@@ -1,0 +1,1 @@
+{"op":"UPDATE","set":{"avg_entry":"181.92","base_cost":"25468.80","count":"140","current_value":"25527.60","delta":"58.80","delta_pct":"0.00231","updated_at":"2026-07-08T14:32:07.512331Z"},"where":{"label":"WIDGET-7","owner_id":"900123456"}}

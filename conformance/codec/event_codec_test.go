@@ -1,0 +1,229 @@
+package codec
+
+import (
+	"bytes"
+	"encoding/json"
+	"reflect"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	decimal "github.com/neal/zerojson/conformance/internal/testleaf"
+)
+
+func dp(s string) *decimal.Decimal {
+	d := decimal.RequireFromString(s)
+	return &d
+}
+
+func variants() map[string]*Event {
+	now := time.Date(2026, 7, 2, 8, 30, 0, 170079000, time.UTC)
+	location := "ZONE1"
+	phase := PhaseClosed
+	recv := StrInt64(now.UnixNano())
+	note := "note with <html> & \"escapes\"\n"
+
+	full := &Event{
+		CreatedAt: now,
+		ClosedAt:  &now,
+		Amount:    decimal.RequireFromString("182.123456789"),
+		Size:      dp("1250.500000000"),
+		Total:     dp("227750"),
+		Origin:    "900123456",
+		Location:  &location,
+		Comment:   "path -> with <html> & escapes",
+		Mode:      ModeUp,
+		Phase:     &phase,
+		Seq:       42,
+		RecvNs:    &recv,
+		Tags:      Tags{"a", "b", "c"},
+		Parents:   NewIDList(uuid.New(), uuid.New()),
+		Meta:      EventMeta{Note: &note, Cost: dp("0.030000000"), Internal: true},
+		MetaPtr:   &EventMeta{Cost: dp("0.000000001")},
+		Items: []EventLeg{
+			{Ratio: decimal.RequireFromString("1"), Label: "ALPHA", Mode: ModeUp},
+			{Ratio: decimal.RequireFromString("2.5"), Label: "BETA", Mode: ModeDown},
+		},
+		PtrItems: []*EventLeg{
+			{Ratio: decimal.RequireFromString("1"), Label: "GAMMA", Mode: ModeUp},
+			nil, // null element must round-trip
+			{Ratio: decimal.RequireFromString("3"), Label: "DELTA", Mode: ModeDown},
+		},
+		Names: []string{"a", "b & c", ""},
+		Count: -7,
+		Shard: 12,
+		Flags: 65535,
+		// A plain decimal-notation magnitude: both encoding/json and
+		// easyjson agree on the format for a value in this range (see
+		// writer.go's AppendFloat64 doc for why extreme magnitudes are
+		// NOT safe to put here — encoding/json and easyjson's format
+		// selection and exponent-digit-width genuinely diverge for
+		// those; float_test.go's TestFloatFormatMatchesEasyjsonExactly
+		// and TestFloatFormatDivergesFromStdlibDocumented cover that
+		// ground directly against both live oracles instead).
+		Weight:      123.456,
+		Ratio32:     2.5,
+		Timeout:     1500 * time.Millisecond,
+		PrimaryDate: YMD{2026, 7, 2},
+		SecondDate:  &YMD{2026, 7, 1},
+		Amounts:     map[string]decimal.Decimal{"ALPHA": decimal.RequireFromString("12.500000001")},
+		Extra:       map[string]any{"nested": []any{1.0, "two", true, nil}},
+		Bag:         map[string]any{"k": "v"},
+		AnyList:     []any{"a", 2.0, false, nil},
+		ID:          uuid.New(),
+		Active:      true,
+	}
+
+	return map[string]*Event{
+		"full":  full,
+		"empty": {},
+	}
+}
+
+// TestByteIdenticalToStdlib validates the generated encoder against
+// encoding/json: same field order (declaration order), same omitempty
+// semantics, same escaping (both HTML-escape by default).
+func TestByteIdenticalToStdlib(t *testing.T) {
+	for name, tr := range variants() {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := tr.AppendZJSON(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(want, got) {
+				t.Fatalf("mismatch\nstdlib:   %s\nzerojson: %s", want, got)
+			}
+		})
+	}
+}
+
+func TestRoundTripAgainstStdlib(t *testing.T) {
+	for name, tr := range variants() {
+		for _, borrow := range []bool{false, true} {
+			t.Run(name, func(t *testing.T) {
+				data, err := json.Marshal(tr)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var want Event
+				if err := json.Unmarshal(data, &want); err != nil {
+					t.Fatal(err)
+				}
+				var got Event
+				if err := unmarshalMode(&got, data, borrow); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(&want, &got) {
+					t.Fatalf("decode mismatch (borrow=%v)\nstdlib:   %+v\nzerojson: %+v", borrow, &want, &got)
+				}
+			})
+		}
+	}
+}
+
+func FuzzDecodeAgainstStdlib(f *testing.F) {
+	for _, tr := range variants() {
+		b, _ := json.Marshal(tr)
+		f.Add(b)
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if hugeExponent(data) {
+			return
+		}
+		// Normalize through stdlib first: zerojson deliberately matches
+		// keys case-sensitively (like easyjson and encoding/json/v2),
+		// while stdlib v1 falls back to case-insensitive matching, so
+		// raw fuzzed keys would diverge by design. Decoding the
+		// canonical re-encoding still fuzzes values (strings, numbers,
+		// escapes, nulls) through zerojson's lexer.
+		var seed Event
+		if err := json.Unmarshal(data, &seed); err != nil {
+			return
+		}
+		canonical, err := json.Marshal(&seed)
+		if err != nil {
+			return
+		}
+
+		var want Event
+		if err := json.Unmarshal(canonical, &want); err != nil {
+			return
+		}
+		var got Event
+		if err := got.UnmarshalZJSON(canonical); err != nil {
+			t.Fatalf("zerojson rejected canonical input %q: %v", canonical, err)
+		}
+		a, _ := json.Marshal(&want)
+		b, _ := json.Marshal(&got)
+		if !bytes.Equal(a, b) {
+			t.Fatalf("divergence\ninput:  %q\nstdlib: %s\nzerojson: %s", canonical, a, b)
+		}
+	})
+}
+
+// hugeExponent reports whether data contains a numeric exponent of six or
+// more digits. shopspring-style decimals parse those compactly but expand
+// them to millions of digits in String() — a decimal-library property
+// shared by every codec (stdlib, easyjson, zerojson), not something the
+// fuzzer should explore.
+func hugeExponent(data []byte) bool {
+	for i := range data {
+		if data[i] != 'e' && data[i] != 'E' {
+			continue
+		}
+		j := i + 1
+		if j < len(data) && (data[j] == '+' || data[j] == '-') {
+			j++
+		}
+		n := 0
+		for j < len(data) && data[j] >= '0' && data[j] <= '9' {
+			n++
+			j++
+		}
+		if n >= 6 {
+			return true
+		}
+	}
+	return false
+}
+
+func unmarshalMode(v *Event, data []byte, borrow bool) error {
+	if borrow {
+		return v.UnmarshalZJSONBorrow(data)
+	}
+	return v.UnmarshalZJSON(data)
+}
+
+// TestNullClearsReferenceFields decodes a null-bearing document into an
+// already-populated struct: pointer and slice fields must go nil, exactly
+// as encoding/json does. (Value-typed fields are left untouched by both.)
+func TestNullClearsReferenceFields(t *testing.T) {
+	base, err := json.Marshal(variants()["full"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want, got Event
+	if err := json.Unmarshal(base, &want); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(base, &got); err != nil {
+		t.Fatal(err)
+	}
+
+	nulls := []byte(`{"size":null,"location":null,"closed_at":null,"phase":null,` +
+		`"recv_ns":null,"total":null,"tags":null,"items":null,"meta_ptr":null}`)
+	if err := json.Unmarshal(nulls, &want); err != nil {
+		t.Fatal(err)
+	}
+	if err := got.UnmarshalZJSON(nulls); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(&want, &got) {
+		t.Fatalf("null handling mismatch\nstdlib:   %+v\nzerojson: %+v", &want, &got)
+	}
+}

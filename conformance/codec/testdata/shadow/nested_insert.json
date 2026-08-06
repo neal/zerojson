@@ -1,0 +1,1 @@
+{"op":"INSERT","set":{"active":true,"attempts":0,"id":"e742d0d4-2690-4c34-a5f7-3ae540cfd772","metadata":{"labels":["fast","primary"],"limits":{"daily":2500,"enabled":true}},"note":"line one\nline two","nullable":null,"ratio":0.000125,"recorded_at":"2026-07-09T21:15:30.123456Z"}}

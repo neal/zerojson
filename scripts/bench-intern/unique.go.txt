@@ -1,0 +1,18 @@
+package zerojson
+
+import "unique"
+
+// This file is copied over intern.go only inside the temporary comparison
+// tree created by scripts/benchmark-intern.sh. It is not a production backend.
+
+const internMaxLen = 24
+
+func Intern(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	if len(b) > internMaxLen {
+		return string(b)
+	}
+	return unique.Make(string(b)).Value()
+}

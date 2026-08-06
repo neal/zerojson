@@ -1,0 +1,4 @@
+cpu*.out
+*.test
+/zerojsongen
+/cmd/zerojsongen/zerojsongen
