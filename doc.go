@@ -1,94 +1,74 @@
-// Package zerojson is the runtime for a codegen-based JSON codec built for
-// high-throughput, fixed-schema message shapes: zero-allocation encoding
-// and near-zero-allocation decoding, with output byte-identical to
-// easyjson so an existing wire format can be adopted and verified
-// byte-for-byte. Installing it pulls no dependencies — the root module's
-// go.mod has no requires.
-//
-// You don't write codecs by hand or reflect at runtime. The generator
-// (cmd/zerojsongen) reads your Go types once, at build time, and emits the
-// codec as ordinary Go source.
+// Package zerojson provides the dependency-free runtime for generated JSON
+// codecs over fixed Go schemas. The generator resolves field names, tags,
+// and codec dispatch at build time and emits ordinary Go source.
 //
 // # Generate, then use
 //
-// Point the generator at a package and list the root types (nested and
-// element/value structs are auto-discovered):
+// Install cmd/zerojsongen as a Go tool and add a directive to your package:
 //
-//	//go:generate go run github.com/neal/zerojson/cmd/zerojsongen -dir . -types Event,Record -out zerojson_gen.go
+//	//go:generate go tool zerojsongen -types Event,Record
 //
-// It writes AppendZJSON / UnmarshalZJSON / UnmarshalZJSONBorrow methods for
-// each type. Roots may be structs, named slices (type X []T, []*T), or
-// named string-keyed maps (type Y map[string]T).
+// Roots may be structs, named slices, or named string-keyed maps. Reachable
+// same-package structs are discovered automatically.
 //
-//	buf, err := v.AppendZJSON(buf[:0]) // encode; append-style, reuse buf for zero alloc
-//	err := v.UnmarshalZJSON(data)      // decode; strings are copied
+//	buf, err := v.AppendZJSON(buf[:0]) // append to a reused buffer
+//	err = v.UnmarshalZJSON(data)      // decode with copied strings and Raw values
 //
-// AppendZJSON never resets dst — it appends and returns the extended
-// slice. On error the returned buffer holds a partial encoding and must be
-// discarded.
+// AppendZJSON appends without resetting the buffer. Discard the partial
+// encoding on error. Leaf-only shapes can encode without allocations when
+// the destination has enough capacity; custom codecs and other shapes may
+// allocate.
 //
-// # Three decode modes and their lifetimes
+// # Decode modes and lifetimes
 //
-// The modes trade copying for aliasing; pick by how long the decoded value
-// must outlive the input buffer.
+// UnmarshalZJSON copies strings and Raw values read by the runtime. Ordinary
+// decodes preserve existing pointer identities and merge into reused targets,
+// except that slice elements are rebuilt from zero. Custom decoders must
+// honor their own input-ownership contracts.
 //
-//   - UnmarshalZJSON(data): decoded strings are COPIED, so the value is
-//     independent of data — safe once data is reused or freed. Costs one
-//     arena allocation per call (backing the target's pointer fields).
+// UnmarshalZJSONBorrow may alias input bytes for strings and Raw values.
+// Keep the input unmodified for the entire lifetime of the result, including
+// retained fields. Escaped strings may be copied; do not rely on that when
+// deciding whether a buffer can be reused.
 //
-//   - UnmarshalZJSONBorrow(data): decoded strings (and zerojson.Raw fields,
-//     and pooled slice/map contents) ALIAS data. Zero-copy, but data must
-//     stay live and unmodified for the whole lifetime of the value. Never
-//     use it with a pooled or reused input buffer (e.g. a Kafka fetch
-//     buffer) unless lifetimes are pinned.
+// With -pool, the generator emits Decode and DecodeBorrow methods on a
+// reusable Decoder. Each call resets the target and reuses arena storage,
+// invalidating the previous result. Finish using or copy out retained data
+// before the next call. Use one Decoder per goroutine; overlapping calls on
+// the same Decoder panic. Pooled borrow decoding of leaf-only shapes can
+// avoid allocations, but custom codecs and containers may still allocate.
 //
-//   - A pooled Decoder (generate with -pool): Decode / DecodeBorrow reuse a
-//     single arena across calls, eliminating the per-decode arena
-//     allocation — combined with DecodeBorrow, a decode loop allocates
-//     zero bytes. The catch is the arena is shared: the value holds
-//     pointers into it (and, in borrow mode, into data), so it is
-//     invalidated by the next Decode/DecodeBorrow on that Decoder. Finish
-//     with — or copy out of — one result before decoding the next. Pool one
-//     Decoder per goroutine, or via a sync.Pool.
+// Decoding is not transactional: an error may leave a partially changed
+// target, whose contents need not match encoding/json's partial result.
 //
-// JSON null clears pointer, slice, and map fields (and leaves value fields
-// untouched), matching encoding/json on a reused target.
+// # Validation and compatibility
 //
-// # Valid: validate without decoding
+// Valid checks complete JSON grammar with the acceptance policy of
+// encoding/json.Valid, including acceptance of invalid UTF-8 in strings.
+// It allocates nothing on success and returns a *SyntaxError on failure.
 //
-// Valid(data) is a standalone, zero-allocation, full RFC 8259 grammar
-// validator whose verdict matches encoding/json.Valid for every input. A
-// successful decode already implies the payload was grammar-valid JSON
-// (unknown fields and skipped content are grammar-checked, and trailing
-// data is rejected), with one documented exception: a known field's own
-// value stays leniently parsed. So Valid is for validate-WITHOUT-decode
-// call sites — an opaque payload stored or forwarded without ever being
-// decoded — which have no decode call to inherit that guarantee from.
+// Decode success does not imply strict JSON validity: ordinary string and
+// number readers intentionally accept some malformed values. Keys, skipped
+// values, and trailing data are checked strictly. Call Valid before decoding
+// when strict grammar is required, or use it alone for opaque payloads.
 //
-// # Compatibility, in brief
+// The codec targets classic encoding/json semantics and easyjson-style
+// encoding, with documented differences including case-sensitive key matching,
+// unsorted maps, float formatting, verbatim Marshaler output, and slice reuse.
+// Null handling also depends on custom methods. Read the [compatibility guide]
+// before adopting it; byte identity is not universal.
 //
-// Encoded output is byte-identical to easyjson's, including its default
-// HTML escaping. Keys are matched case-sensitively (like easyjson and
-// encoding/json/v2). A handful of deliberate divergences from
-// encoding/json v1 (float formatting, verbatim Marshaler output, lenient
-// known-field values) and the single knowing divergence from easyjson
-// (omitzero, which easyjson ignores) are enumerated in the README and
-// pinned by differential tests.
+// # Custom codecs
 //
-// # Extending the fast path
+// Implement the Appender/Reader pair for types you own, or register append/read
+// functions with the generator's -leaf flag. Registered leaf readers may be
+// replayed by ordered decoding and must be safe to invoke more than once.
+// Custom appenders are responsible for producing valid JSON.
+// Raw captures a grammar-checked JSON value without materializing it.
 //
-// A type that formats as one JSON token can join the zero-alloc path
-// without reflection two ways: implement the Appender/Reader interface
-// pair on the type (best for types you own), or register free append/read
-// functions with the generator's -leaf flag (for types you don't).
-// zerojson.Raw captures and re-emits an arbitrary JSON value verbatim, for
-// projection/passthrough decoding.
+// External-oracle tests live in the separate conformance module so the
+// runtime remains dependency-free. See the repository's conformance README
+// for coverage, fuzzing, and verification commands.
 //
-// # Correctness
-//
-// This runtime package is deliberately dependency-free; the differential
-// and byte-identity test suites that need external oracles (easyjson,
-// encoding/json v1 and v2, google/uuid) live in the
-// separate conformance module. See github.com/neal/zerojson/conformance
-// for the oracle-by-property story and the fuzzers that pin it.
+// [compatibility guide]: https://github.com/neal/zerojson/blob/main/docs/compatibility.md
 package zerojson

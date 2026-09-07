@@ -1,7 +1,7 @@
 # Synthetic shadow model
 
-Real production payloads are unavailable, so the shadow campaign treats the
-wire space as an explicit model rather than guessing a handful of examples.
+The shadow campaign models synthetic wire possibilities without requiring
+production captures.
 Every generated document is replayed through `encoding/json` and zerojson's
 plain/pooled copy/borrow entry points; successful values must agree
 semantically, errors must agree by acceptance verdict, copy modes are scribbled
@@ -37,6 +37,5 @@ for the Go schema and therefore must be rejected consistently.
 Pairwise and three-wise coverage cannot prove every eight-dimensional
 combination. The fuzz target uses one seed for every factor level to explore
 interiors continuously, while the adversarial tier covers scale boundaries.
-The model is deliberately source-controlled: a new production type shape or
-wire convention must add a dimension/level here instead of relying on an
-unrecorded assumption.
+When expanding the model, document new dimensions and levels here and update
+the coverage verifier. Unmodeled schemas need separate generated-schema tests.
