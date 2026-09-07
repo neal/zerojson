@@ -335,7 +335,7 @@ func FuzzAPIAppendInterface(f *testing.F) {
 			string(b),
 			len(b),
 			float64(len(b)),
-			b != nil && len(b) > 0 && b[0] > 127,
+			len(b) > 0 && b[0] > 127,
 			map[string]any{"k": string(b), "n": len(b)},
 			[]any{string(b), len(b), nil},
 			json.RawMessage(b), // may be invalid JSON -> json.Marshal errors, must not panic

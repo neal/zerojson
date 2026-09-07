@@ -362,22 +362,6 @@ func (g *generator) emitNullDelivery(f fieldInfo, target, ind string) {
 	g.p("%s}", ind)
 }
 
-// elemNullDelivery emits, for a slice element or map value of leaf kind
-// vi (non-pointer) at target, the null-delivery statement if the kind is
-// null-delivered, and reports whether it did.
-func (g *generator) elemNullDelivery(vi *fieldInfo, target, ind string) bool {
-	if vi == nil {
-		return false
-	}
-	f := *vi
-	f.ptr = false
-	if !isNullDelivered(f) {
-		return false
-	}
-	g.emitNullDelivery(f, target, ind)
-	return true
-}
-
 // emitNullSwitch clears reference-typed fields on JSON null, matching
 // encoding/json: pointers and slices go nil; value fields are untouched.
 func (g *generator) emitNullSwitch(ti typeInfo) {

@@ -321,15 +321,13 @@ func TestInt64Uint64BoundaryComplete(t *testing.T) {
 	}
 	// Exact int64 min/max +/-2 as decimal strings (strconv is the oracle for
 	// which of these overflow).
-	for _, s := range []string{
+	strs = append(strs,
 		"9223372036854775805", "9223372036854775806", "9223372036854775807",
 		"9223372036854775808", "9223372036854775809",
 		"-9223372036854775806", "-9223372036854775807", "-9223372036854775808",
 		"-9223372036854775809", "-9223372036854775810",
 		"0", "-0", "00", "007", "000000000000000000001",
-	} {
-		strs = append(strs, s)
-	}
+	)
 	for _, s := range strs {
 		checkSignedDecode(t, i64, s)
 		checkSignedDecodeOracle(t, i64, `"`+s+`"`, s) // ,string variant
@@ -341,13 +339,11 @@ func TestInt64Uint64BoundaryComplete(t *testing.T) {
 			ustrs = append(ustrs, strconv.FormatUint(p+uint64(int64(d)), 10))
 		}
 	}
-	for _, s := range []string{
+	ustrs = append(ustrs,
 		"18446744073709551613", "18446744073709551614", "18446744073709551615",
 		"18446744073709551616", "18446744073709551617",
 		"0", "007", "0000000000000000000001", "-1",
-	} {
-		ustrs = append(ustrs, s)
-	}
+	)
 	for _, s := range ustrs {
 		checkUnsignedDecode(t, u64, s)
 		checkUnsignedDecodeOracle(t, u64, `"`+s+`"`, s)

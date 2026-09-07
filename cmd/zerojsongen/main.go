@@ -484,7 +484,7 @@ func loadWithBlankedOutput(base packages.Config, absOut string) *packages.Packag
 		}
 		if os.Getenv("ZEROJSONGEN_DEBUG") != "" {
 			log.Printf("load with %s overlay #%d failed: err=%v", absOut, i+1, err)
-			if pkgs != nil && len(pkgs) == 1 {
+			if len(pkgs) == 1 {
 				for _, e := range pkgs[0].Errors {
 					log.Printf("  %v", e)
 				}

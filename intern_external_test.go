@@ -13,7 +13,9 @@ func TestInternValueContract(t *testing.T) {
 	if got := zerojson.Intern([]byte("filled")); got != "filled" {
 		t.Fatalf("Intern([]byte(\"filled\")) = %q", got)
 	}
-	if zerojson.Intern([]byte("acme")) != zerojson.Intern([]byte("acme")) {
+	first := zerojson.Intern([]byte("acme"))
+	second := zerojson.Intern([]byte("acme"))
+	if first != second {
 		t.Fatal("equal inputs produced unequal interned values")
 	}
 	if zerojson.Intern(nil) != "" || zerojson.Intern([]byte{}) != "" {

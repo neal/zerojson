@@ -94,7 +94,7 @@ func TestSyntheticShadowAdversarial(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			shadowCompare(t, shadowVariant{name: tc.name, data: tc.data}, &pooledCopy, &pooledBorrow)
+			shadowCompare(t, shadowVariant(tc), &pooledCopy, &pooledBorrow)
 		})
 	}
 }

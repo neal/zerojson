@@ -18,7 +18,7 @@ func TestAppendInterfaceMarshalError(t *testing.T) {
 		t.Fatalf("AppendInterface on error mutated dst: %q", got)
 	}
 	// Sanity: the same value fails json.Marshal directly (the analogue).
-	if _, e := json.Marshal(make(chan int)); e == nil {
+	if _, e := json.Marshal(make(chan int)); e == nil { //nolint:staticcheck // SA1026: deliberately exercise unsupported-type rejection.
 		t.Fatal("json.Marshal(chan) unexpectedly succeeded")
 	}
 }
