@@ -1,14 +1,24 @@
 package generator
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 )
+
+// These templates compile only after the campaign generates their codecs.
+//
+//go:embed testdata/schema_campaign/state.go
+var schemaStateTypes string
+
+//go:embed testdata/schema_campaign/state_test.go
+var schemaStateTests string
 
 const defaultSchemaSeed uint64 = 0x7a65726f6a736f6e
 const defaultSchemaCount = 40
@@ -163,7 +173,70 @@ func buildGeneratedSchemas(seed uint64, count int) []generatedSchema {
 		}
 		schemas = append(schemas, generatedSchema{name: name, decl: decl.String(), inputs: inputs})
 	}
-	return schemas
+	return append(schemas, buildSchemaCombinations(seed)...)
+}
+
+// Cross every base with every container, then rotate aliases, named
+// containers, embedding and tags by seed. This is a bounded interaction
+// matrix, not a random sample that can silently omit an entire base/shape.
+func buildSchemaCombinations(seed uint64) []generatedSchema {
+	bases := []schemaAtom{
+		{typ: "CustomJSON", value: "19"},
+		{typ: "TextDate", value: `"date"`},
+		{typ: "EmptyJSON", value: `"empty"`},
+		{typ: "PointerJSON", value: "17"},
+		{typ: "DefinedBytes", value: `"AQID"`},
+		{typ: "EmptyArray", value: `"array"`},
+		{typ: "Mode", value: `"up"`},
+		{typ: "Child", value: `{"a":7,"b":"child"}`},
+	}
+	var result []generatedSchema
+	for i, base := range bases {
+		for shape := range 4 {
+			n := i*4 + shape
+			name := fmt.Sprintf("Combination%02d", n)
+			variant := (int(seed%6) + n) % 6
+			typ, value := base.typ, base.value
+			var decl strings.Builder
+			if variant%2 == 0 {
+				typ = name + "Alias"
+				fmt.Fprintf(&decl, "type %s = %s\n", typ, base.typ)
+			}
+			switch shape {
+			case 1:
+				typ = "*" + typ
+			case 2:
+				typ, value = "[]"+typ, "["+value+","+value+"]"
+			case 3:
+				typ, value = "map[string]"+typ, `{"x":`+value+`}`
+			}
+			if shape >= 2 && variant%2 != 0 {
+				fmt.Fprintf(&decl, "type %sContainer %s\n", name, typ)
+				typ = name + "Container"
+			}
+			option := []string{"", ",omitempty", ",omitempty,omitzero"}[variant%3]
+			// An array without IsZero deliberately has no omitzero support.
+			if shape == 0 && base.typ == "EmptyArray" {
+				option = ",omitempty"
+			}
+			// Custom struct IsZero is not part of this fixture's contract.
+			if shape == 0 && (base.typ == "EmptyJSON" || base.typ == "Child") {
+				option = ",omitempty"
+			}
+			if variant%2 == 0 {
+				fmt.Fprintf(&decl, "type %s struct { V %s `json:\"v%s\"` }\n", name, typ, option)
+			} else {
+				// Tagged, unexported, same-package embedded values.
+				fmt.Fprintf(&decl, "type hidden%s struct { V %s `json:\"v%s\"` }; type %s struct { hidden%s `json:\"nested\"` }\n", name, typ, option, name, name)
+			}
+			doc := `{"v":` + value + `}`
+			if variant%2 != 0 {
+				doc = `{"nested":` + doc + `}`
+			}
+			result = append(result, generatedSchema{name: name, decl: decl.String(), inputs: []string{`{}`, `null`, doc}})
+		}
+	}
+	return result
 }
 
 const schemaPackagePreamble = `package p
@@ -212,6 +285,18 @@ func (v *TextDate) UnmarshalText(data []byte) error { if string(data) == "date" 
 type CustomJSON int
 func (v CustomJSON) MarshalJSON() ([]byte, error) { return strconv.AppendInt(nil, int64(v), 10), nil }
 func (v *CustomJSON) UnmarshalJSON(data []byte) error { var n int; if err := json.Unmarshal(data, &n); err != nil { return err }; *v = CustomJSON(n); return nil }
+
+type EmptyJSON struct{}
+func (EmptyJSON) MarshalJSON() ([]byte, error) { return []byte("\"empty\""), nil }
+func (*EmptyJSON) UnmarshalJSON(b []byte) error { var s string; return json.Unmarshal(b, &s) }
+type PointerJSON int
+func (v *PointerJSON) MarshalJSON() ([]byte, error) { return json.Marshal(int(*v)+100) }
+func (v *PointerJSON) UnmarshalJSON(b []byte) error { var n int; if err := json.Unmarshal(b, &n); err != nil { return err }; *v = PointerJSON(n); return nil }
+type DefinedByte byte
+type DefinedBytes []DefinedByte
+type EmptyArray [0]int
+func (EmptyArray) MarshalJSON() ([]byte, error) { return []byte("\"array\""), nil }
+func (*EmptyArray) UnmarshalJSON(b []byte) error { var s string; return json.Unmarshal(b, &s) }
 
 `
 
@@ -301,7 +386,20 @@ func TestGeneratedSchemaCampaign(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
+	t.Cleanup(func() {
+		if !t.Failed() {
+			os.RemoveAll(dir)
+			return
+		}
+		// Keep failed sources under testdata so a later ./... does not
+		// accidentally discover broken generated packages.
+		dest, err := preserveSchemaFailure(moduleRoot, dir, seed, count)
+		if err != nil {
+			t.Logf("save failure: %v", err)
+			return
+		}
+		t.Logf("failed schema sources retained at %s; seed=%#x count=%d", dest, seed, count)
+	})
 
 	var typesSource strings.Builder
 	typesSource.WriteString(schemaPackagePreamble)
@@ -317,23 +415,118 @@ func TestGeneratedSchemaCampaign(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "schema_test.go"), []byte(schemaBehaviorSource(seed, schemas)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-
-	cmd := exec.Command(gen,
-		"-dir", dir,
-		"-types", strings.Join(typeNames, ","),
-		"-leaf", testLeafSpec,
-		"-pool",
-		"-out", filepath.Join(dir, "zerojson_gen.go"),
-		"-tests", filepath.Join(dir, "fuzz_gen_test.go"),
-	)
-	cmd.Dir = moduleRoot
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("generator failed for seed %#x: %v\n%s", seed, err, out)
+	for name, data := range map[string]string{"state.go": schemaStateTypes, "state_test.go": schemaStateTests} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
+	typeNames = append(typeNames, "CampaignState")
 
-	cmd = exec.Command("go", "test", "-count=1", "-timeout=3m", ".")
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("generated schema campaign failed; reproduce with ZEROJSON_SCHEMA_SEED=%#x ZEROJSON_SCHEMA_COUNT=%d\n%v\n%s", seed, count, err, out)
+	for _, mode := range []string{"ordered", "fallback"} {
+		// Do not overwrite the first failed codec before it is preserved.
+		if !t.Run(mode, func(t *testing.T) {
+			args := []string{"-dir", dir, "-types", strings.Join(typeNames, ","), "-leaf", testLeafSpec,
+				"-pool", "-out", filepath.Join(dir, "zerojson_gen.go"), "-tests", filepath.Join(dir, "fuzz_gen_test.go")}
+			if mode == "fallback" {
+				args = append(args, "-no-ordered")
+			}
+			cmd := exec.Command(gen, args...)
+			cmd.Dir = moduleRoot
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("generator seed=%#x: %v\n%s", seed, err, out)
+			}
+			var instrumentation []string
+			if os.Getenv("ZEROJSON_SCHEMA_RACE") != "" {
+				instrumentation = append(instrumentation, "-race")
+			}
+			if os.Getenv("ZEROJSON_CHECKPTR") != "" {
+				instrumentation = append(instrumentation, "-gcflags=all=-d=checkptr=2")
+			}
+			testArgs := append([]string{"test", "-count=1", "-timeout=10m"}, instrumentation...)
+			cmd = exec.Command("go", append(testArgs, ".")...)
+			cmd.Dir = dir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("schema seed=%#x count=%d: %v\n%s", seed, count, err, out)
+			}
+			if budget := os.Getenv("ZEROJSON_SCHEMA_FUZZTIME"); budget != "" {
+				fuzzArgs := append([]string{"test", "-run=^$", "-fuzz=^FuzzCampaignState$", "-fuzztime=" + budget, "-fuzzminimizetime=5s", "-parallel=1", "-timeout=30m"}, instrumentation...)
+				cmd = exec.Command("go", append(fuzzArgs, ".")...)
+				cmd.Dir = dir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("state campaign fuzz: %v\n%s", err, out)
+				} else {
+					t.Logf("state campaign fuzz:\n%s", out)
+				}
+			}
+		}) {
+			break
+		}
+	}
+}
+
+func preserveSchemaFailure(moduleRoot, dir string, seed uint64, count int) (string, error) {
+	root := filepath.Join(moduleRoot, "testdata", "schema-failures")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", err
+	}
+	dest, err := os.MkdirTemp(root, fmt.Sprintf("seed-%x-", seed))
+	if err != nil {
+		return "", err
+	}
+	if err := os.Rename(dir, filepath.Join(dest, "package")); err != nil {
+		return "", err
+	}
+	repro := fmt.Sprintf("Toolchain: %s\nSchema seed: %#x\nRandom schema count: %d\n\nReplay the retained codec and any minimized fuzz seeds:\ncd %q\ngo test -count=1 -v .\n\nRegenerate the full campaign from the repository root:\nZEROJSON_SCHEMA_SEED=%#x ZEROJSON_SCHEMA_COUNT=%d go test ./conformance/generator -run '^TestGeneratedSchemaCampaign$' -count=1 -v\n", runtime.Version(), seed, count, filepath.Join(dest, "package"), seed, count)
+	if err := os.WriteFile(filepath.Join(dest, "REPRODUCE.txt"), []byte(repro), 0o644); err != nil {
+		return dest, err
+	}
+	return dest, nil
+}
+
+func TestSchemaFailureRetention(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "temporary-package")
+	corpus := filepath.Join("testdata", "fuzz", "FuzzCampaignState", "regression")
+	if err := os.MkdirAll(filepath.Join(src, filepath.Dir(corpus)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string]string{"types.go": "package p", corpus: "go test fuzz v1\n[]byte(\"sequence\")\n"} {
+		if err := os.WriteFile(filepath.Join(src, name), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dest, err := preserveSchemaFailure(root, src, 7, 40)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"types.go", corpus} {
+		if _, err := os.Stat(filepath.Join(dest, "package", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatal("failed package remains discoverable outside testdata")
+	}
+	if b, err := os.ReadFile(filepath.Join(dest, "REPRODUCE.txt")); err != nil || !strings.Contains(string(b), "ZEROJSON_SCHEMA_SEED=0x7") {
+		t.Fatalf("missing replay metadata: %v %s", err, b)
+	}
+}
+
+func TestSchemaCombinationCoverage(t *testing.T) {
+	for seed := uint64(0); seed < 6; seed++ {
+		cases := buildSchemaCombinations(seed)
+		if len(cases) != 32 {
+			t.Fatalf("seed=%d: got %d combinations", seed, len(cases))
+		}
+		seen := map[string]bool{}
+		for _, tc := range cases {
+			if seen[tc.name] || len(tc.inputs) != 3 || tc.inputs[2] == "{}" {
+				t.Fatalf("vacuous/duplicate combination: %+v", tc)
+			}
+			seen[tc.name] = true
+		}
+		if fmt.Sprint(cases) != fmt.Sprint(buildSchemaCombinations(seed)) {
+			t.Fatal("schema campaign is not deterministic")
+		}
 	}
 }
