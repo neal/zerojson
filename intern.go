@@ -6,8 +6,9 @@ import "sync"
 // unique ID, not a repeated token.
 const internMaxLen = 24
 
-// internShardMax caps entries per shard so unexpectedly high-cardinality
-// inputs degrade to plain copies instead of growing the table without bound.
+// internShardMax caps entries per shard: a full shard starts a new
+// generation (see Intern), so the table never grows past its fixed size
+// and never freezes either.
 const internShardMax = 4096
 
 // The intern table is sharded to reduce contention between concurrent
@@ -37,10 +38,13 @@ func internHash(b []byte) uint32 {
 	return h
 }
 
-// Intern returns a canonical string for b, allocating only the first time a
-// short value is seen while its shard has capacity. Once a shard reaches its
-// fixed cap, new values are copied but not retained. Lookups for retained
-// values are allocation-free.
+// Intern returns a string equal to b. Hits in the retained table do not
+// allocate; misses and values longer than 24 bytes are copied.
+//
+// The process-global table retains at most 32 shards of 4,096 entries each.
+// A full shard resets to a new generation, so previously seen values can
+// allocate again. Strings held by callers stay valid across resets; the cap
+// bounds table entries, not all live strings or transient GC memory.
 func Intern(b []byte) string {
 	if len(b) == 0 {
 		return ""
@@ -59,9 +63,12 @@ func Intern(b []byte) string {
 	s, ok = sh.m[string(b)]
 	if !ok {
 		s = string(b)
-		if len(sh.m) < internShardMax {
-			sh.m[s] = s
+		if len(sh.m) >= internShardMax {
+			// New generation: drop the shard's references (not the
+			// strings themselves) and start over with this value.
+			clear(sh.m)
 		}
+		sh.m[s] = s
 	}
 	sh.Unlock()
 	return s
