@@ -3,40 +3,101 @@ package zerojson
 import (
 	"encoding/binary"
 	"fmt"
+	"strings"
 )
 
-// Lexer is a minimal pull-parser over a complete JSON document held in
-// memory. Known/declared field values are read by lenient, fast leaf
-// readers (deliberately not full RFC 8259 validation: a bare number may
-// have a leading zero, a string may contain a raw control byte) — the
-// trusted-path design this package is built around. Content the Lexer
-// doesn't otherwise examine is not exempt from grammar checking, though:
-// Skip (unknown fields, Raw passthrough spans) and Finish (trailing data
-// after the top-level value) ARE fully grammar-strict, reusing Valid's
-// own grammar walk (valid.go) — see the README's "Validation" section
-// for the resulting decode-implies-valid composition story, and
-// top-level zerojson.Valid for a standalone full-payload validator.
+// Lexer is a pull parser over a complete in-memory JSON document.
+// Ordinary string and number readers are intentionally lenient; they are not
+// a substitute for Valid. ReadKey, Skip, RawValue, and Finish check grammar
+// for keys, skipped/captured values, and trailing content respectively.
 type Lexer struct {
-	data  []byte
-	pos   int
-	err   error
-	depth int
+	data     []byte
+	pos      int
+	err      error
+	depth    int
+	path     []string    // field names the pending error unwound through, innermost first
+	wrapped  *FieldError // Err()'s cached annotation of err for the current path
+	wrappedN int         // len(path) the cache was built for
 
 	// Borrow makes string reads return views into the input buffer
 	// instead of copies. Callers must guarantee the input outlives the
-	// decoded struct.
+	// decoded struct and remains unmodified while any result refers to it.
 	Borrow bool
 }
 
-// maxDepth bounds nesting in ReadInterface to prevent stack exhaustion
-// from adversarial deeply-nested input. Matches encoding/json's limit.
+// maxDepth bounds object/array nesting on every decode path — the
+// generated decoders (EnterObject/EnterArray and the ordered decoder's
+// Enter/Leave), ReadInterface, and Skip/Valid, which thread the current
+// depth through so a skipped subtree is measured from where it actually
+// sits in the document, not from zero — to prevent stack exhaustion from
+// adversarial deeply-nested input. Matches encoding/json's limit exactly
+// (a document 10000 levels deep is accepted, 10001 is not), at every
+// nesting position, so decode success continues to imply Valid.
 const maxDepth = 10000
 
 func NewLexer(data []byte, borrow bool) Lexer {
 	return Lexer{data: data, Borrow: borrow}
 }
 
-func (l *Lexer) Err() error { return l.err }
+// Err returns the first decode error, annotated with the JSON field path
+// it occurred under (see AnnotateField) — e.g.
+// `field legs.price: zerojson: expected number at offset 41`. The
+// annotation is applied lazily, once, so the nil check on the hot path
+// stays a single load.
+func (l *Lexer) Err() error {
+	if l.err == nil {
+		return nil
+	}
+	if len(l.path) == 0 {
+		return l.err
+	}
+	if l.wrapped != nil && l.wrappedN == len(l.path) {
+		return l.wrapped
+	}
+	// Annotations are recorded innermost-first as the error unwinds; the
+	// path is rebuilt (only on the error path) each time a new enclosing
+	// field is added, always wrapping the raw error once.
+	var b strings.Builder
+	b.WriteString("field ")
+	for i := len(l.path) - 1; i >= 0; i-- {
+		b.WriteString(l.path[i])
+		if i > 0 {
+			b.WriteByte('.')
+		}
+	}
+	l.wrapped = &FieldError{Path: b.String(), Err: l.err}
+	l.wrappedN = len(l.path)
+	return l.wrapped
+}
+
+// FieldError wraps a decode error with the JSON path of the field being
+// decoded when it occurred ("legs.price" — container names are not
+// suffixed with [] and element indices are not recorded), for on-call diagnosis
+// without the document. Unwrap yields the underlying error.
+type FieldError struct {
+	Path string
+	Err  error
+}
+
+func (e *FieldError) Error() string { return e.Path + ": " + e.Err.Error() }
+func (e *FieldError) Unwrap() error { return e.Err }
+
+// AnnotateField records that the pending error occurred while decoding
+// the member called name; generated decoders call it as the error unwinds
+// through each enclosing object, building the path Err reports. name is
+// copied (it may alias the input).
+func (l *Lexer) AnnotateField(name []byte) {
+	if l.err != nil {
+		l.path = append(l.path, string(name))
+	}
+}
+
+// AnnotateFieldString is AnnotateField for a compile-time field name.
+func (l *Lexer) AnnotateFieldString(name string) {
+	if l.err != nil {
+		l.path = append(l.path, name)
+	}
+}
 
 // AddError records an error from a delegated UnmarshalJSON call.
 func (l *Lexer) AddError(err error) {
@@ -77,7 +138,11 @@ func (l *Lexer) skipWSSlow() {
 	}
 }
 
-// Delim consumes an expected delimiter.
+// Delim consumes an expected delimiter. It does no depth accounting: a
+// hand-written Reader that walks an object or array must use
+// EnterObject/NextMember or EnterArray/NextElem (which count the level
+// and enforce the nesting limit), not Delim('{') paired with NextMember —
+// that pairing would leave NextMember's decrement unmatched.
 func (l *Lexer) Delim(c byte) {
 	l.skipWS()
 	if l.pos >= len(l.data) || l.data[l.pos] != c {
@@ -122,9 +187,16 @@ func (l *Lexer) IsNull() bool {
 	return false
 }
 
+// NullBytes returns the four bytes of the null literal IsNull just
+// consumed (aliasing the input), for delivering the literal to a
+// value-typed json.Unmarshaler exactly as encoding/json does. Valid only
+// immediately after IsNull returned true.
+func (l *Lexer) NullBytes() []byte { return l.data[l.pos-4 : l.pos] }
+
 // EnterObject consumes '{' and reports whether the object has members; an
-// empty object's '}' is consumed too. Malformed input records an error and
-// returns false.
+// empty object's '}' is consumed too. Malformed input, or nesting beyond
+// maxDepth, records an error and returns false. A non-empty object counts
+// one level of depth until NextMember consumes its closing '}'.
 func (l *Lexer) EnterObject() bool {
 	l.Delim('{')
 	if l.err != nil {
@@ -132,15 +204,22 @@ func (l *Lexer) EnterObject() bool {
 	}
 	l.skipWS()
 	if l.pos < len(l.data) && l.data[l.pos] == '}' {
+		// An empty object is still a nesting level for the limit's
+		// purposes (Valid and encoding/json count it), so `{}` at the
+		// limit is rejected even though nothing is entered.
+		if !l.DepthOK() {
+			return false
+		}
 		l.pos++
 		return false
 	}
-	return true
+	return l.Enter()
 }
 
 // NextMember consumes the ',' between object members (returning true) or
-// the closing '}' (returning false). Unlike the WantComma/IsDelim pair it
-// replaces, it costs a single whitespace skip per member.
+// the closing '}' (returning false, and leaving the object's depth level).
+// Unlike the WantComma/IsDelim pair it replaces, it costs a single
+// whitespace skip per member.
 func (l *Lexer) NextMember() bool {
 	l.skipWS()
 	if l.pos < len(l.data) {
@@ -150,6 +229,7 @@ func (l *Lexer) NextMember() bool {
 			return true
 		case '}':
 			l.pos++
+			l.depth--
 			return false
 		}
 	}
@@ -158,7 +238,8 @@ func (l *Lexer) NextMember() bool {
 }
 
 // EnterArray consumes '[' and reports whether the array has elements; an
-// empty array's ']' is consumed too.
+// empty array's ']' is consumed too. Depth accounting is as for
+// EnterObject.
 func (l *Lexer) EnterArray() bool {
 	l.Delim('[')
 	if l.err != nil {
@@ -166,14 +247,17 @@ func (l *Lexer) EnterArray() bool {
 	}
 	l.skipWS()
 	if l.pos < len(l.data) && l.data[l.pos] == ']' {
+		if !l.DepthOK() {
+			return false
+		}
 		l.pos++
 		return false
 	}
-	return true
+	return l.Enter()
 }
 
 // NextElem consumes the ',' between array elements (returning true) or the
-// closing ']' (returning false).
+// closing ']' (returning false, and leaving the array's depth level).
 func (l *Lexer) NextElem() bool {
 	l.skipWS()
 	if l.pos < len(l.data) {
@@ -183,6 +267,7 @@ func (l *Lexer) NextElem() bool {
 			return true
 		case ']':
 			l.pos++
+			l.depth--
 			return false
 		}
 	}
@@ -258,7 +343,9 @@ func (l *Lexer) RawValue() []byte {
 // satisfy RFC 8259's number grammar, literals must match exactly, strings
 // must have valid escape sequences and no raw unescaped control bytes, and
 // nested object/array content is fully walked (recursively, to the same
-// maxDepth cap Valid enforces) rather than merely brace/bracket-counted.
+// maxDepth cap Valid enforces — measured from the Lexer's CURRENT depth,
+// so a subtree skipped 3 levels down has 3 fewer levels to spend, exactly
+// as Valid would count it) rather than merely brace/bracket-counted.
 //
 // This is what makes a successful decode imply the whole payload was
 // grammar-valid JSON (see README's composition story): every byte is
@@ -275,7 +362,7 @@ func (l *Lexer) Skip() {
 		return
 	}
 	l.skipWS()
-	pos, err := validValue(l.data, l.pos, 0)
+	pos, err := validValue(l.data, l.pos, l.depth)
 	if err != nil {
 		l.err = err
 		return

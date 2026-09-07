@@ -169,18 +169,27 @@ func TestTruncationSweepErrorsAreReported(t *testing.T) {
 	corpus := truncationCorpus(t)
 	for name, data := range corpus {
 		t.Run(name, func(t *testing.T) {
-			var full Event
-			// Only Event-shaped entries decode into Event; for the
-			// error-reporting property the target's shape doesn't matter
-			// (any truncated object must error), so decode everything
-			// into Event: unknown keys are skipped, and a truncated
-			// document errors during skip just as it does mid-field.
-			if err := full.UnmarshalZJSON(data); err != nil {
+			// For the error-reporting property the target's shape mostly
+			// doesn't matter (any truncated object must error), so most
+			// entries decode into Event: unknown keys are skipped, and a
+			// truncated document errors during skip just as it does
+			// mid-field. The stringopt corpus is the exception: its
+			// `,string`-quoted numbers land on Event's PLAIN numeric
+			// fields of the same name, which (correctly) reject a quoted
+			// token, so it decodes into its own StringOptCases shape.
+			decode := func(b []byte) error {
+				if name == "stringopt" {
+					var v StringOptCases
+					return v.UnmarshalZJSON(b)
+				}
+				var v Event
+				return v.UnmarshalZJSON(b)
+			}
+			if err := decode(data); err != nil {
 				t.Fatalf("full document rejected: %v", err)
 			}
 			for i := range data {
-				var v Event
-				if err := v.UnmarshalZJSON(data[:i:i]); err == nil {
+				if err := decode(data[:i:i]); err == nil {
 					t.Fatalf("prefix [:%d] of %s decoded without error\nprefix: %q", i, name, data[:i])
 				}
 			}

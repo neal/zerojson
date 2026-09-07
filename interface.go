@@ -17,17 +17,25 @@ func (l *Lexer) ReadInterface() any {
 	case '"':
 		return l.ReadString()
 	case '{':
-		if l.depth++; l.depth > maxDepth {
-			l.setErr("exceeded max nesting depth")
-			return nil
-		}
 		l.pos++
 		m := make(map[string]any)
 		l.skipWS()
 		if l.pos < len(l.data) && l.data[l.pos] == '}' {
+			// An empty object is still one nesting level (Valid and
+			// encoding/json count it), so it must respect the limit even
+			// though there is nothing to descend into.
+			if !l.DepthOK() {
+				return nil
+			}
 			l.pos++
-			l.depth--
 			return m
+		}
+		// Enter here; NextMember leaves on the closing '}' — the same
+		// protocol the generated decoders use. Decrementing again here
+		// would drive the counter negative and let a later sibling exceed
+		// the limit.
+		if !l.Enter() {
+			return nil
 		}
 		for {
 			m[string(l.ReadKey())] = l.ReadInterface()
@@ -38,22 +46,22 @@ func (l *Lexer) ReadInterface() any {
 				break
 			}
 		}
-		l.depth--
 		return m
 	case '[':
-		if l.depth++; l.depth > maxDepth {
-			l.setErr("exceeded max nesting depth")
-			return nil
-		}
 		l.pos++
 		// Non-nil empty slice so [] round-trips as [], matching
 		// encoding/json (a nil slice would re-encode as null).
 		s := []any{}
 		l.skipWS()
 		if l.pos < len(l.data) && l.data[l.pos] == ']' {
+			if !l.DepthOK() {
+				return nil
+			}
 			l.pos++
-			l.depth--
 			return s
+		}
+		if !l.Enter() {
+			return nil
 		}
 		for {
 			s = append(s, l.ReadInterface())
@@ -64,7 +72,6 @@ func (l *Lexer) ReadInterface() any {
 				break
 			}
 		}
-		l.depth--
 		return s
 	case 't', 'f':
 		return l.ReadBool()
@@ -75,7 +82,14 @@ func (l *Lexer) ReadInterface() any {
 		l.setErr("bad literal")
 		return nil
 	default:
-		b := l.readNumericBytes()
+		b := l.readBareNumericBytes()
+		if l.err != nil {
+			return nil
+		}
+		if !bareFloatOK(b) {
+			l.setErr("number %q: malformed number", b)
+			return nil
+		}
 		f, err := strconv.ParseFloat(bytesToString(b), 64)
 		if err != nil {
 			l.setErr("number %q: %v", b, err)

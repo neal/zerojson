@@ -8,7 +8,25 @@ import (
 // leafAppend emits an encode statement for a custom leaf value at ptrExpr
 // (which must be a pointer to the value).
 func (g *generator) leafAppend(ls *leafSpec, ptrExpr, ind string) {
-	g.p("%sdst = %s.%s(dst, %s)", ind, ls.appendQual, ls.appendFn, ptrExpr)
+	if ls.appendPkg == runtimePath && ls.appendFn == "AppendRaw" {
+		// zerojson.Raw is validated on encode like json.RawMessage: a
+		// user-constructed Raw that is not valid JSON is an error, never
+		// silently invalid output.
+		g.p("%svar err error", ind)
+		g.p("%sdst, err = zerojson.AppendRawChecked(dst, %s)", ind, ptrExpr)
+		g.p("%sif err != nil { return dst, err }", ind)
+		return
+	}
+	g.p("%sdst = %s%s(dst, %s)", ind, qualDot(ls.appendQual), ls.appendFn, ptrExpr)
+}
+
+// qualDot renders a package qualifier for a call: "pkg." or, for a
+// codec living in the package being generated, nothing.
+func qualDot(q string) string {
+	if q == "" {
+		return ""
+	}
+	return q + "."
 }
 
 func (g *generator) genEncode(ti typeInfo) {
@@ -28,7 +46,17 @@ func (g *generator) genEncode(ti typeInfo) {
 			g.p("\t{")
 		}
 		g.p("\t\tif len(dst) > n { dst = append(dst, ',') }")
-		g.p("\t\tdst = append(dst, `%q:`...)", f.jsonName)
+		if keyLiteralSafe(f.jsonName) {
+			g.p("\t\tdst = append(dst, `%q:`...)", f.jsonName)
+		} else {
+			// A name that needs JSON escaping (an HTML-sensitive byte,
+			// a control char, non-ASCII) goes through the same
+			// AppendString the values use, so the key is escaped exactly
+			// as encoding/json and easyjson escape it — rather than as a
+			// Go-quoted literal, which is not JSON escaping.
+			g.p("\t\tdst = zerojson.AppendString(dst, %q)", f.jsonName)
+			g.p("\t\tdst = append(dst, ':')")
+		}
 		if f.ptr && !f.omitempty && !f.omitzero {
 			// Non-omitempty, non-omitzero pointer: key always present,
 			// null when nil.
@@ -44,6 +72,14 @@ func (g *generator) genEncode(ti typeInfo) {
 	}
 	g.p("\treturn append(dst, '}'), nil")
 	g.p("}")
+}
+
+// keyLiteralSafe reports whether a JSON field name can be emitted as the
+// raw-string literal `"name":` — every byte must be one AppendString would
+// pass through verbatim (jsonNameNeedsEscape), and it must not contain a
+// backtick, which would terminate the Go raw string the literal lives in.
+func keyLiteralSafe(name string) bool {
+	return !jsonNameNeedsEscape(name) && !strings.Contains(name, "`")
 }
 
 // encodeGate returns the emit condition, or "" for always-emit. omitempty
@@ -67,7 +103,10 @@ func (g *generator) encodeGate(f fieldInfo) string {
 		}
 	}
 	if f.omitzero {
-		if c := g.zeroGate(f); c != "" {
+		// For a scalar both options reduce to the same test; emitting it
+		// twice (`v.X != 0 && v.X != 0`) is flagged by go vet's bools
+		// check, which go test runs by default.
+		if c := g.zeroGate(f); c != "" && (len(conds) == 0 || conds[0] != c) {
 			conds = append(conds, c)
 		}
 	}
@@ -80,7 +119,7 @@ func (g *generator) encodeGate(f fieldInfo) string {
 // the same limitation for omitempty specifically).
 func (g *generator) emptyGate(f fieldInfo) string {
 	switch f.kind {
-	case kString, kEnum:
+	case kString, kEnum, kJSONNumber:
 		return fmt.Sprintf("v.%s != \"\"", f.access)
 	case kBool:
 		return fmt.Sprintf("v.%s", f.access)
@@ -104,11 +143,12 @@ func (g *generator) emptyGate(f fieldInfo) string {
 
 // scalarEmptyGate returns omitempty's emit condition for a Marshaler/
 // Appender/TextMarshaler/CustomLeaf value field whose underlying type is a
-// scalar (numeric/string/bool) — matching encoding/json's isEmptyValue,
-// which inspects the underlying kind, so a zero-valued scalar custom type is
-// omitted (e.g. a quoted-money Cents(0)) while a struct-underlying one
-// (decimal.Decimal, a struct-shaped Marshaler) has no emptiness and is
-// always emitted.
+// scalar (numeric/string/bool) or a slice/map — matching encoding/json's
+// isEmptyValue, which inspects the underlying kind, so a zero-valued
+// scalar custom type is omitted (e.g. a quoted-money Cents(0)) and an
+// empty slice-shaped one (zerojson.Raw, a []string-backed TextMarshaler)
+// is omitted too, while a struct-underlying one (decimal.Decimal, a
+// struct-shaped Marshaler) has no emptiness and is always emitted.
 func scalarEmptyGate(f fieldInfo) string {
 	switch f.scalarEmpty {
 	case "num":
@@ -117,8 +157,26 @@ func scalarEmptyGate(f fieldInfo) string {
 		return fmt.Sprintf("v.%s != \"\"", f.access)
 	case "bool":
 		return fmt.Sprintf("bool(v.%s)", f.access)
+	case "len", "array":
+		return fmt.Sprintf("len(v.%s) != 0", f.access)
 	}
 	return ""
+}
+
+// scalarZeroGate is scalarEmptyGate's omitzero counterpart for a custom
+// type WITHOUT an IsZero method: Go 1.24 stdlib semantics compare against
+// the zero value of the underlying kind, which for a slice/map is nil
+// (not len 0 — the omitempty/omitzero distinction).
+func scalarZeroGate(f fieldInfo) string {
+	if f.scalarEmpty == "array" {
+		// Without an IsZero method array omitzero remains unsupported;
+		// emptiness (length) is not the same as element-wise zeroness.
+		return ""
+	}
+	if f.scalarEmpty == "len" {
+		return fmt.Sprintf("v.%s != nil", f.access)
+	}
+	return scalarEmptyGate(f)
 }
 
 // zeroGate returns omitzero's emit condition for f (Go 1.24 stdlib
@@ -134,7 +192,7 @@ func (g *generator) zeroGate(f fieldInfo) string {
 		return fmt.Sprintf("!v.%s.IsZero()", f.access)
 	}
 	switch f.kind {
-	case kString, kEnum:
+	case kString, kEnum, kJSONNumber:
 		return fmt.Sprintf("v.%s != \"\"", f.access)
 	case kBool:
 		return fmt.Sprintf("v.%s", f.access)
@@ -146,8 +204,16 @@ func (g *generator) zeroGate(f fieldInfo) string {
 		if f.marshalerIsSlice || f.marshalerIsMap {
 			return fmt.Sprintf("v.%s != nil", f.access)
 		}
+		if c := scalarZeroGate(f); c != "" {
+			return c
+		}
 		return fmt.Sprintf("!v.%s.IsZero()", f.access)
-	case kTime, kCustomLeaf, kStruct, kTextMarshaler, kAppender:
+	case kCustomLeaf, kTextMarshaler, kAppender:
+		if c := scalarZeroGate(f); c != "" {
+			return c
+		}
+		return fmt.Sprintf("!v.%s.IsZero()", f.access)
+	case kTime, kStruct:
 		return fmt.Sprintf("!v.%s.IsZero()", f.access)
 	case kUUID:
 		if f.hasIsZero {
@@ -168,11 +234,22 @@ func (g *generator) emitValue(f fieldInfo, ind string) {
 		return expr
 	}
 	e := "v." + f.access
+	// ce is the collection value for slice/map kinds: the field itself,
+	// or, for a pointer-to-slice/map field, the pointee (parenthesized so
+	// indexing and ranging apply to the collection, not the pointer).
+	ce := e
+	if f.ptr {
+		ce = "(*" + e + ")"
+	}
 	switch f.kind {
 	case kString, kEnum:
 		g.p("%sdst = zerojson.AppendString(dst, string(%s))", ind, deref(e))
+	case kJSONNumber:
+		g.p("%svar err error", ind)
+		g.p("%sdst, err = zerojson.AppendJSONNumber(dst, string(%s))", ind, deref(e))
+		g.p("%sif err != nil { return dst, err }", ind)
 	case kBool:
-		g.p("%sdst = zerojson.AppendBool(dst, %s)", ind, deref(e))
+		g.p("%sdst = zerojson.AppendBool(dst, bool(%s))", ind, deref(e))
 	case kQuotedInt:
 		g.p("%sdst = zerojson.AppendQuotedInt64(dst, int64(%s))", ind, deref(e))
 	case kInt:
@@ -228,61 +305,63 @@ func (g *generator) emitValue(f fieldInfo, ind string) {
 		// []byte / named byte slice: base64 string, or null when nil
 		// (AppendBytesBase64 handles the nil→null case itself), matching
 		// encoding/json and easyjson.
-		g.p("%sdst = zerojson.AppendBytesBase64(dst, []byte(%s))", ind, deref(e))
+		g.p("%sdst = zerojson.AppendBytesBase64(dst, %s)", ind, byteSliceEncodeExpr(f, deref(e)))
+	case kEmptyStruct:
+		g.p("%sdst = append(dst, \"{}\"...)", ind)
 	case kSlice:
 		// A nil (non-omitempty, non-omitzero) slice encodes as null, a
 		// non-nil one — including an empty non-nil slice — as an array,
 		// matching encoding/json and easyjson. (omitempty/omitzero fields
 		// never reach here nil: their gate already skipped the field.)
-		g.p("%sif %s == nil {", ind, e)
+		g.p("%sif %s == nil {", ind, ce)
 		g.p("%s\tdst = append(dst, \"null\"...)", ind)
 		g.p("%s} else {", ind)
 		g.p("%s\tdst = append(dst, '[')", ind)
-		g.p("%s\tfor i := range %s {", ind, e)
+		g.p("%s\tfor i := range %s {", ind, ce)
 		g.p("%s\t\tif i > 0 { dst = append(dst, ',') }", ind)
 		if f.elemPtr {
-			g.p("%s\t\tif %s[i] == nil {", ind, e)
+			g.p("%s\t\tif %s[i] == nil {", ind, ce)
 			g.p("%s\t\t\tdst = append(dst, \"null\"...)", ind)
 			g.p("%s\t\t\tcontinue", ind)
 			g.p("%s\t\t}", ind)
 		}
 		g.p("%s\t\tvar err error", ind)
-		g.p("%s\t\tdst, err = %s[i].AppendZJSON(dst)", ind, e)
+		g.p("%s\t\tdst, err = %s[i].AppendZJSON(dst)", ind, ce)
 		g.p("%s\t\tif err != nil { return dst, err }", ind)
 		g.p("%s\t}", ind)
 		g.p("%s\tdst = append(dst, ']')", ind)
 		g.p("%s}", ind)
 	case kLeafSlice:
-		g.p("%sif %s == nil {", ind, e)
+		g.p("%sif %s == nil {", ind, ce)
 		g.p("%s\tdst = append(dst, \"null\"...)", ind)
 		g.p("%s} else {", ind)
 		g.p("%s\tdst = append(dst, '[')", ind)
-		g.p("%s\tfor i := range %s {", ind, e)
+		g.p("%s\tfor i := range %s {", ind, ce)
 		g.p("%s\t\tif i > 0 { dst = append(dst, ',') }", ind)
 		if f.elemPtr {
-			g.p("%s\t\tif %s[i] == nil {", ind, e)
+			g.p("%s\t\tif %s[i] == nil {", ind, ce)
 			g.p("%s\t\t\tdst = append(dst, \"null\"...)", ind)
 			g.p("%s\t\t\tcontinue", ind)
 			g.p("%s\t\t}", ind)
 		}
 		switch f.valInfo.kind {
 		case kMarshaler:
-			g.p("%s\t\traw, err := %s[i].MarshalJSON()", ind, e)
+			g.p("%s\t\traw, err := %s[i].MarshalJSON()", ind, ce)
 			g.p("%s\t\tif err != nil { return dst, err }", ind)
 			g.p("%s\t\tif err := zerojson.Valid(raw); err != nil { return dst, err }", ind)
 			g.p("%s\t\tdst = append(dst, raw...)", ind)
 		case kTextMarshaler:
-			g.p("%s\t\traw, err := %s[i].MarshalText()", ind, e)
+			g.p("%s\t\traw, err := %s[i].MarshalText()", ind, ce)
 			g.p("%s\t\tif err != nil { return dst, err }", ind)
 			g.p("%s\t\tdst = zerojson.AppendStringBytes(dst, raw)", ind)
 		case kCustomLeaf:
-			g.leafAppend(f.valInfo.leaf, fmt.Sprintf("&%s[i]", e), ind+"\t\t")
+			g.leafAppend(f.valInfo.leaf, fmt.Sprintf("&%s[i]", ce), ind+"\t\t")
 		case kInterface:
 			g.p("%s\t\tvar err error", ind)
-			g.p("%s\t\tdst, err = zerojson.AppendInterface(dst, %s[i])", ind, e)
+			g.p("%s\t\tdst, err = zerojson.AppendInterface(dst, %s[i])", ind, ce)
 			g.p("%s\t\tif err != nil { return dst, err }", ind)
 		default:
-			g.emitLeafAppend(f.valInfo, e+"[i]", ind+"\t\t")
+			g.emitLeafAppend(f.valInfo, ce+"[i]", ind+"\t\t")
 		}
 		g.p("%s\t}", ind)
 		g.p("%s\tdst = append(dst, ']')", ind)
@@ -291,12 +370,12 @@ func (g *generator) emitValue(f fieldInfo, ind string) {
 		// Range order, matching easyjson (encoding/json would sort keys).
 		// A nil map encodes as null, a non-nil one (empty included) as an
 		// object.
-		g.p("%sif %s == nil {", ind, e)
+		g.p("%sif %s == nil {", ind, ce)
 		g.p("%s\tdst = append(dst, \"null\"...)", ind)
 		g.p("%s} else {", ind)
 		g.p("%s\tdst = append(dst, '{')", ind)
 		g.p("%s\tfirst := true", ind)
-		g.p("%s\tfor mk, mv := range %s {", ind, e)
+		g.p("%s\tfor mk, mv := range %s {", ind, ce)
 		g.p("%s\t\tif !first { dst = append(dst, ',') }", ind)
 		g.p("%s\t\tfirst = false", ind)
 		g.p("%s\t\tdst = zerojson.AppendString(dst, string(mk))", ind)
@@ -353,6 +432,10 @@ func (g *generator) emitLeafAppend(fi *fieldInfo, expr, ind string) {
 	switch fi.kind {
 	case kString, kEnum:
 		g.p("%sdst = zerojson.AppendString(dst, string(%s))", ind, expr)
+	case kJSONNumber:
+		g.p("%svar err error", ind)
+		g.p("%sdst, err = zerojson.AppendJSONNumber(dst, string(%s))", ind, expr)
+		g.p("%sif err != nil { return dst, err }", ind)
 	case kBool:
 		g.p("%sdst = zerojson.AppendBool(dst, bool(%s))", ind, expr)
 	case kInt:
@@ -378,7 +461,7 @@ func (g *generator) emitLeafAppend(fi *fieldInfo, expr, ind string) {
 	case kCustomLeaf:
 		g.leafAppend(fi.leaf, "&"+expr, ind)
 	case kByteSlice:
-		g.p("%sdst = zerojson.AppendBytesBase64(dst, []byte(%s))", ind, expr)
+		g.p("%sdst = zerojson.AppendBytesBase64(dst, %s)", ind, byteSliceEncodeExpr(*fi, expr))
 	case kEmptyStruct:
 		g.p("%s_ = %s", ind, expr)
 		g.p("%sdst = append(dst, \"{}\"...)", ind)

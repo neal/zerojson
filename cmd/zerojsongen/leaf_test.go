@@ -10,7 +10,9 @@ func TestParseLeaf(t *testing.T) {
 	if tp != "github.com/foo/money.Amount" {
 		t.Errorf("type path: %q", tp)
 	}
-	if ls.appendPkg != "github.com/foo/jpmoney" || ls.appendFn != "Append" || ls.appendQual != "jpmoney" {
+	// Qualifiers are assigned later by the generator (useLeaf), from the
+	// package's declared name, so parseLeaf leaves them empty.
+	if ls.appendPkg != "github.com/foo/jpmoney" || ls.appendFn != "Append" || ls.appendQual != "" {
 		t.Errorf("append: %+v", ls)
 	}
 	if ls.readPkg != "github.com/foo/jpmoney" || ls.readFn != "Read" {

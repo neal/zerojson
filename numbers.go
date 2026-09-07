@@ -2,12 +2,18 @@ package zerojson
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 	"strconv"
 )
 
 // readNumericBytes returns the raw bytes of either a quoted or bare
-// number token.
+// number token. This is the LENIENT form: it backs the exported
+// ReadNumericBytes (custom leaf codecs whose wire format is a quoted
+// number, e.g. a decimal) and ReadQuotedOrBareInt64 (the quoted-int64
+// marker convention). The ordinary int/uint/float field readers use
+// readBareNumericBytes instead, which rejects a string token the way
+// encoding/json does for a plain numeric field.
 func (l *Lexer) readNumericBytes() []byte {
 	l.skipWS()
 	if l.pos < len(l.data) && l.data[l.pos] == '"' {
@@ -17,6 +23,29 @@ func (l *Lexer) readNumericBytes() []byte {
 		}
 		return b
 	}
+	return l.scanNumberRun()
+}
+
+// readBareNumericBytes returns the raw bytes of a bare number token,
+// recording an error if the next value is a string (or anything else
+// that cannot begin a number). A plain int/uint/float field decoding
+// `"12"` — or `"NaN"`, which strconv would otherwise happily parse into a
+// value AppendFloat64 then refuses to re-encode — is an error here,
+// matching encoding/json and easyjson, which both reject a quoted number
+// on a field without the `,string` option.
+func (l *Lexer) readBareNumericBytes() []byte {
+	l.skipWS()
+	b := l.scanNumberRun()
+	if len(b) == 0 {
+		l.setErr("expected number")
+	}
+	return b
+}
+
+// scanNumberRun consumes the greedy [0-9+\-.eE] run at the current
+// position. Grammar is checked by the caller's parser (parseDigitsBounded
+// for integers, bareFloatOK+strconv.ParseFloat for floats), not here.
+func (l *Lexer) scanNumberRun() []byte {
 	start := l.pos
 	for l.pos < len(l.data) {
 		switch c := l.data[l.pos]; {
@@ -27,6 +56,32 @@ func (l *Lexer) readNumericBytes() []byte {
 		}
 	}
 	return l.data[start:l.pos]
+}
+
+// bareFloatOK rejects the float spellings strconv.ParseFloat accepts but
+// JSON's number grammar does not: a leading '+', a missing integer part
+// (`.5`), and a '.' with no digit after it (`1.` / `1.e5`). Anything past
+// the first '.' or exponent marker is left to ParseFloat, which already
+// rejects a second '.', an empty exponent, and so on. A leading zero
+// (`007`) is deliberately still accepted — the documented declared-field
+// leniency (see the README's compatibility contract).
+func bareFloatOK(b []byte) bool {
+	i := 0
+	if i < len(b) && b[i] == '-' {
+		i++
+	}
+	if i >= len(b) || b[i] < '0' || b[i] > '9' {
+		return false
+	}
+	for ; i < len(b); i++ {
+		switch b[i] {
+		case '.':
+			return i+1 < len(b) && b[i+1] >= '0' && b[i+1] <= '9'
+		case 'e', 'E':
+			return true
+		}
+	}
+	return true
 }
 
 // readQuotedNumericBytes is the strict counterpart used for json:",string"
@@ -46,9 +101,37 @@ func (l *Lexer) readQuotedNumericBytes() []byte {
 }
 
 // ReadNumericBytes returns the raw bytes of the next number token (quoted
-// or bare), for custom leaf-type read functions to parse themselves.
+// or bare), for custom leaf-type read functions to parse themselves. It
+// is deliberately lenient about the token kind: a custom leaf owns its
+// own wire format, and a quoted decimal (`"2.50"`) is a common one. The
+// generated readers for plain int/uint/float fields are stricter (bare
+// number only), matching encoding/json.
 func (l *Lexer) ReadNumericBytes() []byte {
 	return l.readNumericBytes()
+}
+
+// ReadQuotedOrBareInt64 parses an int64 from either a quoted string
+// token or a bare number. It backs the ZeroJSONQuotedInt64 marker
+// convention (a custom int64 type whose canonical wire form is the quoted
+// base-10 string, but which should still accept a bare number from a
+// producer that never quoted it), so generated code for such a type
+// stays as lenient as the type's own UnmarshalJSON would typically be.
+func (l *Lexer) ReadQuotedOrBareInt64() int64 {
+	l.skipWS()
+	if l.pos < len(l.data) && l.data[l.pos] == '"' {
+		b := l.readQuotedNumericBytes()
+		// Inside the quotes a leading '+' is tolerated — and only there —
+		// because such a type's own UnmarshalJSON is conventionally
+		// strconv.ParseInt on the unquoted digits, which accepts it; the
+		// generated fast path must not reject a document the type's own
+		// method would have taken. A BARE token is JSON grammar, where a
+		// leading '+' is simply invalid, so it gets the strict reader.
+		if len(b) > 1 && b[0] == '+' && b[1] >= '0' && b[1] <= '9' {
+			b = b[1:]
+		}
+		return l.parseSigned(b, math.MaxInt64)
+	}
+	return l.parseSigned(l.readBareNumericBytes(), math.MaxInt64)
 }
 
 // IsEightDigits reports whether all 8 bytes of v (a little-endian load)
@@ -117,36 +200,30 @@ func parseDigitsBounded(b []byte, limit uint64) (uint64, bool) {
 	return v, true
 }
 
-// readSigned reads a quoted-or-bare signed integer whose magnitude must fit
-// the target width: a non-negative value may reach maxPos (the width's
+// readSigned reads a bare signed integer whose magnitude must fit the
+// target width: a non-negative value may reach maxPos (the width's
 // MaxInt), a negative value maxPos+1 (the width's MinInt). Out-of-range or
-// malformed input records a decode error and returns 0, matching
+// malformed input (including a leading '+', which JSON's number grammar
+// does not allow) records a decode error and returns 0, matching
 // encoding/json's range rejection rather than a silent wrap-and-truncate.
 func (l *Lexer) readSigned(maxPos uint64) int64 {
-	b := l.readNumericBytes()
-	return l.parseSigned(b, maxPos, true)
+	b := l.readBareNumericBytes()
+	return l.parseSigned(b, maxPos)
 }
 
 func (l *Lexer) readQuotedSigned(maxPos uint64) int64 {
 	b := l.readQuotedNumericBytes()
-	return l.parseSigned(b, maxPos, false)
+	return l.parseSigned(b, maxPos)
 }
 
-func (l *Lexer) parseSigned(b []byte, maxPos uint64, allowPlus bool) int64 {
+func (l *Lexer) parseSigned(b []byte, maxPos uint64) int64 {
 	if l.err != nil {
 		return 0
 	}
 	neg := false
-	if len(b) > 0 {
-		switch b[0] {
-		case '-':
-			neg = true
-			b = b[1:]
-		case '+':
-			if allowPlus {
-				b = b[1:]
-			}
-		}
+	if len(b) > 0 && b[0] == '-' {
+		neg = true
+		b = b[1:]
 	}
 	limit := maxPos
 	if neg {
@@ -168,25 +245,22 @@ func (l *Lexer) parseSigned(b []byte, maxPos uint64, allowPlus bool) int64 {
 	return int64(v)
 }
 
-// readUnsigned reads a quoted-or-bare unsigned integer that must not exceed
-// limit (the target width's MaxUint). A negative sign, non-digit, or
-// out-of-range value records a decode error and returns 0.
+// readUnsigned reads a bare unsigned integer that must not exceed limit
+// (the target width's MaxUint). A sign, non-digit, or out-of-range value
+// records a decode error and returns 0.
 func (l *Lexer) readUnsigned(limit uint64) uint64 {
-	b := l.readNumericBytes()
-	return l.parseUnsigned(b, limit, true)
+	b := l.readBareNumericBytes()
+	return l.parseUnsigned(b, limit)
 }
 
 func (l *Lexer) readQuotedUnsigned(limit uint64) uint64 {
 	b := l.readQuotedNumericBytes()
-	return l.parseUnsigned(b, limit, false)
+	return l.parseUnsigned(b, limit)
 }
 
-func (l *Lexer) parseUnsigned(b []byte, limit uint64, allowPlus bool) uint64 {
+func (l *Lexer) parseUnsigned(b []byte, limit uint64) uint64 {
 	if l.err != nil {
 		return 0
-	}
-	if allowPlus && len(b) > 0 && b[0] == '+' {
-		b = b[1:]
 	}
 	v, ok := parseDigitsBounded(b, limit)
 	if !ok {
@@ -196,9 +270,10 @@ func (l *Lexer) parseUnsigned(b []byte, limit uint64, allowPlus bool) uint64 {
 	return v
 }
 
-// ReadInt8/16/32/64 parse a quoted-or-bare signed integer, range-checked
-// against the named width: a value outside [MinIntN, MaxIntN] is a decode
-// error, not a silently wrapped cast (see readSigned).
+// ReadInt8/16/32/64 parse a bare signed integer, range-checked against
+// the named width: a value outside [MinIntN, MaxIntN] is a decode error,
+// not a silently wrapped cast (see readSigned). A quoted number is an
+// error too (use the ReadQuoted* variants for `,string` fields).
 func (l *Lexer) ReadInt8() int8   { return int8(l.readSigned(math.MaxInt8)) }
 func (l *Lexer) ReadInt16() int16 { return int16(l.readSigned(math.MaxInt16)) }
 func (l *Lexer) ReadInt32() int32 { return int32(l.readSigned(math.MaxInt32)) }
@@ -209,8 +284,8 @@ func (l *Lexer) ReadQuotedInt16() int16 { return int16(l.readQuotedSigned(math.M
 func (l *Lexer) ReadQuotedInt32() int32 { return int32(l.readQuotedSigned(math.MaxInt32)) }
 func (l *Lexer) ReadQuotedInt64() int64 { return l.readQuotedSigned(math.MaxInt64) }
 
-// ReadUint8/16/32/64 parse a quoted-or-bare unsigned integer, range-checked
-// against the named width (see readUnsigned).
+// ReadUint8/16/32/64 parse a bare unsigned integer, range-checked against
+// the named width (see readUnsigned).
 func (l *Lexer) ReadUint8() uint8   { return uint8(l.readUnsigned(math.MaxUint8)) }
 func (l *Lexer) ReadUint16() uint16 { return uint16(l.readUnsigned(math.MaxUint16)) }
 func (l *Lexer) ReadUint32() uint32 { return uint32(l.readUnsigned(math.MaxUint32)) }
@@ -221,8 +296,8 @@ func (l *Lexer) ReadQuotedUint16() uint16 { return uint16(l.readQuotedUnsigned(m
 func (l *Lexer) ReadQuotedUint32() uint32 { return uint32(l.readQuotedUnsigned(math.MaxUint32)) }
 func (l *Lexer) ReadQuotedUint64() uint64 { return l.readQuotedUnsigned(math.MaxUint64) }
 
-// ReadInt/ReadUint parse a quoted-or-bare integer range-checked against the
-// build platform's `int`/`uint` width, so generated code for an `int` or
+// ReadInt/ReadUint parse a bare integer range-checked against the build
+// platform's `int`/`uint` width, so generated code for an `int` or
 // `uint` field never blind-casts a 64-bit read into a narrower word. The
 // bounds are the untyped constants math.MaxInt/math.MinInt/math.MaxUint:
 // on a 64-bit target they equal the int64/uint64 limits, so these are the
@@ -236,10 +311,38 @@ func (l *Lexer) ReadUint() uint { return uint(l.readUnsigned(math.MaxUint)) }
 func (l *Lexer) ReadQuotedInt() int   { return int(l.readQuotedSigned(math.MaxInt)) }
 func (l *Lexer) ReadQuotedUint() uint { return uint(l.readQuotedUnsigned(math.MaxUint)) }
 
-// ReadFloat64 parses a quoted-or-bare floating point number.
-func (l *Lexer) ReadFloat64() float64 {
-	b := l.readNumericBytes()
+// ReadFloat32 is ReadFloat64 for a float32 target: the same grammar, but
+// parsed at 32-bit precision so a value outside float32's range (1e39)
+// is a decode error — as encoding/json reports it — rather than a silent
+// ±Inf that AppendFloat32 would then refuse to re-encode.
+func (l *Lexer) ReadFloat32() float32 {
+	b := l.readBareNumericBytes()
 	if l.err != nil {
+		return 0
+	}
+	if !bareFloatOK(b) {
+		l.setErr("float %q: malformed number", b)
+		return 0
+	}
+	f, err := strconv.ParseFloat(bytesToString(b), 32)
+	if err != nil {
+		l.setErr("float %q: %v", b, err)
+		return 0
+	}
+	return float32(f)
+}
+
+// ReadFloat64 parses a bare floating point number. A quoted token is an
+// error (so `"NaN"` and `"Inf"` can never sneak in as values that would
+// then fail to re-encode), as are the non-JSON spellings strconv accepts
+// (`+1`, `.5`, `1.`); see bareFloatOK.
+func (l *Lexer) ReadFloat64() float64 {
+	b := l.readBareNumericBytes()
+	if l.err != nil {
+		return 0
+	}
+	if !bareFloatOK(b) {
+		l.setErr("float %q: malformed number", b)
 		return 0
 	}
 	f, err := strconv.ParseFloat(bytesToString(b), 64)
@@ -247,4 +350,75 @@ func (l *Lexer) ReadFloat64() float64 {
 		l.setErr("float %q: %v", b, err)
 	}
 	return f
+}
+
+// ReadJSONNumber reads a value for an encoding/json.Number field: a bare
+// number token, or (as classic encoding/json also accepts for Number) a
+// string token whose contents are a valid JSON number. The literal is
+// returned verbatim (copied), never parsed, so precision is preserved
+// exactly as with encoding/json. A string that is not a number literal,
+// or a bare token that fails the RFC 8259 grammar, is a decode error —
+// this reader is grammar-strict even for the bare form (no leading zero),
+// because the literal is stored, not parsed, and would otherwise be
+// re-encoded as invalid JSON.
+func (l *Lexer) ReadJSONNumber() string {
+	l.skipWS()
+	var b []byte
+	if l.pos < len(l.data) && l.data[l.pos] == '"' {
+		b = l.readQuotedNumericBytes()
+	} else {
+		b = l.readBareNumericBytes()
+	}
+	if l.err != nil {
+		return ""
+	}
+	if end, err := validNumber(b, 0); err != nil || end != len(b) {
+		l.setErr("json.Number %q: invalid number literal", b)
+		return ""
+	}
+	return string(b)
+}
+
+// AppendJSONNumber appends an encoding/json.Number literal verbatim, as
+// encoding/json does: an empty Number encodes as 0, and anything that is
+// not a valid JSON number literal is an error rather than invalid output.
+func AppendJSONNumber(dst []byte, n string) ([]byte, error) {
+	if n == "" {
+		return append(dst, '0'), nil
+	}
+	if end, err := validNumber([]byte(n), 0); err != nil || end != len(n) {
+		return dst, fmt.Errorf("json: invalid number literal %q", n)
+	}
+	return append(dst, n...), nil
+}
+
+// IsQuotedNull consumes the string token whose VALUE is null — the exact
+// spelling "null" or any escaped equivalent ("n\u0075ll") — if it is
+// next, and reports whether it did. A `,string` field accepts it as a
+// no-op (encoding/json treats the quoted spelling of null exactly like
+// the bare literal there: the field is left untouched, a pointer is
+// cleared). The common case costs one byte compare: only a token that
+// begins with `"n` or `"\` can be a spelling of null, so anything else
+// returns immediately without scanning.
+func (l *Lexer) IsQuotedNull() bool {
+	l.skipWS()
+	if l.pos+1 >= len(l.data) || l.data[l.pos] != '"' {
+		return false
+	}
+	if c := l.data[l.pos+1]; c != 'n' && c != '\\' {
+		return false
+	}
+	start := l.pos
+	b, plain, _ := l.readStringBytes()
+	if l.err != nil {
+		return false
+	}
+	if !plain {
+		b = unescapeStringBytes(b)
+	}
+	if string(b) == "null" {
+		return true
+	}
+	l.pos = start
+	return false
 }

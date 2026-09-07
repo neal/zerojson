@@ -4,9 +4,11 @@ package typeshape
 
 import (
 	"encoding/binary"
+	json_ "encoding/json"
 	"github.com/google/uuid"
 	zerojson "github.com/neal/zerojson"
 	"github.com/neal/zerojson/conformance/internal/testleaf"
+	reflect_ "reflect"
 	"time"
 )
 
@@ -34,17 +36,17 @@ func (v *C_bytes) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_bytes) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_bytes) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -57,22 +59,24 @@ func (v *C_bytes) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_bytes can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_bytes) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_bytes{}
+	zjDecodeC_bytes(l, v, a)
+}
+
 // zjDecodeC_bytes tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_bytes(l, v, a) {
 		return
 	}
@@ -102,10 +106,22 @@ func zjDecodeOrderedC_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) bo
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -160,6 +176,7 @@ func zjDecodeOrderedC_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) bo
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -173,13 +190,26 @@ func zjDecodeOrderedFieldC_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_byte
 		case 0:
 			v.F = nil
 		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_bytes[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		v.F = []byte(l.ReadBytesBase64())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_bytes[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_bytes are C_bytes's JSON field names by declared index, for error paths.
+var zjFieldNamesC_bytes = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_bytes matches and consumes the literal `"name":` for declared
@@ -212,8 +242,8 @@ func zjIsDeclaredKeyC_bytes(name string) bool {
 }
 
 // zjDecodeFallbackC_bytes is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) {
 	_ = a
 	if !l.EnterObject() {
@@ -229,6 +259,10 @@ func zjDecodeFallbackC_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) {
 			case "f":
 				v.F = nil
 			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -241,6 +275,7 @@ func zjDecodeFallbackC_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) {
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -273,17 +308,17 @@ func (v *C_bytes_named) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_bytes_named) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_bytes_named) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -296,22 +331,24 @@ func (v *C_bytes_named) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_bytes_named can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_bytes_named) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_bytes_named{}
+	zjDecodeC_bytes_named(l, v, a)
+}
+
 // zjDecodeC_bytes_named tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjArenaC_bytes_named) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_bytes_named(l, v, a) {
 		return
 	}
@@ -341,10 +378,22 @@ func zjDecodeOrderedC_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjAren
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -399,6 +448,7 @@ func zjDecodeOrderedC_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjAren
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -412,13 +462,26 @@ func zjDecodeOrderedFieldC_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *z
 		case 0:
 			v.F = nil
 		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_bytes_named[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		v.F = Blob(l.ReadBytesBase64())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_bytes_named[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_bytes_named are C_bytes_named's JSON field names by declared index, for error paths.
+var zjFieldNamesC_bytes_named = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_bytes_named matches and consumes the literal `"name":` for declared
@@ -451,8 +514,8 @@ func zjIsDeclaredKeyC_bytes_named(name string) bool {
 }
 
 // zjDecodeFallbackC_bytes_named is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjArenaC_bytes_named) {
 	_ = a
 	if !l.EnterObject() {
@@ -468,6 +531,10 @@ func zjDecodeFallbackC_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjAre
 			case "f":
 				v.F = nil
 			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -480,6 +547,7 @@ func zjDecodeFallbackC_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjAre
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -512,17 +580,17 @@ func (v *C_bytes_named_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_bytes_named_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_bytes_named_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -535,22 +603,24 @@ func (v *C_bytes_named_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_bytes_named_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_bytes_named_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_bytes_named_oe{}
+	zjDecodeC_bytes_named_oe(l, v, a)
+}
+
 // zjDecodeC_bytes_named_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a *zjArenaC_bytes_named_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_bytes_named_oe(l, v, a) {
 		return
 	}
@@ -580,10 +650,22 @@ func zjDecodeOrderedC_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a *
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -638,6 +720,7 @@ func zjDecodeOrderedC_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a *
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -651,13 +734,26 @@ func zjDecodeOrderedFieldC_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe
 		case 0:
 			v.F = nil
 		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_bytes_named_oe[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		v.F = Blob(l.ReadBytesBase64())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_bytes_named_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_bytes_named_oe are C_bytes_named_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesC_bytes_named_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_bytes_named_oe matches and consumes the literal `"name":` for declared
@@ -690,8 +786,8 @@ func zjIsDeclaredKeyC_bytes_named_oe(name string) bool {
 }
 
 // zjDecodeFallbackC_bytes_named_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a *zjArenaC_bytes_named_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -707,6 +803,10 @@ func zjDecodeFallbackC_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a 
 			case "f":
 				v.F = nil
 			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -719,6 +819,7 @@ func zjDecodeFallbackC_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a 
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -763,17 +864,17 @@ func (v *C_bytes_nested_slice) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_bytes_nested_slice) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_bytes_nested_slice) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -786,22 +887,24 @@ func (v *C_bytes_nested_slice) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_bytes_nested_slice can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_bytes_nested_slice) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_bytes_nested_slice{}
+	zjDecodeC_bytes_nested_slice(l, v, a)
+}
+
 // zjDecodeC_bytes_nested_slice tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_slice, a *zjArenaC_bytes_nested_slice) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_bytes_nested_slice(l, v, a) {
 		return
 	}
@@ -831,10 +934,22 @@ func zjDecodeOrderedC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_sl
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -889,6 +1004,7 @@ func zjDecodeOrderedC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_sl
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -901,6 +1017,10 @@ func zjDecodeOrderedFieldC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nest
 		switch k {
 		case 0:
 			v.F = nil
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_bytes_nested_slice[k])
+			return false
 		}
 		return true
 	}
@@ -922,7 +1042,7 @@ func zjDecodeOrderedFieldC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nest
 					a.c0[idx] = []byte(l.ReadBytesBase64())
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				if !l.NextElem() {
 					break
@@ -934,7 +1054,16 @@ func zjDecodeOrderedFieldC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nest
 		}
 		v.F = a.c0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_bytes_nested_slice[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_bytes_nested_slice are C_bytes_nested_slice's JSON field names by declared index, for error paths.
+var zjFieldNamesC_bytes_nested_slice = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_bytes_nested_slice matches and consumes the literal `"name":` for declared
@@ -967,8 +1096,8 @@ func zjIsDeclaredKeyC_bytes_nested_slice(name string) bool {
 }
 
 // zjDecodeFallbackC_bytes_nested_slice is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_slice, a *zjArenaC_bytes_nested_slice) {
 	_ = a
 	if !l.EnterObject() {
@@ -983,6 +1112,10 @@ func zjDecodeFallbackC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_s
 			switch string(key) {
 			case "f":
 				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -1007,7 +1140,7 @@ func zjDecodeFallbackC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_s
 						a.c0[idx] = []byte(l.ReadBytesBase64())
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					if !l.NextElem() {
 						break
@@ -1022,6 +1155,7 @@ func zjDecodeFallbackC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_s
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -1066,17 +1200,17 @@ func (v *C_bytes_nested_slice_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_bytes_nested_slice_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_bytes_nested_slice_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -1089,22 +1223,24 @@ func (v *C_bytes_nested_slice_oe) unmarshalZJSON(data []byte, borrow bool) error
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_bytes_nested_slice_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_bytes_nested_slice_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_bytes_nested_slice_oe{}
+	zjDecodeC_bytes_nested_slice_oe(l, v, a)
+}
+
 // zjDecodeC_bytes_nested_slice_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested_slice_oe, a *zjArenaC_bytes_nested_slice_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_bytes_nested_slice_oe(l, v, a) {
 		return
 	}
@@ -1134,10 +1270,22 @@ func zjDecodeOrderedC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -1192,6 +1340,7 @@ func zjDecodeOrderedC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -1204,6 +1353,10 @@ func zjDecodeOrderedFieldC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_n
 		switch k {
 		case 0:
 			v.F = nil
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_bytes_nested_slice_oe[k])
+			return false
 		}
 		return true
 	}
@@ -1225,7 +1378,7 @@ func zjDecodeOrderedFieldC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_n
 					a.c0[idx] = []byte(l.ReadBytesBase64())
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				if !l.NextElem() {
 					break
@@ -1237,7 +1390,16 @@ func zjDecodeOrderedFieldC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_n
 		}
 		v.F = a.c0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_bytes_nested_slice_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_bytes_nested_slice_oe are C_bytes_nested_slice_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesC_bytes_nested_slice_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_bytes_nested_slice_oe matches and consumes the literal `"name":` for declared
@@ -1270,8 +1432,8 @@ func zjIsDeclaredKeyC_bytes_nested_slice_oe(name string) bool {
 }
 
 // zjDecodeFallbackC_bytes_nested_slice_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested_slice_oe, a *zjArenaC_bytes_nested_slice_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -1286,6 +1448,10 @@ func zjDecodeFallbackC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_neste
 			switch string(key) {
 			case "f":
 				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -1310,7 +1476,7 @@ func zjDecodeFallbackC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_neste
 						a.c0[idx] = []byte(l.ReadBytesBase64())
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					if !l.NextElem() {
 						break
@@ -1325,6 +1491,7 @@ func zjDecodeFallbackC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_neste
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -1357,17 +1524,17 @@ func (v *C_bytes_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_bytes_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_bytes_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -1380,22 +1547,24 @@ func (v *C_bytes_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_bytes_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_bytes_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_bytes_oe{}
+	zjDecodeC_bytes_oe(l, v, a)
+}
+
 // zjDecodeC_bytes_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_bytes_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_bytes_oe(l, v, a) {
 		return
 	}
@@ -1425,10 +1594,22 @@ func zjDecodeOrderedC_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_byt
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -1483,6 +1664,7 @@ func zjDecodeOrderedC_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_byt
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -1496,13 +1678,26 @@ func zjDecodeOrderedFieldC_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArena
 		case 0:
 			v.F = nil
 		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_bytes_oe[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		v.F = []byte(l.ReadBytesBase64())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_bytes_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_bytes_oe are C_bytes_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesC_bytes_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_bytes_oe matches and consumes the literal `"name":` for declared
@@ -1535,8 +1730,8 @@ func zjIsDeclaredKeyC_bytes_oe(name string) bool {
 }
 
 // zjDecodeFallbackC_bytes_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_bytes_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -1552,6 +1747,10 @@ func zjDecodeFallbackC_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_by
 			case "f":
 				v.F = nil
 			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -1564,6 +1763,7 @@ func zjDecodeFallbackC_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_by
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -1601,17 +1801,17 @@ func (v *C_bytes_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_bytes_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_bytes_ptr) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -1624,22 +1824,24 @@ func (v *C_bytes_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_bytes_ptr can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_bytes_ptr) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_bytes_ptr{}
+	zjDecodeC_bytes_ptr(l, v, a)
+}
+
 // zjDecodeC_bytes_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_bytes_ptr) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_bytes_ptr(l, v, a) {
 		return
 	}
@@ -1663,16 +1865,32 @@ func zjDecodeC_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_bytes_pt
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrderedC_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_bytes_ptr) bool {
 	_ = a
+	// Caller-owned pointers and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -1727,6 +1945,7 @@ func zjDecodeOrderedC_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_b
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -1740,14 +1959,31 @@ func zjDecodeOrderedFieldC_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjAre
 		case 0:
 			v.F = nil
 		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_bytes_ptr[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		a.f0 = []byte(l.ReadBytesBase64())
-		v.F = &a.f0
+		if v.F == nil {
+			a.f0 = []byte(l.ReadBytesBase64())
+			v.F = &a.f0
+		} else {
+			*v.F = []byte(l.ReadBytesBase64())
+		}
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_bytes_ptr[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_bytes_ptr are C_bytes_ptr's JSON field names by declared index, for error paths.
+var zjFieldNamesC_bytes_ptr = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_bytes_ptr matches and consumes the literal `"name":` for declared
@@ -1780,8 +2016,8 @@ func zjIsDeclaredKeyC_bytes_ptr(name string) bool {
 }
 
 // zjDecodeFallbackC_bytes_ptr is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_bytes_ptr) {
 	_ = a
 	if !l.EnterObject() {
@@ -1797,6 +2033,10 @@ func zjDecodeFallbackC_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_
 			case "f":
 				v.F = nil
 			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -1804,12 +2044,17 @@ func zjDecodeFallbackC_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_
 		}
 		switch string(key) {
 		case "f":
-			a.f0 = []byte(l.ReadBytesBase64())
-			v.F = &a.f0
+			if v.F == nil {
+				a.f0 = []byte(l.ReadBytesBase64())
+				v.F = &a.f0
+			} else {
+				*v.F = []byte(l.ReadBytesBase64())
+			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -1859,17 +2104,17 @@ func (v *C_map_bytes) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_map_bytes) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_map_bytes) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -1882,23 +2127,25 @@ func (v *C_map_bytes) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_map_bytes can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_map_bytes) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_map_bytes{}
+	zjDecodeC_map_bytes(l, v, a)
+}
+
 // zjDecodeC_map_bytes tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_map_bytes) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
 	a.s0 = false
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_map_bytes(l, v, a) {
 		return
 	}
@@ -1928,10 +2175,22 @@ func zjDecodeOrderedC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_m
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -1986,6 +2245,7 @@ func zjDecodeOrderedC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_m
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -1999,6 +2259,10 @@ func zjDecodeOrderedFieldC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjAre
 		case 0:
 			v.F = nil
 			a.s0 = false
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_map_bytes[k])
+			return false
 		}
 		return true
 	}
@@ -2022,7 +2286,7 @@ func zjDecodeOrderedFieldC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjAre
 					mv = []byte(l.ReadBytesBase64())
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				a.m0[mk] = mv
 				if !l.NextMember() {
@@ -2032,7 +2296,16 @@ func zjDecodeOrderedFieldC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjAre
 		}
 		v.F = a.m0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_map_bytes[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_map_bytes are C_map_bytes's JSON field names by declared index, for error paths.
+var zjFieldNamesC_map_bytes = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_map_bytes matches and consumes the literal `"name":` for declared
@@ -2065,8 +2338,8 @@ func zjIsDeclaredKeyC_map_bytes(name string) bool {
 }
 
 // zjDecodeFallbackC_map_bytes is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_map_bytes) {
 	_ = a
 	if !l.EnterObject() {
@@ -2082,6 +2355,10 @@ func zjDecodeFallbackC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_
 			case "f":
 				v.F = nil
 				a.s0 = false
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -2108,7 +2385,7 @@ func zjDecodeFallbackC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_
 						mv = []byte(l.ReadBytesBase64())
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					a.m0[mk] = mv
 					if !l.NextMember() {
@@ -2121,6 +2398,7 @@ func zjDecodeFallbackC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -2170,17 +2448,17 @@ func (v *C_map_bytes_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_map_bytes_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_map_bytes_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -2193,23 +2471,25 @@ func (v *C_map_bytes_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_map_bytes_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_map_bytes_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_map_bytes_oe{}
+	zjDecodeC_map_bytes_oe(l, v, a)
+}
+
 // zjDecodeC_map_bytes_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjArenaC_map_bytes_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
 	a.s0 = false
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_map_bytes_oe(l, v, a) {
 		return
 	}
@@ -2239,10 +2519,22 @@ func zjDecodeOrderedC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjAr
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -2297,6 +2589,7 @@ func zjDecodeOrderedC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjAr
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -2310,6 +2603,10 @@ func zjDecodeOrderedFieldC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a 
 		case 0:
 			v.F = nil
 			a.s0 = false
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_map_bytes_oe[k])
+			return false
 		}
 		return true
 	}
@@ -2333,7 +2630,7 @@ func zjDecodeOrderedFieldC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a 
 					mv = []byte(l.ReadBytesBase64())
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				a.m0[mk] = mv
 				if !l.NextMember() {
@@ -2343,7 +2640,16 @@ func zjDecodeOrderedFieldC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a 
 		}
 		v.F = a.m0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_map_bytes_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_map_bytes_oe are C_map_bytes_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesC_map_bytes_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_map_bytes_oe matches and consumes the literal `"name":` for declared
@@ -2376,8 +2682,8 @@ func zjIsDeclaredKeyC_map_bytes_oe(name string) bool {
 }
 
 // zjDecodeFallbackC_map_bytes_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjArenaC_map_bytes_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -2393,6 +2699,10 @@ func zjDecodeFallbackC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjA
 			case "f":
 				v.F = nil
 				a.s0 = false
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -2419,7 +2729,7 @@ func zjDecodeFallbackC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjA
 						mv = []byte(l.ReadBytesBase64())
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					a.m0[mk] = mv
 					if !l.NextMember() {
@@ -2432,6 +2742,7 @@ func zjDecodeFallbackC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjA
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -2481,17 +2792,17 @@ func (v *C_map_decimal) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_map_decimal) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_map_decimal) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -2504,23 +2815,25 @@ func (v *C_map_decimal) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_map_decimal can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_map_decimal) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_map_decimal{}
+	zjDecodeC_map_decimal(l, v, a)
+}
+
 // zjDecodeC_map_decimal tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjArenaC_map_decimal) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
 	a.s0 = false
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_map_decimal(l, v, a) {
 		return
 	}
@@ -2550,10 +2863,22 @@ func zjDecodeOrderedC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjAren
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -2608,6 +2933,7 @@ func zjDecodeOrderedC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjAren
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -2621,6 +2947,10 @@ func zjDecodeOrderedFieldC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *z
 		case 0:
 			v.F = nil
 			a.s0 = false
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_map_decimal[k])
+			return false
 		}
 		return true
 	}
@@ -2644,7 +2974,7 @@ func zjDecodeOrderedFieldC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *z
 					testleaf.Read(l, &mv)
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				a.m0[mk] = mv
 				if !l.NextMember() {
@@ -2654,7 +2984,16 @@ func zjDecodeOrderedFieldC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *z
 		}
 		v.F = a.m0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_map_decimal[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_map_decimal are C_map_decimal's JSON field names by declared index, for error paths.
+var zjFieldNamesC_map_decimal = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_map_decimal matches and consumes the literal `"name":` for declared
@@ -2687,8 +3026,8 @@ func zjIsDeclaredKeyC_map_decimal(name string) bool {
 }
 
 // zjDecodeFallbackC_map_decimal is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjArenaC_map_decimal) {
 	_ = a
 	if !l.EnterObject() {
@@ -2704,6 +3043,10 @@ func zjDecodeFallbackC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjAre
 			case "f":
 				v.F = nil
 				a.s0 = false
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -2730,7 +3073,7 @@ func zjDecodeFallbackC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjAre
 						testleaf.Read(l, &mv)
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					a.m0[mk] = mv
 					if !l.NextMember() {
@@ -2743,6 +3086,7 @@ func zjDecodeFallbackC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjAre
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -2792,17 +3136,17 @@ func (v *C_map_decimal_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_map_decimal_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_map_decimal_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -2815,23 +3159,25 @@ func (v *C_map_decimal_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_map_decimal_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_map_decimal_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_map_decimal_oe{}
+	zjDecodeC_map_decimal_oe(l, v, a)
+}
+
 // zjDecodeC_map_decimal_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a *zjArenaC_map_decimal_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
 	a.s0 = false
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_map_decimal_oe(l, v, a) {
 		return
 	}
@@ -2861,10 +3207,22 @@ func zjDecodeOrderedC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a *
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -2919,6 +3277,7 @@ func zjDecodeOrderedC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a *
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -2932,6 +3291,10 @@ func zjDecodeOrderedFieldC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe
 		case 0:
 			v.F = nil
 			a.s0 = false
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_map_decimal_oe[k])
+			return false
 		}
 		return true
 	}
@@ -2955,7 +3318,7 @@ func zjDecodeOrderedFieldC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe
 					testleaf.Read(l, &mv)
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				a.m0[mk] = mv
 				if !l.NextMember() {
@@ -2965,7 +3328,16 @@ func zjDecodeOrderedFieldC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe
 		}
 		v.F = a.m0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_map_decimal_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_map_decimal_oe are C_map_decimal_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesC_map_decimal_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_map_decimal_oe matches and consumes the literal `"name":` for declared
@@ -2998,8 +3370,8 @@ func zjIsDeclaredKeyC_map_decimal_oe(name string) bool {
 }
 
 // zjDecodeFallbackC_map_decimal_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a *zjArenaC_map_decimal_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -3015,6 +3387,10 @@ func zjDecodeFallbackC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a 
 			case "f":
 				v.F = nil
 				a.s0 = false
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -3041,7 +3417,7 @@ func zjDecodeFallbackC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a 
 						testleaf.Read(l, &mv)
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					a.m0[mk] = mv
 					if !l.NextMember() {
@@ -3054,6 +3430,7 @@ func zjDecodeFallbackC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a 
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -3103,17 +3480,17 @@ func (v *C_map_int) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_map_int) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_map_int) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -3126,23 +3503,25 @@ func (v *C_map_int) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_map_int can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_map_int) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_map_int{}
+	zjDecodeC_map_int(l, v, a)
+}
+
 // zjDecodeC_map_int tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_int) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
 	a.s0 = false
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_map_int(l, v, a) {
 		return
 	}
@@ -3172,10 +3551,22 @@ func zjDecodeOrderedC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_i
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -3230,6 +3621,7 @@ func zjDecodeOrderedC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_i
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -3243,6 +3635,10 @@ func zjDecodeOrderedFieldC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_
 		case 0:
 			v.F = nil
 			a.s0 = false
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_map_int[k])
+			return false
 		}
 		return true
 	}
@@ -3266,7 +3662,7 @@ func zjDecodeOrderedFieldC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_
 					mv = int(l.ReadInt())
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				a.m0[mk] = mv
 				if !l.NextMember() {
@@ -3276,7 +3672,16 @@ func zjDecodeOrderedFieldC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_
 		}
 		v.F = a.m0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_map_int[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_map_int are C_map_int's JSON field names by declared index, for error paths.
+var zjFieldNamesC_map_int = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_map_int matches and consumes the literal `"name":` for declared
@@ -3309,8 +3714,8 @@ func zjIsDeclaredKeyC_map_int(name string) bool {
 }
 
 // zjDecodeFallbackC_map_int is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_int) {
 	_ = a
 	if !l.EnterObject() {
@@ -3326,6 +3731,10 @@ func zjDecodeFallbackC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_
 			case "f":
 				v.F = nil
 				a.s0 = false
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -3352,7 +3761,7 @@ func zjDecodeFallbackC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_
 						mv = int(l.ReadInt())
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					a.m0[mk] = mv
 					if !l.NextMember() {
@@ -3365,6 +3774,7 @@ func zjDecodeFallbackC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -3414,17 +3824,17 @@ func (v *C_map_int_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_map_int_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_map_int_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -3437,23 +3847,25 @@ func (v *C_map_int_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_map_int_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_map_int_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_map_int_oe{}
+	zjDecodeC_map_int_oe(l, v, a)
+}
+
 // zjDecodeC_map_int_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArenaC_map_int_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
 	a.s0 = false
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_map_int_oe(l, v, a) {
 		return
 	}
@@ -3483,10 +3895,22 @@ func zjDecodeOrderedC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArenaC
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -3541,6 +3965,7 @@ func zjDecodeOrderedC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArenaC
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -3554,6 +3979,10 @@ func zjDecodeOrderedFieldC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjA
 		case 0:
 			v.F = nil
 			a.s0 = false
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_map_int_oe[k])
+			return false
 		}
 		return true
 	}
@@ -3577,7 +4006,7 @@ func zjDecodeOrderedFieldC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjA
 					mv = int(l.ReadInt())
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				a.m0[mk] = mv
 				if !l.NextMember() {
@@ -3587,7 +4016,16 @@ func zjDecodeOrderedFieldC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjA
 		}
 		v.F = a.m0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_map_int_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_map_int_oe are C_map_int_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesC_map_int_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_map_int_oe matches and consumes the literal `"name":` for declared
@@ -3620,8 +4058,8 @@ func zjIsDeclaredKeyC_map_int_oe(name string) bool {
 }
 
 // zjDecodeFallbackC_map_int_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArenaC_map_int_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -3637,6 +4075,10 @@ func zjDecodeFallbackC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArena
 			case "f":
 				v.F = nil
 				a.s0 = false
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -3663,7 +4105,7 @@ func zjDecodeFallbackC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArena
 						mv = int(l.ReadInt())
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					a.m0[mk] = mv
 					if !l.NextMember() {
@@ -3676,6 +4118,7 @@ func zjDecodeFallbackC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArena
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -3726,17 +4169,17 @@ func (v *C_map_set) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_map_set) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_map_set) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -3749,23 +4192,25 @@ func (v *C_map_set) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_map_set can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_map_set) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_map_set{}
+	zjDecodeC_map_set(l, v, a)
+}
+
 // zjDecodeC_map_set tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_set) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
 	a.s0 = false
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_map_set(l, v, a) {
 		return
 	}
@@ -3795,10 +4240,22 @@ func zjDecodeOrderedC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_s
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -3853,6 +4310,7 @@ func zjDecodeOrderedC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_s
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -3866,6 +4324,10 @@ func zjDecodeOrderedFieldC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_
 		case 0:
 			v.F = nil
 			a.s0 = false
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_map_set[k])
+			return false
 		}
 		return true
 	}
@@ -3889,7 +4351,7 @@ func zjDecodeOrderedFieldC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_
 					l.SkipObject()
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				a.m0[mk] = mv
 				if !l.NextMember() {
@@ -3899,7 +4361,16 @@ func zjDecodeOrderedFieldC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_
 		}
 		v.F = a.m0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_map_set[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_map_set are C_map_set's JSON field names by declared index, for error paths.
+var zjFieldNamesC_map_set = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_map_set matches and consumes the literal `"name":` for declared
@@ -3932,8 +4403,8 @@ func zjIsDeclaredKeyC_map_set(name string) bool {
 }
 
 // zjDecodeFallbackC_map_set is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_set) {
 	_ = a
 	if !l.EnterObject() {
@@ -3949,6 +4420,10 @@ func zjDecodeFallbackC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_
 			case "f":
 				v.F = nil
 				a.s0 = false
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -3975,7 +4450,7 @@ func zjDecodeFallbackC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_
 						l.SkipObject()
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					a.m0[mk] = mv
 					if !l.NextMember() {
@@ -3988,6 +4463,7 @@ func zjDecodeFallbackC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -4038,17 +4514,17 @@ func (v *C_map_set_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_map_set_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_map_set_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -4061,23 +4537,25 @@ func (v *C_map_set_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_map_set_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_map_set_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_map_set_oe{}
+	zjDecodeC_map_set_oe(l, v, a)
+}
+
 // zjDecodeC_map_set_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArenaC_map_set_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
 	a.s0 = false
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_map_set_oe(l, v, a) {
 		return
 	}
@@ -4107,10 +4585,22 @@ func zjDecodeOrderedC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArenaC
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -4165,6 +4655,7 @@ func zjDecodeOrderedC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArenaC
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -4178,6 +4669,10 @@ func zjDecodeOrderedFieldC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjA
 		case 0:
 			v.F = nil
 			a.s0 = false
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_map_set_oe[k])
+			return false
 		}
 		return true
 	}
@@ -4201,7 +4696,7 @@ func zjDecodeOrderedFieldC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjA
 					l.SkipObject()
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				a.m0[mk] = mv
 				if !l.NextMember() {
@@ -4211,7 +4706,16 @@ func zjDecodeOrderedFieldC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjA
 		}
 		v.F = a.m0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_map_set_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_map_set_oe are C_map_set_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesC_map_set_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_map_set_oe matches and consumes the literal `"name":` for declared
@@ -4244,8 +4748,8 @@ func zjIsDeclaredKeyC_map_set_oe(name string) bool {
 }
 
 // zjDecodeFallbackC_map_set_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArenaC_map_set_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -4261,6 +4765,10 @@ func zjDecodeFallbackC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArena
 			case "f":
 				v.F = nil
 				a.s0 = false
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -4287,7 +4795,7 @@ func zjDecodeFallbackC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArena
 						l.SkipObject()
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					a.m0[mk] = mv
 					if !l.NextMember() {
@@ -4300,6 +4808,7 @@ func zjDecodeFallbackC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArena
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -4353,17 +4862,17 @@ func (v *C_map_struct) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_map_struct) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_map_struct) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -4376,23 +4885,25 @@ func (v *C_map_struct) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_map_struct can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_map_struct) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_map_struct{}
+	zjDecodeC_map_struct(l, v, a)
+}
+
 // zjDecodeC_map_struct tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArenaC_map_struct) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
 	a.s0 = false
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_map_struct(l, v, a) {
 		return
 	}
@@ -4422,10 +4933,22 @@ func zjDecodeOrderedC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArenaC
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -4480,6 +5003,7 @@ func zjDecodeOrderedC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArenaC
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -4493,6 +5017,10 @@ func zjDecodeOrderedFieldC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjA
 		case 0:
 			v.F = nil
 			a.s0 = false
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_map_struct[k])
+			return false
 		}
 		return true
 	}
@@ -4517,7 +5045,7 @@ func zjDecodeOrderedFieldC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjA
 					zjDecodeInner(l, &mv, &ea)
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				a.m0[mk] = mv
 				if !l.NextMember() {
@@ -4527,7 +5055,16 @@ func zjDecodeOrderedFieldC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjA
 		}
 		v.F = a.m0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_map_struct[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_map_struct are C_map_struct's JSON field names by declared index, for error paths.
+var zjFieldNamesC_map_struct = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_map_struct matches and consumes the literal `"name":` for declared
@@ -4560,8 +5097,8 @@ func zjIsDeclaredKeyC_map_struct(name string) bool {
 }
 
 // zjDecodeFallbackC_map_struct is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArenaC_map_struct) {
 	_ = a
 	if !l.EnterObject() {
@@ -4577,6 +5114,10 @@ func zjDecodeFallbackC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArena
 			case "f":
 				v.F = nil
 				a.s0 = false
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -4604,7 +5145,7 @@ func zjDecodeFallbackC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArena
 						zjDecodeInner(l, &mv, &ea)
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					a.m0[mk] = mv
 					if !l.NextMember() {
@@ -4617,6 +5158,7 @@ func zjDecodeFallbackC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArena
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -4670,17 +5212,17 @@ func (v *C_map_struct_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_map_struct_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_map_struct_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -4693,23 +5235,25 @@ func (v *C_map_struct_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_map_struct_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_map_struct_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_map_struct_oe{}
+	zjDecodeC_map_struct_oe(l, v, a)
+}
+
 // zjDecodeC_map_struct_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *zjArenaC_map_struct_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
 	a.s0 = false
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_map_struct_oe(l, v, a) {
 		return
 	}
@@ -4739,10 +5283,22 @@ func zjDecodeOrderedC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *zj
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -4797,6 +5353,7 @@ func zjDecodeOrderedC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *zj
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -4810,6 +5367,10 @@ func zjDecodeOrderedFieldC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, 
 		case 0:
 			v.F = nil
 			a.s0 = false
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_map_struct_oe[k])
+			return false
 		}
 		return true
 	}
@@ -4834,7 +5395,7 @@ func zjDecodeOrderedFieldC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, 
 					zjDecodeInner(l, &mv, &ea)
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				a.m0[mk] = mv
 				if !l.NextMember() {
@@ -4844,7 +5405,16 @@ func zjDecodeOrderedFieldC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, 
 		}
 		v.F = a.m0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_map_struct_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_map_struct_oe are C_map_struct_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesC_map_struct_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_map_struct_oe matches and consumes the literal `"name":` for declared
@@ -4877,8 +5447,8 @@ func zjIsDeclaredKeyC_map_struct_oe(name string) bool {
 }
 
 // zjDecodeFallbackC_map_struct_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *zjArenaC_map_struct_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -4894,6 +5464,10 @@ func zjDecodeFallbackC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *z
 			case "f":
 				v.F = nil
 				a.s0 = false
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -4921,7 +5495,7 @@ func zjDecodeFallbackC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *z
 						zjDecodeInner(l, &mv, &ea)
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					a.m0[mk] = mv
 					if !l.NextMember() {
@@ -4934,6 +5508,7 @@ func zjDecodeFallbackC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *z
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -4978,17 +5553,17 @@ func (v *C_slice_decimal) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_slice_decimal) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_slice_decimal) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -5001,22 +5576,24 @@ func (v *C_slice_decimal) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_slice_decimal can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_slice_decimal) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_slice_decimal{}
+	zjDecodeC_slice_decimal(l, v, a)
+}
+
 // zjDecodeC_slice_decimal tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *zjArenaC_slice_decimal) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_slice_decimal(l, v, a) {
 		return
 	}
@@ -5046,10 +5623,22 @@ func zjDecodeOrderedC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *zj
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -5104,6 +5693,7 @@ func zjDecodeOrderedC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *zj
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -5116,6 +5706,10 @@ func zjDecodeOrderedFieldC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, 
 		switch k {
 		case 0:
 			v.F = nil
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_slice_decimal[k])
+			return false
 		}
 		return true
 	}
@@ -5137,7 +5731,7 @@ func zjDecodeOrderedFieldC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, 
 					testleaf.Read(l, &a.c0[idx])
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				if !l.NextElem() {
 					break
@@ -5149,7 +5743,16 @@ func zjDecodeOrderedFieldC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, 
 		}
 		v.F = a.c0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_slice_decimal[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_slice_decimal are C_slice_decimal's JSON field names by declared index, for error paths.
+var zjFieldNamesC_slice_decimal = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_slice_decimal matches and consumes the literal `"name":` for declared
@@ -5182,8 +5785,8 @@ func zjIsDeclaredKeyC_slice_decimal(name string) bool {
 }
 
 // zjDecodeFallbackC_slice_decimal is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *zjArenaC_slice_decimal) {
 	_ = a
 	if !l.EnterObject() {
@@ -5198,6 +5801,10 @@ func zjDecodeFallbackC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *z
 			switch string(key) {
 			case "f":
 				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -5222,7 +5829,7 @@ func zjDecodeFallbackC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *z
 						testleaf.Read(l, &a.c0[idx])
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					if !l.NextElem() {
 						break
@@ -5237,6 +5844,7 @@ func zjDecodeFallbackC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *z
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -5281,17 +5889,17 @@ func (v *C_slice_decimal_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_slice_decimal_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_slice_decimal_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -5304,22 +5912,24 @@ func (v *C_slice_decimal_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_slice_decimal_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_slice_decimal_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_slice_decimal_oe{}
+	zjDecodeC_slice_decimal_oe(l, v, a)
+}
+
 // zjDecodeC_slice_decimal_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe, a *zjArenaC_slice_decimal_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_slice_decimal_oe(l, v, a) {
 		return
 	}
@@ -5349,10 +5959,22 @@ func zjDecodeOrderedC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe,
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -5407,6 +6029,7 @@ func zjDecodeOrderedC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe,
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -5419,6 +6042,10 @@ func zjDecodeOrderedFieldC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decima
 		switch k {
 		case 0:
 			v.F = nil
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_slice_decimal_oe[k])
+			return false
 		}
 		return true
 	}
@@ -5440,7 +6067,7 @@ func zjDecodeOrderedFieldC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decima
 					testleaf.Read(l, &a.c0[idx])
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				if !l.NextElem() {
 					break
@@ -5452,7 +6079,16 @@ func zjDecodeOrderedFieldC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decima
 		}
 		v.F = a.c0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_slice_decimal_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_slice_decimal_oe are C_slice_decimal_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesC_slice_decimal_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_slice_decimal_oe matches and consumes the literal `"name":` for declared
@@ -5485,8 +6121,8 @@ func zjIsDeclaredKeyC_slice_decimal_oe(name string) bool {
 }
 
 // zjDecodeFallbackC_slice_decimal_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe, a *zjArenaC_slice_decimal_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -5501,6 +6137,10 @@ func zjDecodeFallbackC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe
 			switch string(key) {
 			case "f":
 				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -5525,7 +6165,7 @@ func zjDecodeFallbackC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe
 						testleaf.Read(l, &a.c0[idx])
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					if !l.NextElem() {
 						break
@@ -5540,6 +6180,7 @@ func zjDecodeFallbackC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -5584,17 +6225,17 @@ func (v *C_slice_int) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_slice_int) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_slice_int) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -5607,22 +6248,24 @@ func (v *C_slice_int) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_slice_int can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_slice_int) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_slice_int{}
+	zjDecodeC_slice_int(l, v, a)
+}
+
 // zjDecodeC_slice_int tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_slice_int) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_slice_int(l, v, a) {
 		return
 	}
@@ -5652,10 +6295,22 @@ func zjDecodeOrderedC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_s
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -5710,6 +6365,7 @@ func zjDecodeOrderedC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_s
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -5722,6 +6378,10 @@ func zjDecodeOrderedFieldC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjAre
 		switch k {
 		case 0:
 			v.F = nil
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_slice_int[k])
+			return false
 		}
 		return true
 	}
@@ -5743,7 +6403,7 @@ func zjDecodeOrderedFieldC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjAre
 					a.c0[idx] = int(l.ReadInt())
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				if !l.NextElem() {
 					break
@@ -5755,7 +6415,16 @@ func zjDecodeOrderedFieldC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjAre
 		}
 		v.F = a.c0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_slice_int[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_slice_int are C_slice_int's JSON field names by declared index, for error paths.
+var zjFieldNamesC_slice_int = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_slice_int matches and consumes the literal `"name":` for declared
@@ -5788,8 +6457,8 @@ func zjIsDeclaredKeyC_slice_int(name string) bool {
 }
 
 // zjDecodeFallbackC_slice_int is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_slice_int) {
 	_ = a
 	if !l.EnterObject() {
@@ -5804,6 +6473,10 @@ func zjDecodeFallbackC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_
 			switch string(key) {
 			case "f":
 				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -5828,7 +6501,7 @@ func zjDecodeFallbackC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_
 						a.c0[idx] = int(l.ReadInt())
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					if !l.NextElem() {
 						break
@@ -5843,6 +6516,7 @@ func zjDecodeFallbackC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -5887,17 +6561,17 @@ func (v *C_slice_int_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_slice_int_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_slice_int_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -5910,22 +6584,24 @@ func (v *C_slice_int_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_slice_int_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_slice_int_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_slice_int_oe{}
+	zjDecodeC_slice_int_oe(l, v, a)
+}
+
 // zjDecodeC_slice_int_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjArenaC_slice_int_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_slice_int_oe(l, v, a) {
 		return
 	}
@@ -5955,10 +6631,22 @@ func zjDecodeOrderedC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjAr
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -6013,6 +6701,7 @@ func zjDecodeOrderedC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjAr
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -6025,6 +6714,10 @@ func zjDecodeOrderedFieldC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a 
 		switch k {
 		case 0:
 			v.F = nil
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_slice_int_oe[k])
+			return false
 		}
 		return true
 	}
@@ -6046,7 +6739,7 @@ func zjDecodeOrderedFieldC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a 
 					a.c0[idx] = int(l.ReadInt())
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				if !l.NextElem() {
 					break
@@ -6058,7 +6751,16 @@ func zjDecodeOrderedFieldC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a 
 		}
 		v.F = a.c0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_slice_int_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_slice_int_oe are C_slice_int_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesC_slice_int_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_slice_int_oe matches and consumes the literal `"name":` for declared
@@ -6091,8 +6793,8 @@ func zjIsDeclaredKeyC_slice_int_oe(name string) bool {
 }
 
 // zjDecodeFallbackC_slice_int_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjArenaC_slice_int_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -6107,6 +6809,10 @@ func zjDecodeFallbackC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjA
 			switch string(key) {
 			case "f":
 				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -6131,7 +6837,7 @@ func zjDecodeFallbackC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjA
 						a.c0[idx] = int(l.ReadInt())
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					if !l.NextElem() {
 						break
@@ -6146,6 +6852,7 @@ func zjDecodeFallbackC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjA
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -6198,17 +6905,17 @@ func (v *C_slice_ptrstruct) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_slice_ptrstruct) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_slice_ptrstruct) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -6221,22 +6928,24 @@ func (v *C_slice_ptrstruct) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_slice_ptrstruct can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_slice_ptrstruct) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_slice_ptrstruct{}
+	zjDecodeC_slice_ptrstruct(l, v, a)
+}
+
 // zjDecodeC_slice_ptrstruct tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a *zjArenaC_slice_ptrstruct) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_slice_ptrstruct(l, v, a) {
 		return
 	}
@@ -6266,10 +6975,22 @@ func zjDecodeOrderedC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -6324,6 +7045,7 @@ func zjDecodeOrderedC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -6336,6 +7058,10 @@ func zjDecodeOrderedFieldC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstru
 		switch k {
 		case 0:
 			v.F = nil
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_slice_ptrstruct[k])
+			return false
 		}
 		return true
 	}
@@ -6357,7 +7083,7 @@ func zjDecodeOrderedFieldC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstru
 					a.c0[len(a.c0)-1] = e
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				if !l.NextElem() {
 					break
@@ -6369,7 +7095,16 @@ func zjDecodeOrderedFieldC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstru
 		}
 		v.F = a.c0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_slice_ptrstruct[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_slice_ptrstruct are C_slice_ptrstruct's JSON field names by declared index, for error paths.
+var zjFieldNamesC_slice_ptrstruct = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_slice_ptrstruct matches and consumes the literal `"name":` for declared
@@ -6402,8 +7137,8 @@ func zjIsDeclaredKeyC_slice_ptrstruct(name string) bool {
 }
 
 // zjDecodeFallbackC_slice_ptrstruct is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a *zjArenaC_slice_ptrstruct) {
 	_ = a
 	if !l.EnterObject() {
@@ -6418,6 +7153,10 @@ func zjDecodeFallbackC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, 
 			switch string(key) {
 			case "f":
 				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -6442,7 +7181,7 @@ func zjDecodeFallbackC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, 
 						a.c0[len(a.c0)-1] = e
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					if !l.NextElem() {
 						break
@@ -6457,6 +7196,7 @@ func zjDecodeFallbackC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, 
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -6509,17 +7249,17 @@ func (v *C_slice_ptrstruct_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_slice_ptrstruct_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_slice_ptrstruct_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -6532,22 +7272,24 @@ func (v *C_slice_ptrstruct_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_slice_ptrstruct_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_slice_ptrstruct_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_slice_ptrstruct_oe{}
+	zjDecodeC_slice_ptrstruct_oe(l, v, a)
+}
+
 // zjDecodeC_slice_ptrstruct_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct_oe, a *zjArenaC_slice_ptrstruct_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_slice_ptrstruct_oe(l, v, a) {
 		return
 	}
@@ -6577,10 +7319,22 @@ func zjDecodeOrderedC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -6635,6 +7389,7 @@ func zjDecodeOrderedC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -6647,6 +7402,10 @@ func zjDecodeOrderedFieldC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrs
 		switch k {
 		case 0:
 			v.F = nil
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_slice_ptrstruct_oe[k])
+			return false
 		}
 		return true
 	}
@@ -6668,7 +7427,7 @@ func zjDecodeOrderedFieldC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrs
 					a.c0[len(a.c0)-1] = e
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				if !l.NextElem() {
 					break
@@ -6680,7 +7439,16 @@ func zjDecodeOrderedFieldC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrs
 		}
 		v.F = a.c0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_slice_ptrstruct_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_slice_ptrstruct_oe are C_slice_ptrstruct_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesC_slice_ptrstruct_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_slice_ptrstruct_oe matches and consumes the literal `"name":` for declared
@@ -6713,8 +7481,8 @@ func zjIsDeclaredKeyC_slice_ptrstruct_oe(name string) bool {
 }
 
 // zjDecodeFallbackC_slice_ptrstruct_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct_oe, a *zjArenaC_slice_ptrstruct_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -6729,6 +7497,10 @@ func zjDecodeFallbackC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruc
 			switch string(key) {
 			case "f":
 				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -6753,7 +7525,7 @@ func zjDecodeFallbackC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruc
 						a.c0[len(a.c0)-1] = e
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					if !l.NextElem() {
 						break
@@ -6768,6 +7540,7 @@ func zjDecodeFallbackC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruc
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -6812,17 +7585,17 @@ func (v *C_slice_string) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_slice_string) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_slice_string) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -6835,22 +7608,24 @@ func (v *C_slice_string) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_slice_string can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_slice_string) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_slice_string{}
+	zjDecodeC_slice_string(l, v, a)
+}
+
 // zjDecodeC_slice_string tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjArenaC_slice_string) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_slice_string(l, v, a) {
 		return
 	}
@@ -6880,10 +7655,22 @@ func zjDecodeOrderedC_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjAr
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -6938,6 +7725,7 @@ func zjDecodeOrderedC_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjAr
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -6950,6 +7738,10 @@ func zjDecodeOrderedFieldC_slice_string(l *zerojson.Lexer, v *C_slice_string, a 
 		switch k {
 		case 0:
 			v.F = nil
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_slice_string[k])
+			return false
 		}
 		return true
 	}
@@ -6971,7 +7763,7 @@ func zjDecodeOrderedFieldC_slice_string(l *zerojson.Lexer, v *C_slice_string, a 
 					a.c0[idx] = l.ReadString()
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				if !l.NextElem() {
 					break
@@ -6983,7 +7775,16 @@ func zjDecodeOrderedFieldC_slice_string(l *zerojson.Lexer, v *C_slice_string, a 
 		}
 		v.F = a.c0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_slice_string[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_slice_string are C_slice_string's JSON field names by declared index, for error paths.
+var zjFieldNamesC_slice_string = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_slice_string matches and consumes the literal `"name":` for declared
@@ -7016,8 +7817,8 @@ func zjIsDeclaredKeyC_slice_string(name string) bool {
 }
 
 // zjDecodeFallbackC_slice_string is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjArenaC_slice_string) {
 	_ = a
 	if !l.EnterObject() {
@@ -7032,6 +7833,10 @@ func zjDecodeFallbackC_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjA
 			switch string(key) {
 			case "f":
 				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -7056,7 +7861,7 @@ func zjDecodeFallbackC_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjA
 						a.c0[idx] = l.ReadString()
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					if !l.NextElem() {
 						break
@@ -7071,6 +7876,7 @@ func zjDecodeFallbackC_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjA
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -7115,17 +7921,17 @@ func (v *C_slice_string_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_slice_string_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_slice_string_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -7138,22 +7944,24 @@ func (v *C_slice_string_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_slice_string_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_slice_string_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_slice_string_oe{}
+	zjDecodeC_slice_string_oe(l, v, a)
+}
+
 // zjDecodeC_slice_string_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a *zjArenaC_slice_string_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_slice_string_oe(l, v, a) {
 		return
 	}
@@ -7183,10 +7991,22 @@ func zjDecodeOrderedC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -7241,6 +8061,7 @@ func zjDecodeOrderedC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -7253,6 +8074,10 @@ func zjDecodeOrderedFieldC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_
 		switch k {
 		case 0:
 			v.F = nil
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_slice_string_oe[k])
+			return false
 		}
 		return true
 	}
@@ -7274,7 +8099,7 @@ func zjDecodeOrderedFieldC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_
 					a.c0[idx] = l.ReadString()
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				if !l.NextElem() {
 					break
@@ -7286,7 +8111,16 @@ func zjDecodeOrderedFieldC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_
 		}
 		v.F = a.c0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_slice_string_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_slice_string_oe are C_slice_string_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesC_slice_string_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_slice_string_oe matches and consumes the literal `"name":` for declared
@@ -7319,8 +8153,8 @@ func zjIsDeclaredKeyC_slice_string_oe(name string) bool {
 }
 
 // zjDecodeFallbackC_slice_string_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a *zjArenaC_slice_string_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -7335,6 +8169,10 @@ func zjDecodeFallbackC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, 
 			switch string(key) {
 			case "f":
 				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -7359,7 +8197,7 @@ func zjDecodeFallbackC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, 
 						a.c0[idx] = l.ReadString()
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					if !l.NextElem() {
 						break
@@ -7374,6 +8212,7 @@ func zjDecodeFallbackC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, 
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -7422,17 +8261,17 @@ func (v *C_slice_struct) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_slice_struct) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_slice_struct) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -7445,22 +8284,24 @@ func (v *C_slice_struct) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_slice_struct can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_slice_struct) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_slice_struct{}
+	zjDecodeC_slice_struct(l, v, a)
+}
+
 // zjDecodeC_slice_struct tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjArenaC_slice_struct) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_slice_struct(l, v, a) {
 		return
 	}
@@ -7490,10 +8331,22 @@ func zjDecodeOrderedC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjAr
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -7548,6 +8401,7 @@ func zjDecodeOrderedC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjAr
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -7560,6 +8414,10 @@ func zjDecodeOrderedFieldC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a 
 		switch k {
 		case 0:
 			v.F = nil
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_slice_struct[k])
+			return false
 		}
 		return true
 	}
@@ -7579,7 +8437,7 @@ func zjDecodeOrderedFieldC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a 
 					zjDecodeInner(l, &a.c0[len(a.c0)-1], &ea)
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				if !l.NextElem() {
 					break
@@ -7591,7 +8449,16 @@ func zjDecodeOrderedFieldC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a 
 		}
 		v.F = a.c0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_slice_struct[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_slice_struct are C_slice_struct's JSON field names by declared index, for error paths.
+var zjFieldNamesC_slice_struct = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_slice_struct matches and consumes the literal `"name":` for declared
@@ -7624,8 +8491,8 @@ func zjIsDeclaredKeyC_slice_struct(name string) bool {
 }
 
 // zjDecodeFallbackC_slice_struct is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjArenaC_slice_struct) {
 	_ = a
 	if !l.EnterObject() {
@@ -7640,6 +8507,10 @@ func zjDecodeFallbackC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjA
 			switch string(key) {
 			case "f":
 				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -7662,7 +8533,7 @@ func zjDecodeFallbackC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjA
 						zjDecodeInner(l, &a.c0[len(a.c0)-1], &ea)
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					if !l.NextElem() {
 						break
@@ -7677,6 +8548,7 @@ func zjDecodeFallbackC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjA
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -7725,17 +8597,17 @@ func (v *C_slice_struct_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *C_slice_struct_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *C_slice_struct_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -7748,22 +8620,24 @@ func (v *C_slice_struct_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so C_slice_struct_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *C_slice_struct_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaC_slice_struct_oe{}
+	zjDecodeC_slice_struct_oe(l, v, a)
+}
+
 // zjDecodeC_slice_struct_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, a *zjArenaC_slice_struct_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedC_slice_struct_oe(l, v, a) {
 		return
 	}
@@ -7793,10 +8667,22 @@ func zjDecodeOrderedC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, a
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -7851,6 +8737,7 @@ func zjDecodeOrderedC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, a
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -7863,6 +8750,10 @@ func zjDecodeOrderedFieldC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_
 		switch k {
 		case 0:
 			v.F = nil
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesC_slice_struct_oe[k])
+			return false
 		}
 		return true
 	}
@@ -7882,7 +8773,7 @@ func zjDecodeOrderedFieldC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_
 					zjDecodeInner(l, &a.c0[len(a.c0)-1], &ea)
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				if !l.NextElem() {
 					break
@@ -7894,7 +8785,16 @@ func zjDecodeOrderedFieldC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_
 		}
 		v.F = a.c0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_slice_struct_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_slice_struct_oe are C_slice_struct_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesC_slice_struct_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyC_slice_struct_oe matches and consumes the literal `"name":` for declared
@@ -7927,8 +8827,8 @@ func zjIsDeclaredKeyC_slice_struct_oe(name string) bool {
 }
 
 // zjDecodeFallbackC_slice_struct_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, a *zjArenaC_slice_struct_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -7943,6 +8843,10 @@ func zjDecodeFallbackC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, 
 			switch string(key) {
 			case "f":
 				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -7965,7 +8869,7 @@ func zjDecodeFallbackC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, 
 						zjDecodeInner(l, &a.c0[len(a.c0)-1], &ea)
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					if !l.NextElem() {
 						break
@@ -7980,6 +8884,7 @@ func zjDecodeFallbackC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, 
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -8026,17 +8931,17 @@ func (v *E_embed_first) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *E_embed_first) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *E_embed_first) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -8049,22 +8954,24 @@ func (v *E_embed_first) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so E_embed_first can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *E_embed_first) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaE_embed_first{}
+	zjDecodeE_embed_first(l, v, a)
+}
+
 // zjDecodeE_embed_first tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeE_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjArenaE_embed_first) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedE_embed_first(l, v, a) {
 		return
 	}
@@ -8094,10 +9001,22 @@ func zjDecodeOrderedE_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjAren
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -8152,6 +9071,7 @@ func zjDecodeOrderedE_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjAren
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -8161,6 +9081,10 @@ func zjDecodeOrderedE_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjAren
 
 func zjDecodeOrderedFieldE_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjArenaE_embed_first, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesE_embed_first[k])
+			return false
+		}
 		return true
 	}
 	switch k {
@@ -8171,7 +9095,18 @@ func zjDecodeOrderedFieldE_embed_first(l *zerojson.Lexer, v *E_embed_first, a *z
 	case 2:
 		v.Last = l.ReadString()
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesE_embed_first[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesE_embed_first are E_embed_first's JSON field names by declared index, for error paths.
+var zjFieldNamesE_embed_first = [...]string{
+	"created_by",
+	"version",
+	"last",
 }
 
 // zjTryOrderedKeyE_embed_first matches and consumes the literal `"name":` for declared
@@ -8222,8 +9157,8 @@ func zjIsDeclaredKeyE_embed_first(name string) bool {
 }
 
 // zjDecodeFallbackE_embed_first is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackE_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjArenaE_embed_first) {
 	_ = a
 	if !l.EnterObject() {
@@ -8235,6 +9170,10 @@ func zjDecodeFallbackE_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjAre
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -8251,6 +9190,7 @@ func zjDecodeFallbackE_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjAre
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -8297,17 +9237,17 @@ func (v *E_embed_last) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *E_embed_last) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *E_embed_last) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -8320,22 +9260,24 @@ func (v *E_embed_last) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so E_embed_last can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *E_embed_last) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaE_embed_last{}
+	zjDecodeE_embed_last(l, v, a)
+}
+
 // zjDecodeE_embed_last tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeE_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArenaE_embed_last) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedE_embed_last(l, v, a) {
 		return
 	}
@@ -8365,10 +9307,22 @@ func zjDecodeOrderedE_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArenaE
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -8423,6 +9377,7 @@ func zjDecodeOrderedE_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArenaE
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -8432,6 +9387,10 @@ func zjDecodeOrderedE_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArenaE
 
 func zjDecodeOrderedFieldE_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArenaE_embed_last, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesE_embed_last[k])
+			return false
+		}
 		return true
 	}
 	switch k {
@@ -8442,7 +9401,18 @@ func zjDecodeOrderedFieldE_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjA
 	case 2:
 		v.Audit.Version = int(l.ReadInt())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesE_embed_last[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesE_embed_last are E_embed_last's JSON field names by declared index, for error paths.
+var zjFieldNamesE_embed_last = [...]string{
+	"first",
+	"created_by",
+	"version",
 }
 
 // zjTryOrderedKeyE_embed_last matches and consumes the literal `"name":` for declared
@@ -8493,8 +9463,8 @@ func zjIsDeclaredKeyE_embed_last(name string) bool {
 }
 
 // zjDecodeFallbackE_embed_last is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackE_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArenaE_embed_last) {
 	_ = a
 	if !l.EnterObject() {
@@ -8506,6 +9476,10 @@ func zjDecodeFallbackE_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArena
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -8522,6 +9496,7 @@ func zjDecodeFallbackE_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArena
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -8561,17 +9536,17 @@ func (v *E_embed_unexported) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *E_embed_unexported) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *E_embed_unexported) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -8584,22 +9559,24 @@ func (v *E_embed_unexported) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so E_embed_unexported can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *E_embed_unexported) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaE_embed_unexported{}
+	zjDecodeE_embed_unexported(l, v, a)
+}
+
 // zjDecodeE_embed_unexported tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeE_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported, a *zjArenaE_embed_unexported) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedE_embed_unexported(l, v, a) {
 		return
 	}
@@ -8629,10 +9606,22 @@ func zjDecodeOrderedE_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported,
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -8687,6 +9676,7 @@ func zjDecodeOrderedE_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported,
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -8696,6 +9686,10 @@ func zjDecodeOrderedE_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported,
 
 func zjDecodeOrderedFieldE_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported, a *zjArenaE_embed_unexported, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesE_embed_unexported[k])
+			return false
+		}
 		return true
 	}
 	switch k {
@@ -8704,7 +9698,17 @@ func zjDecodeOrderedFieldE_embed_unexported(l *zerojson.Lexer, v *E_embed_unexpo
 	case 1:
 		v.Own = l.ReadString()
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesE_embed_unexported[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesE_embed_unexported are E_embed_unexported's JSON field names by declared index, for error paths.
+var zjFieldNamesE_embed_unexported = [...]string{
+	"visible",
+	"own",
 }
 
 // zjTryOrderedKeyE_embed_unexported matches and consumes the literal `"name":` for declared
@@ -8746,8 +9750,8 @@ func zjIsDeclaredKeyE_embed_unexported(name string) bool {
 }
 
 // zjDecodeFallbackE_embed_unexported is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackE_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported, a *zjArenaE_embed_unexported) {
 	_ = a
 	if !l.EnterObject() {
@@ -8759,6 +9763,10 @@ func zjDecodeFallbackE_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -8773,6 +9781,7 @@ func zjDecodeFallbackE_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -8809,17 +9818,17 @@ func (v *L_appender) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_appender) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_appender) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -8832,27 +9841,29 @@ func (v *L_appender) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_appender can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_appender) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_appender{}
+	zjDecodeL_appender(l, v, a)
+}
+
 // zjDecodeL_appender tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_appender(l *zerojson.Lexer, v *L_appender, a *zjArenaL_appender) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
 	zjDecodeFallbackL_appender(l, v, a)
 }
 
 // zjDecodeFallbackL_appender is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_appender(l *zerojson.Lexer, v *L_appender, a *zjArenaL_appender) {
 	_ = a
 	if !l.EnterObject() {
@@ -8864,6 +9875,16 @@ func zjDecodeFallbackL_appender(l *zerojson.Lexer, v *L_appender, a *zjArenaL_ap
 			return
 		}
 		if l.IsNull() {
+			switch string(key) {
+			case "f":
+				if err := v.F.UnmarshalJSON(l.NullBytes()); err != nil {
+					l.AddError(err)
+				}
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -8876,6 +9897,7 @@ func zjDecodeFallbackL_appender(l *zerojson.Lexer, v *L_appender, a *zjArenaL_ap
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -8912,17 +9934,17 @@ func (v *L_appender_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_appender_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_appender_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -8935,27 +9957,29 @@ func (v *L_appender_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_appender_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_appender_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_appender_oe{}
+	zjDecodeL_appender_oe(l, v, a)
+}
+
 // zjDecodeL_appender_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_appender_oe(l *zerojson.Lexer, v *L_appender_oe, a *zjArenaL_appender_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
 	zjDecodeFallbackL_appender_oe(l, v, a)
 }
 
 // zjDecodeFallbackL_appender_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_appender_oe(l *zerojson.Lexer, v *L_appender_oe, a *zjArenaL_appender_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -8967,6 +9991,16 @@ func zjDecodeFallbackL_appender_oe(l *zerojson.Lexer, v *L_appender_oe, a *zjAre
 			return
 		}
 		if l.IsNull() {
+			switch string(key) {
+			case "f":
+				if err := v.F.UnmarshalJSON(l.NullBytes()); err != nil {
+					l.AddError(err)
+				}
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -8979,6 +10013,7 @@ func zjDecodeFallbackL_appender_oe(l *zerojson.Lexer, v *L_appender_oe, a *zjAre
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -8993,7 +10028,6 @@ func zjDecodeFallbackL_appender_oe(l *zerojson.Lexer, v *L_appender_oe, a *zjAre
 // cell per slice/map field so repeated decodes reuse their backing
 // storage instead of reallocating it every time.
 type zjArenaL_appender_ptr struct {
-	s0 bool
 	f0 Cents
 }
 
@@ -9021,17 +10055,17 @@ func (v *L_appender_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_appender_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_appender_ptr) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -9044,28 +10078,29 @@ func (v *L_appender_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_appender_ptr can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_appender_ptr) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_appender_ptr{}
+	zjDecodeL_appender_ptr(l, v, a)
+}
+
 // zjDecodeL_appender_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_appender_ptr(l *zerojson.Lexer, v *L_appender_ptr, a *zjArenaL_appender_ptr) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s0 = false
 	zjDecodeFallbackL_appender_ptr(l, v, a)
 }
 
 // zjDecodeFallbackL_appender_ptr is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_appender_ptr(l *zerojson.Lexer, v *L_appender_ptr, a *zjArenaL_appender_ptr) {
 	_ = a
 	if !l.EnterObject() {
@@ -9080,7 +10115,10 @@ func zjDecodeFallbackL_appender_ptr(l *zerojson.Lexer, v *L_appender_ptr, a *zjA
 			switch string(key) {
 			case "f":
 				v.F = nil
-				a.s0 = false
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -9089,21 +10127,17 @@ func zjDecodeFallbackL_appender_ptr(l *zerojson.Lexer, v *L_appender_ptr, a *zjA
 		}
 		switch string(key) {
 		case "f":
-			if !a.s0 {
-				a.s0 = true
-				if v.F != nil {
-					a.f0 = *v.F
-				} else {
-					var zjZero Cents
-					a.f0 = zjZero
-				}
+			if v.F == nil {
+				var zjZero Cents
+				a.f0 = zjZero
+				v.F = &a.f0
 			}
-			v.F = &a.f0
 			v.F.ReadZJSON(l)
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -9131,22 +10165,22 @@ func (v *L_bool) AppendZJSON(dst []byte) ([]byte, error) {
 			dst = append(dst, ',')
 		}
 		dst = append(dst, `"f":`...)
-		dst = zerojson.AppendBool(dst, v.F)
+		dst = zerojson.AppendBool(dst, bool(v.F))
 	}
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_bool) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_bool) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -9159,22 +10193,24 @@ func (v *L_bool) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_bool can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_bool) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_bool{}
+	zjDecodeL_bool(l, v, a)
+}
+
 // zjDecodeL_bool tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_bool(l, v, a) {
 		return
 	}
@@ -9204,10 +10240,22 @@ func zjDecodeOrderedL_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) bool 
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -9262,6 +10310,7 @@ func zjDecodeOrderedL_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) bool 
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -9271,13 +10320,26 @@ func zjDecodeOrderedL_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) bool 
 
 func zjDecodeOrderedFieldL_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_bool[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		v.F = l.ReadBool()
+		v.F = bool(l.ReadBool())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_bool[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_bool are L_bool's JSON field names by declared index, for error paths.
+var zjFieldNamesL_bool = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_bool matches and consumes the literal `"name":` for declared
@@ -9310,8 +10372,8 @@ func zjIsDeclaredKeyL_bool(name string) bool {
 }
 
 // zjDecodeFallbackL_bool is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) {
 	_ = a
 	if !l.EnterObject() {
@@ -9323,6 +10385,10 @@ func zjDecodeFallbackL_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) {
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -9330,11 +10396,12 @@ func zjDecodeFallbackL_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) {
 		}
 		switch string(key) {
 		case "f":
-			v.F = l.ReadBool()
+			v.F = bool(l.ReadBool())
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -9362,22 +10429,22 @@ func (v *L_bool_oe) AppendZJSON(dst []byte) ([]byte, error) {
 			dst = append(dst, ',')
 		}
 		dst = append(dst, `"f":`...)
-		dst = zerojson.AppendBool(dst, v.F)
+		dst = zerojson.AppendBool(dst, bool(v.F))
 	}
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_bool_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_bool_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -9390,22 +10457,24 @@ func (v *L_bool_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_bool_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_bool_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_bool_oe{}
+	zjDecodeL_bool_oe(l, v, a)
+}
+
 // zjDecodeL_bool_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_bool_oe(l, v, a) {
 		return
 	}
@@ -9435,10 +10504,22 @@ func zjDecodeOrderedL_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool_
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -9493,6 +10574,7 @@ func zjDecodeOrderedL_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool_
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -9502,13 +10584,26 @@ func zjDecodeOrderedL_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool_
 
 func zjDecodeOrderedFieldL_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool_oe, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_bool_oe[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		v.F = l.ReadBool()
+		v.F = bool(l.ReadBool())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_bool_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_bool_oe are L_bool_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesL_bool_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_bool_oe matches and consumes the literal `"name":` for declared
@@ -9541,8 +10636,8 @@ func zjIsDeclaredKeyL_bool_oe(name string) bool {
 }
 
 // zjDecodeFallbackL_bool_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -9554,6 +10649,10 @@ func zjDecodeFallbackL_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -9561,11 +10660,12 @@ func zjDecodeFallbackL_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool
 		}
 		switch string(key) {
 		case "f":
-			v.F = l.ReadBool()
+			v.F = bool(l.ReadBool())
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -9597,23 +10697,23 @@ func (v *L_bool_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 		if v.F == nil {
 			dst = append(dst, "null"...)
 		} else {
-			dst = zerojson.AppendBool(dst, *v.F)
+			dst = zerojson.AppendBool(dst, bool(*v.F))
 		}
 	}
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_bool_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_bool_ptr) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -9626,22 +10726,24 @@ func (v *L_bool_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_bool_ptr can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_bool_ptr) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_bool_ptr{}
+	zjDecodeL_bool_ptr(l, v, a)
+}
+
 // zjDecodeL_bool_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bool_ptr) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_bool_ptr(l, v, a) {
 		return
 	}
@@ -9665,16 +10767,32 @@ func zjDecodeL_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bool_ptr) 
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrderedL_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bool_ptr) bool {
 	_ = a
+	// Caller-owned pointers and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -9729,6 +10847,7 @@ func zjDecodeOrderedL_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_boo
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -9742,14 +10861,31 @@ func zjDecodeOrderedFieldL_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArena
 		case 0:
 			v.F = nil
 		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_bool_ptr[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		a.f0 = l.ReadBool()
-		v.F = &a.f0
+		if v.F == nil {
+			a.f0 = bool(l.ReadBool())
+			v.F = &a.f0
+		} else {
+			*v.F = bool(l.ReadBool())
+		}
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_bool_ptr[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_bool_ptr are L_bool_ptr's JSON field names by declared index, for error paths.
+var zjFieldNamesL_bool_ptr = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_bool_ptr matches and consumes the literal `"name":` for declared
@@ -9782,8 +10918,8 @@ func zjIsDeclaredKeyL_bool_ptr(name string) bool {
 }
 
 // zjDecodeFallbackL_bool_ptr is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bool_ptr) {
 	_ = a
 	if !l.EnterObject() {
@@ -9799,6 +10935,10 @@ func zjDecodeFallbackL_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bo
 			case "f":
 				v.F = nil
 			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -9806,12 +10946,17 @@ func zjDecodeFallbackL_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bo
 		}
 		switch string(key) {
 		case "f":
-			a.f0 = l.ReadBool()
-			v.F = &a.f0
+			if v.F == nil {
+				a.f0 = bool(l.ReadBool())
+				v.F = &a.f0
+			} else {
+				*v.F = bool(l.ReadBool())
+			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -9844,17 +10989,17 @@ func (v *L_decimal) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_decimal) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_decimal) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -9867,22 +11012,24 @@ func (v *L_decimal) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_decimal can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_decimal) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_decimal{}
+	zjDecodeL_decimal(l, v, a)
+}
+
 // zjDecodeL_decimal tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_decimal) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_decimal(l, v, a) {
 		return
 	}
@@ -9912,10 +11059,22 @@ func zjDecodeOrderedL_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_decim
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -9970,6 +11129,7 @@ func zjDecodeOrderedL_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_decim
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -9979,13 +11139,26 @@ func zjDecodeOrderedL_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_decim
 
 func zjDecodeOrderedFieldL_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_decimal, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_decimal[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		testleaf.Read(l, &v.F)
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_decimal[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_decimal are L_decimal's JSON field names by declared index, for error paths.
+var zjFieldNamesL_decimal = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_decimal matches and consumes the literal `"name":` for declared
@@ -10018,8 +11191,8 @@ func zjIsDeclaredKeyL_decimal(name string) bool {
 }
 
 // zjDecodeFallbackL_decimal is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_decimal) {
 	_ = a
 	if !l.EnterObject() {
@@ -10031,6 +11204,10 @@ func zjDecodeFallbackL_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_deci
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -10043,6 +11220,7 @@ func zjDecodeFallbackL_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_deci
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -10075,17 +11253,17 @@ func (v *L_decimal_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_decimal_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_decimal_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -10098,22 +11276,24 @@ func (v *L_decimal_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_decimal_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_decimal_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_decimal_oe{}
+	zjDecodeL_decimal_oe(l, v, a)
+}
+
 // zjDecodeL_decimal_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArenaL_decimal_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_decimal_oe(l, v, a) {
 		return
 	}
@@ -10143,10 +11323,22 @@ func zjDecodeOrderedL_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArenaL
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -10201,6 +11393,7 @@ func zjDecodeOrderedL_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArenaL
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -10210,13 +11403,26 @@ func zjDecodeOrderedL_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArenaL
 
 func zjDecodeOrderedFieldL_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArenaL_decimal_oe, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_decimal_oe[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		testleaf.Read(l, &v.F)
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_decimal_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_decimal_oe are L_decimal_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesL_decimal_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_decimal_oe matches and consumes the literal `"name":` for declared
@@ -10249,8 +11455,8 @@ func zjIsDeclaredKeyL_decimal_oe(name string) bool {
 }
 
 // zjDecodeFallbackL_decimal_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArenaL_decimal_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -10262,6 +11468,10 @@ func zjDecodeFallbackL_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArena
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -10274,6 +11484,7 @@ func zjDecodeFallbackL_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArena
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -10311,17 +11522,17 @@ func (v *L_decimal_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_decimal_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_decimal_ptr) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -10334,22 +11545,24 @@ func (v *L_decimal_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_decimal_ptr can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_decimal_ptr) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_decimal_ptr{}
+	zjDecodeL_decimal_ptr(l, v, a)
+}
+
 // zjDecodeL_decimal_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjArenaL_decimal_ptr) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_decimal_ptr(l, v, a) {
 		return
 	}
@@ -10373,16 +11586,32 @@ func zjDecodeL_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjArenaL_deci
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrderedL_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjArenaL_decimal_ptr) bool {
 	_ = a
+	// Caller-owned pointers and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -10437,6 +11666,7 @@ func zjDecodeOrderedL_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjAren
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -10450,14 +11680,31 @@ func zjDecodeOrderedFieldL_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *z
 		case 0:
 			v.F = nil
 		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_decimal_ptr[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		v.F = &a.f0
+		if v.F == nil {
+			var zjZero testleaf.Decimal
+			a.f0 = zjZero
+			v.F = &a.f0
+		}
 		testleaf.Read(l, v.F)
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_decimal_ptr[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_decimal_ptr are L_decimal_ptr's JSON field names by declared index, for error paths.
+var zjFieldNamesL_decimal_ptr = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_decimal_ptr matches and consumes the literal `"name":` for declared
@@ -10490,8 +11737,8 @@ func zjIsDeclaredKeyL_decimal_ptr(name string) bool {
 }
 
 // zjDecodeFallbackL_decimal_ptr is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjArenaL_decimal_ptr) {
 	_ = a
 	if !l.EnterObject() {
@@ -10507,6 +11754,10 @@ func zjDecodeFallbackL_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjAre
 			case "f":
 				v.F = nil
 			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -10514,12 +11765,17 @@ func zjDecodeFallbackL_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjAre
 		}
 		switch string(key) {
 		case "f":
-			v.F = &a.f0
+			if v.F == nil {
+				var zjZero testleaf.Decimal
+				a.f0 = zjZero
+				v.F = &a.f0
+			}
 			testleaf.Read(l, v.F)
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -10552,17 +11808,17 @@ func (v *L_enum) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_enum) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_enum) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -10575,22 +11831,24 @@ func (v *L_enum) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_enum can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_enum) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_enum{}
+	zjDecodeL_enum(l, v, a)
+}
+
 // zjDecodeL_enum tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_enum(l, v, a) {
 		return
 	}
@@ -10620,10 +11878,22 @@ func zjDecodeOrderedL_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) bool 
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -10678,6 +11948,7 @@ func zjDecodeOrderedL_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) bool 
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -10687,6 +11958,10 @@ func zjDecodeOrderedL_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) bool 
 
 func zjDecodeOrderedFieldL_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_enum[k])
+			return false
+		}
 		return true
 	}
 	switch k {
@@ -10698,7 +11973,16 @@ func zjDecodeOrderedFieldL_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum, 
 			v.F = Mode(string(b))
 		}
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_enum[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_enum are L_enum's JSON field names by declared index, for error paths.
+var zjFieldNamesL_enum = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_enum matches and consumes the literal `"name":` for declared
@@ -10731,8 +12015,8 @@ func zjIsDeclaredKeyL_enum(name string) bool {
 }
 
 // zjDecodeFallbackL_enum is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) {
 	_ = a
 	if !l.EnterObject() {
@@ -10744,6 +12028,10 @@ func zjDecodeFallbackL_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) {
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -10761,6 +12049,7 @@ func zjDecodeFallbackL_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) {
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -10793,17 +12082,17 @@ func (v *L_enum_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_enum_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_enum_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -10816,22 +12105,24 @@ func (v *L_enum_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_enum_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_enum_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_enum_oe{}
+	zjDecodeL_enum_oe(l, v, a)
+}
+
 // zjDecodeL_enum_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_enum_oe(l, v, a) {
 		return
 	}
@@ -10861,10 +12152,22 @@ func zjDecodeOrderedL_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum_
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -10919,6 +12222,7 @@ func zjDecodeOrderedL_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum_
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -10928,6 +12232,10 @@ func zjDecodeOrderedL_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum_
 
 func zjDecodeOrderedFieldL_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum_oe, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_enum_oe[k])
+			return false
+		}
 		return true
 	}
 	switch k {
@@ -10939,7 +12247,16 @@ func zjDecodeOrderedFieldL_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_
 			v.F = Mode(string(b))
 		}
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_enum_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_enum_oe are L_enum_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesL_enum_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_enum_oe matches and consumes the literal `"name":` for declared
@@ -10972,8 +12289,8 @@ func zjIsDeclaredKeyL_enum_oe(name string) bool {
 }
 
 // zjDecodeFallbackL_enum_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -10985,6 +12302,10 @@ func zjDecodeFallbackL_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -11002,6 +12323,7 @@ func zjDecodeFallbackL_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -11039,17 +12361,17 @@ func (v *L_enum_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_enum_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_enum_ptr) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -11062,22 +12384,24 @@ func (v *L_enum_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_enum_ptr can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_enum_ptr) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_enum_ptr{}
+	zjDecodeL_enum_ptr(l, v, a)
+}
+
 // zjDecodeL_enum_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_enum_ptr) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_enum_ptr(l, v, a) {
 		return
 	}
@@ -11101,16 +12425,32 @@ func zjDecodeL_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_enum_ptr) 
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrderedL_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_enum_ptr) bool {
 	_ = a
+	// Caller-owned pointers and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -11165,6 +12505,7 @@ func zjDecodeOrderedL_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_enu
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -11178,19 +12519,36 @@ func zjDecodeOrderedFieldL_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArena
 		case 0:
 			v.F = nil
 		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_enum_ptr[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
+		if v.F == nil {
+			var zjZero Mode
+			a.f0 = zjZero
+			v.F = &a.f0
+		}
 		switch b := l.ReadEnumBytes(); string(b) {
 		case "up":
-			a.f0 = ModeUp
+			*v.F = ModeUp
 		default:
-			a.f0 = Mode(string(b))
+			*v.F = Mode(string(b))
 		}
-		v.F = &a.f0
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_enum_ptr[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_enum_ptr are L_enum_ptr's JSON field names by declared index, for error paths.
+var zjFieldNamesL_enum_ptr = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_enum_ptr matches and consumes the literal `"name":` for declared
@@ -11223,8 +12581,8 @@ func zjIsDeclaredKeyL_enum_ptr(name string) bool {
 }
 
 // zjDecodeFallbackL_enum_ptr is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_enum_ptr) {
 	_ = a
 	if !l.EnterObject() {
@@ -11240,6 +12598,10 @@ func zjDecodeFallbackL_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_en
 			case "f":
 				v.F = nil
 			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -11247,17 +12609,22 @@ func zjDecodeFallbackL_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_en
 		}
 		switch string(key) {
 		case "f":
+			if v.F == nil {
+				var zjZero Mode
+				a.f0 = zjZero
+				v.F = &a.f0
+			}
 			switch b := l.ReadEnumBytes(); string(b) {
 			case "up":
-				a.f0 = ModeUp
+				*v.F = ModeUp
 			default:
-				a.f0 = Mode(string(b))
+				*v.F = Mode(string(b))
 			}
-			v.F = &a.f0
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -11294,17 +12661,17 @@ func (v *L_float32) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_float32) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_float32) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -11317,22 +12684,24 @@ func (v *L_float32) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_float32 can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_float32) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_float32{}
+	zjDecodeL_float32(l, v, a)
+}
+
 // zjDecodeL_float32 tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_float32) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_float32(l, v, a) {
 		return
 	}
@@ -11362,10 +12731,22 @@ func zjDecodeOrderedL_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_float
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -11420,6 +12801,7 @@ func zjDecodeOrderedL_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_float
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -11429,13 +12811,26 @@ func zjDecodeOrderedL_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_float
 
 func zjDecodeOrderedFieldL_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_float32, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_float32[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		v.F = float32(l.ReadFloat64())
+		v.F = float32(l.ReadFloat32())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_float32[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_float32 are L_float32's JSON field names by declared index, for error paths.
+var zjFieldNamesL_float32 = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_float32 matches and consumes the literal `"name":` for declared
@@ -11468,8 +12863,8 @@ func zjIsDeclaredKeyL_float32(name string) bool {
 }
 
 // zjDecodeFallbackL_float32 is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_float32) {
 	_ = a
 	if !l.EnterObject() {
@@ -11481,6 +12876,10 @@ func zjDecodeFallbackL_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_floa
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -11488,11 +12887,12 @@ func zjDecodeFallbackL_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_floa
 		}
 		switch string(key) {
 		case "f":
-			v.F = float32(l.ReadFloat64())
+			v.F = float32(l.ReadFloat32())
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -11529,17 +12929,17 @@ func (v *L_float32_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_float32_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_float32_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -11552,22 +12952,24 @@ func (v *L_float32_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_float32_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_float32_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_float32_oe{}
+	zjDecodeL_float32_oe(l, v, a)
+}
+
 // zjDecodeL_float32_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArenaL_float32_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_float32_oe(l, v, a) {
 		return
 	}
@@ -11597,10 +12999,22 @@ func zjDecodeOrderedL_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArenaL
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -11655,6 +13069,7 @@ func zjDecodeOrderedL_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArenaL
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -11664,13 +13079,26 @@ func zjDecodeOrderedL_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArenaL
 
 func zjDecodeOrderedFieldL_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArenaL_float32_oe, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_float32_oe[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		v.F = float32(l.ReadFloat64())
+		v.F = float32(l.ReadFloat32())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_float32_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_float32_oe are L_float32_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesL_float32_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_float32_oe matches and consumes the literal `"name":` for declared
@@ -11703,8 +13131,8 @@ func zjIsDeclaredKeyL_float32_oe(name string) bool {
 }
 
 // zjDecodeFallbackL_float32_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArenaL_float32_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -11716,6 +13144,10 @@ func zjDecodeFallbackL_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArena
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -11723,11 +13155,12 @@ func zjDecodeFallbackL_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArena
 		}
 		switch string(key) {
 		case "f":
-			v.F = float32(l.ReadFloat64())
+			v.F = float32(l.ReadFloat32())
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -11769,17 +13202,17 @@ func (v *L_float32_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_float32_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_float32_ptr) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -11792,22 +13225,24 @@ func (v *L_float32_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_float32_ptr can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_float32_ptr) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_float32_ptr{}
+	zjDecodeL_float32_ptr(l, v, a)
+}
+
 // zjDecodeL_float32_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjArenaL_float32_ptr) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_float32_ptr(l, v, a) {
 		return
 	}
@@ -11831,16 +13266,32 @@ func zjDecodeL_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjArenaL_floa
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrderedL_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjArenaL_float32_ptr) bool {
 	_ = a
+	// Caller-owned pointers and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -11895,6 +13346,7 @@ func zjDecodeOrderedL_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjAren
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -11908,14 +13360,31 @@ func zjDecodeOrderedFieldL_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *z
 		case 0:
 			v.F = nil
 		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_float32_ptr[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		a.f0 = float32(l.ReadFloat64())
-		v.F = &a.f0
+		if v.F == nil {
+			a.f0 = float32(l.ReadFloat32())
+			v.F = &a.f0
+		} else {
+			*v.F = float32(l.ReadFloat32())
+		}
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_float32_ptr[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_float32_ptr are L_float32_ptr's JSON field names by declared index, for error paths.
+var zjFieldNamesL_float32_ptr = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_float32_ptr matches and consumes the literal `"name":` for declared
@@ -11948,8 +13417,8 @@ func zjIsDeclaredKeyL_float32_ptr(name string) bool {
 }
 
 // zjDecodeFallbackL_float32_ptr is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjArenaL_float32_ptr) {
 	_ = a
 	if !l.EnterObject() {
@@ -11965,6 +13434,10 @@ func zjDecodeFallbackL_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjAre
 			case "f":
 				v.F = nil
 			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -11972,12 +13445,17 @@ func zjDecodeFallbackL_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjAre
 		}
 		switch string(key) {
 		case "f":
-			a.f0 = float32(l.ReadFloat64())
-			v.F = &a.f0
+			if v.F == nil {
+				a.f0 = float32(l.ReadFloat32())
+				v.F = &a.f0
+			} else {
+				*v.F = float32(l.ReadFloat32())
+			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -12014,17 +13492,17 @@ func (v *L_float64) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_float64) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_float64) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -12037,22 +13515,24 @@ func (v *L_float64) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_float64 can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_float64) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_float64{}
+	zjDecodeL_float64(l, v, a)
+}
+
 // zjDecodeL_float64 tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_float64) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_float64(l, v, a) {
 		return
 	}
@@ -12082,10 +13562,22 @@ func zjDecodeOrderedL_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_float
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -12140,6 +13632,7 @@ func zjDecodeOrderedL_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_float
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -12149,13 +13642,26 @@ func zjDecodeOrderedL_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_float
 
 func zjDecodeOrderedFieldL_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_float64, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_float64[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		v.F = float64(l.ReadFloat64())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_float64[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_float64 are L_float64's JSON field names by declared index, for error paths.
+var zjFieldNamesL_float64 = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_float64 matches and consumes the literal `"name":` for declared
@@ -12188,8 +13694,8 @@ func zjIsDeclaredKeyL_float64(name string) bool {
 }
 
 // zjDecodeFallbackL_float64 is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_float64) {
 	_ = a
 	if !l.EnterObject() {
@@ -12201,6 +13707,10 @@ func zjDecodeFallbackL_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_floa
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -12213,6 +13723,7 @@ func zjDecodeFallbackL_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_floa
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -12249,17 +13760,17 @@ func (v *L_float64_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_float64_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_float64_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -12272,22 +13783,24 @@ func (v *L_float64_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_float64_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_float64_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_float64_oe{}
+	zjDecodeL_float64_oe(l, v, a)
+}
+
 // zjDecodeL_float64_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArenaL_float64_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_float64_oe(l, v, a) {
 		return
 	}
@@ -12317,10 +13830,22 @@ func zjDecodeOrderedL_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArenaL
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -12375,6 +13900,7 @@ func zjDecodeOrderedL_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArenaL
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -12384,13 +13910,26 @@ func zjDecodeOrderedL_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArenaL
 
 func zjDecodeOrderedFieldL_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArenaL_float64_oe, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_float64_oe[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		v.F = float64(l.ReadFloat64())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_float64_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_float64_oe are L_float64_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesL_float64_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_float64_oe matches and consumes the literal `"name":` for declared
@@ -12423,8 +13962,8 @@ func zjIsDeclaredKeyL_float64_oe(name string) bool {
 }
 
 // zjDecodeFallbackL_float64_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArenaL_float64_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -12436,6 +13975,10 @@ func zjDecodeFallbackL_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArena
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -12448,6 +13991,7 @@ func zjDecodeFallbackL_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArena
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -12489,17 +14033,17 @@ func (v *L_float64_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_float64_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_float64_ptr) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -12512,22 +14056,24 @@ func (v *L_float64_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_float64_ptr can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_float64_ptr) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_float64_ptr{}
+	zjDecodeL_float64_ptr(l, v, a)
+}
+
 // zjDecodeL_float64_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjArenaL_float64_ptr) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_float64_ptr(l, v, a) {
 		return
 	}
@@ -12551,16 +14097,32 @@ func zjDecodeL_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjArenaL_floa
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrderedL_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjArenaL_float64_ptr) bool {
 	_ = a
+	// Caller-owned pointers and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -12615,6 +14177,7 @@ func zjDecodeOrderedL_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjAren
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -12628,14 +14191,31 @@ func zjDecodeOrderedFieldL_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *z
 		case 0:
 			v.F = nil
 		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_float64_ptr[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		a.f0 = float64(l.ReadFloat64())
-		v.F = &a.f0
+		if v.F == nil {
+			a.f0 = float64(l.ReadFloat64())
+			v.F = &a.f0
+		} else {
+			*v.F = float64(l.ReadFloat64())
+		}
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_float64_ptr[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_float64_ptr are L_float64_ptr's JSON field names by declared index, for error paths.
+var zjFieldNamesL_float64_ptr = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_float64_ptr matches and consumes the literal `"name":` for declared
@@ -12668,8 +14248,8 @@ func zjIsDeclaredKeyL_float64_ptr(name string) bool {
 }
 
 // zjDecodeFallbackL_float64_ptr is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjArenaL_float64_ptr) {
 	_ = a
 	if !l.EnterObject() {
@@ -12685,6 +14265,10 @@ func zjDecodeFallbackL_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjAre
 			case "f":
 				v.F = nil
 			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -12692,12 +14276,17 @@ func zjDecodeFallbackL_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjAre
 		}
 		switch string(key) {
 		case "f":
-			a.f0 = float64(l.ReadFloat64())
-			v.F = &a.f0
+			if v.F == nil {
+				a.f0 = float64(l.ReadFloat64())
+				v.F = &a.f0
+			} else {
+				*v.F = float64(l.ReadFloat64())
+			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -12730,17 +14319,17 @@ func (v *L_int) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_int) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_int) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -12753,22 +14342,24 @@ func (v *L_int) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_int can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_int) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_int{}
+	zjDecodeL_int(l, v, a)
+}
+
 // zjDecodeL_int tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_int(l, v, a) {
 		return
 	}
@@ -12798,10 +14389,22 @@ func zjDecodeOrderedL_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) bool {
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -12856,6 +14459,7 @@ func zjDecodeOrderedL_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) bool {
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -12865,13 +14469,26 @@ func zjDecodeOrderedL_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) bool {
 
 func zjDecodeOrderedFieldL_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_int[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		v.F = int(l.ReadInt())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_int[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_int are L_int's JSON field names by declared index, for error paths.
+var zjFieldNamesL_int = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_int matches and consumes the literal `"name":` for declared
@@ -12904,8 +14521,8 @@ func zjIsDeclaredKeyL_int(name string) bool {
 }
 
 // zjDecodeFallbackL_int is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) {
 	_ = a
 	if !l.EnterObject() {
@@ -12917,6 +14534,10 @@ func zjDecodeFallbackL_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) {
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -12929,6 +14550,7 @@ func zjDecodeFallbackL_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) {
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -12961,17 +14583,17 @@ func (v *L_int32) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_int32) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_int32) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -12984,22 +14606,24 @@ func (v *L_int32) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_int32 can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_int32) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_int32{}
+	zjDecodeL_int32(l, v, a)
+}
+
 // zjDecodeL_int32 tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_int32(l, v, a) {
 		return
 	}
@@ -13029,10 +14653,22 @@ func zjDecodeOrderedL_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) bo
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -13087,6 +14723,7 @@ func zjDecodeOrderedL_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) bo
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -13096,13 +14733,26 @@ func zjDecodeOrderedL_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) bo
 
 func zjDecodeOrderedFieldL_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_int32[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		v.F = int32(l.ReadInt32())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_int32[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_int32 are L_int32's JSON field names by declared index, for error paths.
+var zjFieldNamesL_int32 = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_int32 matches and consumes the literal `"name":` for declared
@@ -13135,8 +14785,8 @@ func zjIsDeclaredKeyL_int32(name string) bool {
 }
 
 // zjDecodeFallbackL_int32 is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) {
 	_ = a
 	if !l.EnterObject() {
@@ -13148,6 +14798,10 @@ func zjDecodeFallbackL_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) {
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -13160,6 +14814,7 @@ func zjDecodeFallbackL_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) {
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -13192,17 +14847,17 @@ func (v *L_int32_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_int32_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_int32_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -13215,22 +14870,24 @@ func (v *L_int32_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_int32_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_int32_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_int32_oe{}
+	zjDecodeL_int32_oe(l, v, a)
+}
+
 // zjDecodeL_int32_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_int32_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_int32_oe(l, v, a) {
 		return
 	}
@@ -13260,10 +14917,22 @@ func zjDecodeOrderedL_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_int
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -13318,6 +14987,7 @@ func zjDecodeOrderedL_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_int
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -13327,13 +14997,26 @@ func zjDecodeOrderedL_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_int
 
 func zjDecodeOrderedFieldL_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_int32_oe, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_int32_oe[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		v.F = int32(l.ReadInt32())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_int32_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_int32_oe are L_int32_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesL_int32_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_int32_oe matches and consumes the literal `"name":` for declared
@@ -13366,8 +15049,8 @@ func zjIsDeclaredKeyL_int32_oe(name string) bool {
 }
 
 // zjDecodeFallbackL_int32_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_int32_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -13379,6 +15062,10 @@ func zjDecodeFallbackL_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_in
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -13391,6 +15078,7 @@ func zjDecodeFallbackL_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_in
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -13428,17 +15116,17 @@ func (v *L_int32_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_int32_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_int32_ptr) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -13451,22 +15139,24 @@ func (v *L_int32_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_int32_ptr can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_int32_ptr) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_int32_ptr{}
+	zjDecodeL_int32_ptr(l, v, a)
+}
+
 // zjDecodeL_int32_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_int32_ptr) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_int32_ptr(l, v, a) {
 		return
 	}
@@ -13490,16 +15180,32 @@ func zjDecodeL_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_int32_pt
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrderedL_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_int32_ptr) bool {
 	_ = a
+	// Caller-owned pointers and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -13554,6 +15260,7 @@ func zjDecodeOrderedL_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_i
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -13567,14 +15274,31 @@ func zjDecodeOrderedFieldL_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjAre
 		case 0:
 			v.F = nil
 		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_int32_ptr[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		a.f0 = int32(l.ReadInt32())
-		v.F = &a.f0
+		if v.F == nil {
+			a.f0 = int32(l.ReadInt32())
+			v.F = &a.f0
+		} else {
+			*v.F = int32(l.ReadInt32())
+		}
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_int32_ptr[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_int32_ptr are L_int32_ptr's JSON field names by declared index, for error paths.
+var zjFieldNamesL_int32_ptr = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_int32_ptr matches and consumes the literal `"name":` for declared
@@ -13607,8 +15331,8 @@ func zjIsDeclaredKeyL_int32_ptr(name string) bool {
 }
 
 // zjDecodeFallbackL_int32_ptr is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_int32_ptr) {
 	_ = a
 	if !l.EnterObject() {
@@ -13624,6 +15348,10 @@ func zjDecodeFallbackL_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_
 			case "f":
 				v.F = nil
 			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -13631,12 +15359,17 @@ func zjDecodeFallbackL_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_
 		}
 		switch string(key) {
 		case "f":
-			a.f0 = int32(l.ReadInt32())
-			v.F = &a.f0
+			if v.F == nil {
+				a.f0 = int32(l.ReadInt32())
+				v.F = &a.f0
+			} else {
+				*v.F = int32(l.ReadInt32())
+			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -13669,17 +15402,17 @@ func (v *L_int_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_int_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_int_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -13692,22 +15425,24 @@ func (v *L_int_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_int_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_int_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_int_oe{}
+	zjDecodeL_int_oe(l, v, a)
+}
+
 // zjDecodeL_int_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_int_oe(l, v, a) {
 		return
 	}
@@ -13737,10 +15472,22 @@ func zjDecodeOrderedL_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe)
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -13795,6 +15542,7 @@ func zjDecodeOrderedL_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe)
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -13804,13 +15552,26 @@ func zjDecodeOrderedL_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe)
 
 func zjDecodeOrderedFieldL_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_int_oe[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		v.F = int(l.ReadInt())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_int_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_int_oe are L_int_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesL_int_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_int_oe matches and consumes the literal `"name":` for declared
@@ -13843,8 +15604,8 @@ func zjIsDeclaredKeyL_int_oe(name string) bool {
 }
 
 // zjDecodeFallbackL_int_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -13856,6 +15617,10 @@ func zjDecodeFallbackL_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -13868,6 +15633,7 @@ func zjDecodeFallbackL_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -13905,17 +15671,17 @@ func (v *L_int_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_int_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_int_ptr) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -13928,22 +15694,24 @@ func (v *L_int_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_int_ptr can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_int_ptr) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_int_ptr{}
+	zjDecodeL_int_ptr(l, v, a)
+}
+
 // zjDecodeL_int_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_ptr) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_int_ptr(l, v, a) {
 		return
 	}
@@ -13967,16 +15735,32 @@ func zjDecodeL_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_ptr) {
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrderedL_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_ptr) bool {
 	_ = a
+	// Caller-owned pointers and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -14031,6 +15815,7 @@ func zjDecodeOrderedL_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_p
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -14044,14 +15829,31 @@ func zjDecodeOrderedFieldL_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_
 		case 0:
 			v.F = nil
 		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_int_ptr[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		a.f0 = int(l.ReadInt())
-		v.F = &a.f0
+		if v.F == nil {
+			a.f0 = int(l.ReadInt())
+			v.F = &a.f0
+		} else {
+			*v.F = int(l.ReadInt())
+		}
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_int_ptr[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_int_ptr are L_int_ptr's JSON field names by declared index, for error paths.
+var zjFieldNamesL_int_ptr = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_int_ptr matches and consumes the literal `"name":` for declared
@@ -14084,8 +15886,8 @@ func zjIsDeclaredKeyL_int_ptr(name string) bool {
 }
 
 // zjDecodeFallbackL_int_ptr is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_ptr) {
 	_ = a
 	if !l.EnterObject() {
@@ -14101,6 +15903,10 @@ func zjDecodeFallbackL_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_
 			case "f":
 				v.F = nil
 			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -14108,12 +15914,17 @@ func zjDecodeFallbackL_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_
 		}
 		switch string(key) {
 		case "f":
-			a.f0 = int(l.ReadInt())
-			v.F = &a.f0
+			if v.F == nil {
+				a.f0 = int(l.ReadInt())
+				v.F = &a.f0
+			} else {
+				*v.F = int(l.ReadInt())
+			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -14153,17 +15964,17 @@ func (v *L_marshaler) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_marshaler) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_marshaler) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -14176,27 +15987,29 @@ func (v *L_marshaler) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_marshaler can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_marshaler) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_marshaler{}
+	zjDecodeL_marshaler(l, v, a)
+}
+
 // zjDecodeL_marshaler tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_marshaler(l *zerojson.Lexer, v *L_marshaler, a *zjArenaL_marshaler) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
 	zjDecodeFallbackL_marshaler(l, v, a)
 }
 
 // zjDecodeFallbackL_marshaler is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_marshaler(l *zerojson.Lexer, v *L_marshaler, a *zjArenaL_marshaler) {
 	_ = a
 	if !l.EnterObject() {
@@ -14210,7 +16023,13 @@ func zjDecodeFallbackL_marshaler(l *zerojson.Lexer, v *L_marshaler, a *zjArenaL_
 		if l.IsNull() {
 			switch string(key) {
 			case "f":
-				v.F = nil
+				if err := v.F.UnmarshalJSON(l.NullBytes()); err != nil {
+					l.AddError(err)
+				}
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -14219,13 +16038,16 @@ func zjDecodeFallbackL_marshaler(l *zerojson.Lexer, v *L_marshaler, a *zjArenaL_
 		}
 		switch string(key) {
 		case "f":
-			if err := v.F.UnmarshalJSON(l.RawValue()); err != nil {
-				l.AddError(err)
+			if raw := l.RawValue(); l.Err() == nil {
+				if err := v.F.UnmarshalJSON(raw); err != nil {
+					l.AddError(err)
+				}
 			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -14265,17 +16087,17 @@ func (v *L_marshaler_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_marshaler_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_marshaler_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -14288,27 +16110,29 @@ func (v *L_marshaler_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_marshaler_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_marshaler_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_marshaler_oe{}
+	zjDecodeL_marshaler_oe(l, v, a)
+}
+
 // zjDecodeL_marshaler_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_marshaler_oe(l *zerojson.Lexer, v *L_marshaler_oe, a *zjArenaL_marshaler_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
 	zjDecodeFallbackL_marshaler_oe(l, v, a)
 }
 
 // zjDecodeFallbackL_marshaler_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_marshaler_oe(l *zerojson.Lexer, v *L_marshaler_oe, a *zjArenaL_marshaler_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -14322,7 +16146,13 @@ func zjDecodeFallbackL_marshaler_oe(l *zerojson.Lexer, v *L_marshaler_oe, a *zjA
 		if l.IsNull() {
 			switch string(key) {
 			case "f":
-				v.F = nil
+				if err := v.F.UnmarshalJSON(l.NullBytes()); err != nil {
+					l.AddError(err)
+				}
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -14331,13 +16161,16 @@ func zjDecodeFallbackL_marshaler_oe(l *zerojson.Lexer, v *L_marshaler_oe, a *zjA
 		}
 		switch string(key) {
 		case "f":
-			if err := v.F.UnmarshalJSON(l.RawValue()); err != nil {
-				l.AddError(err)
+			if raw := l.RawValue(); l.Err() == nil {
+				if err := v.F.UnmarshalJSON(raw); err != nil {
+					l.AddError(err)
+				}
 			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -14352,7 +16185,6 @@ func zjDecodeFallbackL_marshaler_oe(l *zerojson.Lexer, v *L_marshaler_oe, a *zjA
 // cell per slice/map field so repeated decodes reuse their backing
 // storage instead of reallocating it every time.
 type zjArenaL_marshaler_ptr struct {
-	s0 bool
 	f0 Tags
 }
 
@@ -14383,17 +16215,17 @@ func (v *L_marshaler_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_marshaler_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_marshaler_ptr) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -14406,28 +16238,29 @@ func (v *L_marshaler_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_marshaler_ptr can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_marshaler_ptr) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_marshaler_ptr{}
+	zjDecodeL_marshaler_ptr(l, v, a)
+}
+
 // zjDecodeL_marshaler_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_marshaler_ptr(l *zerojson.Lexer, v *L_marshaler_ptr, a *zjArenaL_marshaler_ptr) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s0 = false
 	zjDecodeFallbackL_marshaler_ptr(l, v, a)
 }
 
 // zjDecodeFallbackL_marshaler_ptr is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_marshaler_ptr(l *zerojson.Lexer, v *L_marshaler_ptr, a *zjArenaL_marshaler_ptr) {
 	_ = a
 	if !l.EnterObject() {
@@ -14442,7 +16275,10 @@ func zjDecodeFallbackL_marshaler_ptr(l *zerojson.Lexer, v *L_marshaler_ptr, a *z
 			switch string(key) {
 			case "f":
 				v.F = nil
-				a.s0 = false
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -14451,23 +16287,21 @@ func zjDecodeFallbackL_marshaler_ptr(l *zerojson.Lexer, v *L_marshaler_ptr, a *z
 		}
 		switch string(key) {
 		case "f":
-			if !a.s0 {
-				a.s0 = true
-				if v.F != nil {
-					a.f0 = *v.F
-				} else {
-					var zjZero Tags
-					a.f0 = zjZero
-				}
+			if v.F == nil {
+				var zjZero Tags
+				a.f0 = zjZero
+				v.F = &a.f0
 			}
-			v.F = &a.f0
-			if err := v.F.UnmarshalJSON(l.RawValue()); err != nil {
-				l.AddError(err)
+			if raw := l.RawValue(); l.Err() == nil {
+				if err := v.F.UnmarshalJSON(raw); err != nil {
+					l.AddError(err)
+				}
 			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -14500,17 +16334,17 @@ func (v *L_quotedint) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_quotedint) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_quotedint) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -14523,22 +16357,24 @@ func (v *L_quotedint) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_quotedint can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_quotedint) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_quotedint{}
+	zjDecodeL_quotedint(l, v, a)
+}
+
 // zjDecodeL_quotedint tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_quotedint) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_quotedint(l, v, a) {
 		return
 	}
@@ -14568,10 +16404,22 @@ func zjDecodeOrderedL_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_q
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -14626,6 +16474,7 @@ func zjDecodeOrderedL_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_q
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -14635,13 +16484,26 @@ func zjDecodeOrderedL_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_q
 
 func zjDecodeOrderedFieldL_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_quotedint, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_quotedint[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		v.F = StrInt64(l.ReadInt64())
+		v.F = StrInt64(l.ReadQuotedOrBareInt64())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_quotedint[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_quotedint are L_quotedint's JSON field names by declared index, for error paths.
+var zjFieldNamesL_quotedint = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_quotedint matches and consumes the literal `"name":` for declared
@@ -14674,8 +16536,8 @@ func zjIsDeclaredKeyL_quotedint(name string) bool {
 }
 
 // zjDecodeFallbackL_quotedint is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_quotedint) {
 	_ = a
 	if !l.EnterObject() {
@@ -14687,6 +16549,10 @@ func zjDecodeFallbackL_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -14694,11 +16560,12 @@ func zjDecodeFallbackL_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_
 		}
 		switch string(key) {
 		case "f":
-			v.F = StrInt64(l.ReadInt64())
+			v.F = StrInt64(l.ReadQuotedOrBareInt64())
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -14731,17 +16598,17 @@ func (v *L_quotedint_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_quotedint_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_quotedint_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -14754,22 +16621,24 @@ func (v *L_quotedint_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_quotedint_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_quotedint_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_quotedint_oe{}
+	zjDecodeL_quotedint_oe(l, v, a)
+}
+
 // zjDecodeL_quotedint_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjArenaL_quotedint_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_quotedint_oe(l, v, a) {
 		return
 	}
@@ -14799,10 +16668,22 @@ func zjDecodeOrderedL_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjAr
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -14857,6 +16738,7 @@ func zjDecodeOrderedL_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjAr
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -14866,13 +16748,26 @@ func zjDecodeOrderedL_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjAr
 
 func zjDecodeOrderedFieldL_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjArenaL_quotedint_oe, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_quotedint_oe[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		v.F = StrInt64(l.ReadInt64())
+		v.F = StrInt64(l.ReadQuotedOrBareInt64())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_quotedint_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_quotedint_oe are L_quotedint_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesL_quotedint_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_quotedint_oe matches and consumes the literal `"name":` for declared
@@ -14905,8 +16800,8 @@ func zjIsDeclaredKeyL_quotedint_oe(name string) bool {
 }
 
 // zjDecodeFallbackL_quotedint_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjArenaL_quotedint_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -14918,6 +16813,10 @@ func zjDecodeFallbackL_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjA
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -14925,11 +16824,12 @@ func zjDecodeFallbackL_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjA
 		}
 		switch string(key) {
 		case "f":
-			v.F = StrInt64(l.ReadInt64())
+			v.F = StrInt64(l.ReadQuotedOrBareInt64())
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -14967,17 +16867,17 @@ func (v *L_quotedint_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_quotedint_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_quotedint_ptr) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -14990,22 +16890,24 @@ func (v *L_quotedint_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_quotedint_ptr can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_quotedint_ptr) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_quotedint_ptr{}
+	zjDecodeL_quotedint_ptr(l, v, a)
+}
+
 // zjDecodeL_quotedint_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *zjArenaL_quotedint_ptr) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_quotedint_ptr(l, v, a) {
 		return
 	}
@@ -15029,16 +16931,32 @@ func zjDecodeL_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *zjArenaL_
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrderedL_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *zjArenaL_quotedint_ptr) bool {
 	_ = a
+	// Caller-owned pointers and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -15093,6 +17011,7 @@ func zjDecodeOrderedL_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *zj
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -15106,14 +17025,31 @@ func zjDecodeOrderedFieldL_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, 
 		case 0:
 			v.F = nil
 		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_quotedint_ptr[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		a.f0 = StrInt64(l.ReadInt64())
-		v.F = &a.f0
+		if v.F == nil {
+			a.f0 = StrInt64(l.ReadQuotedOrBareInt64())
+			v.F = &a.f0
+		} else {
+			*v.F = StrInt64(l.ReadQuotedOrBareInt64())
+		}
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_quotedint_ptr[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_quotedint_ptr are L_quotedint_ptr's JSON field names by declared index, for error paths.
+var zjFieldNamesL_quotedint_ptr = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_quotedint_ptr matches and consumes the literal `"name":` for declared
@@ -15146,8 +17082,8 @@ func zjIsDeclaredKeyL_quotedint_ptr(name string) bool {
 }
 
 // zjDecodeFallbackL_quotedint_ptr is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *zjArenaL_quotedint_ptr) {
 	_ = a
 	if !l.EnterObject() {
@@ -15163,6 +17099,10 @@ func zjDecodeFallbackL_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *z
 			case "f":
 				v.F = nil
 			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -15170,12 +17110,17 @@ func zjDecodeFallbackL_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *z
 		}
 		switch string(key) {
 		case "f":
-			a.f0 = StrInt64(l.ReadInt64())
-			v.F = &a.f0
+			if v.F == nil {
+				a.f0 = StrInt64(l.ReadQuotedOrBareInt64())
+				v.F = &a.f0
+			} else {
+				*v.F = StrInt64(l.ReadQuotedOrBareInt64())
+			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -15208,17 +17153,17 @@ func (v *L_string) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_string) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_string) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -15231,22 +17176,24 @@ func (v *L_string) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_string can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_string) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_string{}
+	zjDecodeL_string(l, v, a)
+}
+
 // zjDecodeL_string tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_string(l, v, a) {
 		return
 	}
@@ -15276,10 +17223,22 @@ func zjDecodeOrderedL_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string)
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -15334,6 +17293,7 @@ func zjDecodeOrderedL_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string)
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -15343,13 +17303,26 @@ func zjDecodeOrderedL_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string)
 
 func zjDecodeOrderedFieldL_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_string[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		v.F = l.ReadString()
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_string[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_string are L_string's JSON field names by declared index, for error paths.
+var zjFieldNamesL_string = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_string matches and consumes the literal `"name":` for declared
@@ -15382,8 +17355,8 @@ func zjIsDeclaredKeyL_string(name string) bool {
 }
 
 // zjDecodeFallbackL_string is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string) {
 	_ = a
 	if !l.EnterObject() {
@@ -15395,6 +17368,10 @@ func zjDecodeFallbackL_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -15407,6 +17384,7 @@ func zjDecodeFallbackL_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -15439,17 +17417,17 @@ func (v *L_string_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_string_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_string_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -15462,22 +17440,24 @@ func (v *L_string_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_string_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_string_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_string_oe{}
+	zjDecodeL_string_oe(l, v, a)
+}
+
 // zjDecodeL_string_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_string_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_string_oe(l, v, a) {
 		return
 	}
@@ -15507,10 +17487,22 @@ func zjDecodeOrderedL_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_s
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -15565,6 +17557,7 @@ func zjDecodeOrderedL_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_s
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -15574,13 +17567,26 @@ func zjDecodeOrderedL_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_s
 
 func zjDecodeOrderedFieldL_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_string_oe, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_string_oe[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		v.F = l.ReadString()
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_string_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_string_oe are L_string_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesL_string_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_string_oe matches and consumes the literal `"name":` for declared
@@ -15613,8 +17619,8 @@ func zjIsDeclaredKeyL_string_oe(name string) bool {
 }
 
 // zjDecodeFallbackL_string_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_string_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -15626,6 +17632,10 @@ func zjDecodeFallbackL_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -15638,6 +17648,7 @@ func zjDecodeFallbackL_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -15675,17 +17686,17 @@ func (v *L_string_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_string_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_string_ptr) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -15698,22 +17709,24 @@ func (v *L_string_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_string_ptr can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_string_ptr) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_string_ptr{}
+	zjDecodeL_string_ptr(l, v, a)
+}
+
 // zjDecodeL_string_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArenaL_string_ptr) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_string_ptr(l, v, a) {
 		return
 	}
@@ -15737,16 +17750,32 @@ func zjDecodeL_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArenaL_string
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrderedL_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArenaL_string_ptr) bool {
 	_ = a
+	// Caller-owned pointers and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -15801,6 +17830,7 @@ func zjDecodeOrderedL_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArenaL
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -15814,14 +17844,31 @@ func zjDecodeOrderedFieldL_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjA
 		case 0:
 			v.F = nil
 		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_string_ptr[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		a.f0 = l.ReadString()
-		v.F = &a.f0
+		if v.F == nil {
+			a.f0 = l.ReadString()
+			v.F = &a.f0
+		} else {
+			*v.F = l.ReadString()
+		}
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_string_ptr[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_string_ptr are L_string_ptr's JSON field names by declared index, for error paths.
+var zjFieldNamesL_string_ptr = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_string_ptr matches and consumes the literal `"name":` for declared
@@ -15854,8 +17901,8 @@ func zjIsDeclaredKeyL_string_ptr(name string) bool {
 }
 
 // zjDecodeFallbackL_string_ptr is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArenaL_string_ptr) {
 	_ = a
 	if !l.EnterObject() {
@@ -15871,6 +17918,10 @@ func zjDecodeFallbackL_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArena
 			case "f":
 				v.F = nil
 			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -15878,12 +17929,17 @@ func zjDecodeFallbackL_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArena
 		}
 		switch string(key) {
 		case "f":
-			a.f0 = l.ReadString()
-			v.F = &a.f0
+			if v.F == nil {
+				a.f0 = l.ReadString()
+				v.F = &a.f0
+			} else {
+				*v.F = l.ReadString()
+			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -15920,17 +17976,17 @@ func (v *L_text) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_text) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_text) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -15943,27 +17999,29 @@ func (v *L_text) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_text can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_text) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_text{}
+	zjDecodeL_text(l, v, a)
+}
+
 // zjDecodeL_text tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_text(l *zerojson.Lexer, v *L_text, a *zjArenaL_text) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
 	zjDecodeFallbackL_text(l, v, a)
 }
 
 // zjDecodeFallbackL_text is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_text(l *zerojson.Lexer, v *L_text, a *zjArenaL_text) {
 	_ = a
 	if !l.EnterObject() {
@@ -15975,6 +18033,10 @@ func zjDecodeFallbackL_text(l *zerojson.Lexer, v *L_text, a *zjArenaL_text) {
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -15982,13 +18044,16 @@ func zjDecodeFallbackL_text(l *zerojson.Lexer, v *L_text, a *zjArenaL_text) {
 		}
 		switch string(key) {
 		case "f":
-			if err := v.F.UnmarshalText(l.ReadTextBytes()); err != nil {
-				l.AddError(err)
+			if txt := l.ReadTextBytes(); l.Err() == nil {
+				if err := v.F.UnmarshalText(txt); err != nil {
+					l.AddError(err)
+				}
 			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -16025,17 +18090,17 @@ func (v *L_text_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_text_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_text_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -16048,27 +18113,29 @@ func (v *L_text_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_text_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_text_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_text_oe{}
+	zjDecodeL_text_oe(l, v, a)
+}
+
 // zjDecodeL_text_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_text_oe(l *zerojson.Lexer, v *L_text_oe, a *zjArenaL_text_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
 	zjDecodeFallbackL_text_oe(l, v, a)
 }
 
 // zjDecodeFallbackL_text_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_text_oe(l *zerojson.Lexer, v *L_text_oe, a *zjArenaL_text_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -16080,6 +18147,10 @@ func zjDecodeFallbackL_text_oe(l *zerojson.Lexer, v *L_text_oe, a *zjArenaL_text
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -16087,13 +18158,16 @@ func zjDecodeFallbackL_text_oe(l *zerojson.Lexer, v *L_text_oe, a *zjArenaL_text
 		}
 		switch string(key) {
 		case "f":
-			if err := v.F.UnmarshalText(l.ReadTextBytes()); err != nil {
-				l.AddError(err)
+			if txt := l.ReadTextBytes(); l.Err() == nil {
+				if err := v.F.UnmarshalText(txt); err != nil {
+					l.AddError(err)
+				}
 			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -16108,7 +18182,6 @@ func zjDecodeFallbackL_text_oe(l *zerojson.Lexer, v *L_text_oe, a *zjArenaL_text
 // cell per slice/map field so repeated decodes reuse their backing
 // storage instead of reallocating it every time.
 type zjArenaL_text_ptr struct {
-	s0 bool
 	f0 YMD
 }
 
@@ -16136,17 +18209,17 @@ func (v *L_text_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_text_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_text_ptr) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -16159,28 +18232,29 @@ func (v *L_text_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_text_ptr can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_text_ptr) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_text_ptr{}
+	zjDecodeL_text_ptr(l, v, a)
+}
+
 // zjDecodeL_text_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_text_ptr(l *zerojson.Lexer, v *L_text_ptr, a *zjArenaL_text_ptr) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s0 = false
 	zjDecodeFallbackL_text_ptr(l, v, a)
 }
 
 // zjDecodeFallbackL_text_ptr is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_text_ptr(l *zerojson.Lexer, v *L_text_ptr, a *zjArenaL_text_ptr) {
 	_ = a
 	if !l.EnterObject() {
@@ -16195,7 +18269,10 @@ func zjDecodeFallbackL_text_ptr(l *zerojson.Lexer, v *L_text_ptr, a *zjArenaL_te
 			switch string(key) {
 			case "f":
 				v.F = nil
-				a.s0 = false
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -16204,23 +18281,21 @@ func zjDecodeFallbackL_text_ptr(l *zerojson.Lexer, v *L_text_ptr, a *zjArenaL_te
 		}
 		switch string(key) {
 		case "f":
-			if !a.s0 {
-				a.s0 = true
-				if v.F != nil {
-					a.f0 = *v.F
-				} else {
-					var zjZero YMD
-					a.f0 = zjZero
-				}
+			if v.F == nil {
+				var zjZero YMD
+				a.f0 = zjZero
+				v.F = &a.f0
 			}
-			v.F = &a.f0
-			if err := v.F.UnmarshalText(l.ReadTextBytes()); err != nil {
-				l.AddError(err)
+			if txt := l.ReadTextBytes(); l.Err() == nil {
+				if err := v.F.UnmarshalText(txt); err != nil {
+					l.AddError(err)
+				}
 			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -16257,17 +18332,17 @@ func (v *L_time) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_time) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_time) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -16280,22 +18355,24 @@ func (v *L_time) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_time can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_time) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_time{}
+	zjDecodeL_time(l, v, a)
+}
+
 // zjDecodeL_time tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_time(l, v, a) {
 		return
 	}
@@ -16325,10 +18402,22 @@ func zjDecodeOrderedL_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) bool 
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -16383,6 +18472,7 @@ func zjDecodeOrderedL_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) bool 
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -16392,13 +18482,26 @@ func zjDecodeOrderedL_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) bool 
 
 func zjDecodeOrderedFieldL_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_time[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		v.F = l.ReadTime()
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_time[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_time are L_time's JSON field names by declared index, for error paths.
+var zjFieldNamesL_time = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_time matches and consumes the literal `"name":` for declared
@@ -16431,8 +18534,8 @@ func zjIsDeclaredKeyL_time(name string) bool {
 }
 
 // zjDecodeFallbackL_time is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) {
 	_ = a
 	if !l.EnterObject() {
@@ -16444,6 +18547,10 @@ func zjDecodeFallbackL_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) {
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -16456,6 +18563,7 @@ func zjDecodeFallbackL_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) {
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -16492,17 +18600,17 @@ func (v *L_time_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_time_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_time_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -16515,22 +18623,24 @@ func (v *L_time_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_time_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_time_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_time_oe{}
+	zjDecodeL_time_oe(l, v, a)
+}
+
 // zjDecodeL_time_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_time_oe(l, v, a) {
 		return
 	}
@@ -16560,10 +18670,22 @@ func zjDecodeOrderedL_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time_
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -16618,6 +18740,7 @@ func zjDecodeOrderedL_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time_
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -16627,13 +18750,26 @@ func zjDecodeOrderedL_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time_
 
 func zjDecodeOrderedFieldL_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time_oe, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_time_oe[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		v.F = l.ReadTime()
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_time_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_time_oe are L_time_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesL_time_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_time_oe matches and consumes the literal `"name":` for declared
@@ -16666,8 +18802,8 @@ func zjIsDeclaredKeyL_time_oe(name string) bool {
 }
 
 // zjDecodeFallbackL_time_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -16679,6 +18815,10 @@ func zjDecodeFallbackL_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -16691,6 +18831,7 @@ func zjDecodeFallbackL_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -16732,17 +18873,17 @@ func (v *L_time_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_time_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_time_ptr) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -16755,22 +18896,24 @@ func (v *L_time_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_time_ptr can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_time_ptr) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_time_ptr{}
+	zjDecodeL_time_ptr(l, v, a)
+}
+
 // zjDecodeL_time_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_time_ptr) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_time_ptr(l, v, a) {
 		return
 	}
@@ -16794,16 +18937,32 @@ func zjDecodeL_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_time_ptr) 
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrderedL_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_time_ptr) bool {
 	_ = a
+	// Caller-owned pointers and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -16858,6 +19017,7 @@ func zjDecodeOrderedL_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_tim
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -16871,14 +19031,31 @@ func zjDecodeOrderedFieldL_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArena
 		case 0:
 			v.F = nil
 		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_time_ptr[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		a.f0 = l.ReadTime()
-		v.F = &a.f0
+		if v.F == nil {
+			a.f0 = l.ReadTime()
+			v.F = &a.f0
+		} else {
+			*v.F = l.ReadTime()
+		}
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_time_ptr[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_time_ptr are L_time_ptr's JSON field names by declared index, for error paths.
+var zjFieldNamesL_time_ptr = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_time_ptr matches and consumes the literal `"name":` for declared
@@ -16911,8 +19088,8 @@ func zjIsDeclaredKeyL_time_ptr(name string) bool {
 }
 
 // zjDecodeFallbackL_time_ptr is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_time_ptr) {
 	_ = a
 	if !l.EnterObject() {
@@ -16928,6 +19105,10 @@ func zjDecodeFallbackL_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_ti
 			case "f":
 				v.F = nil
 			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -16935,12 +19116,17 @@ func zjDecodeFallbackL_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_ti
 		}
 		switch string(key) {
 		case "f":
-			a.f0 = l.ReadTime()
-			v.F = &a.f0
+			if v.F == nil {
+				a.f0 = l.ReadTime()
+				v.F = &a.f0
+			} else {
+				*v.F = l.ReadTime()
+			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -16973,17 +19159,17 @@ func (v *L_uint16) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_uint16) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_uint16) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -16996,22 +19182,24 @@ func (v *L_uint16) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_uint16 can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_uint16) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_uint16{}
+	zjDecodeL_uint16(l, v, a)
+}
+
 // zjDecodeL_uint16 tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_uint16(l, v, a) {
 		return
 	}
@@ -17041,10 +19229,22 @@ func zjDecodeOrderedL_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16)
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -17099,6 +19299,7 @@ func zjDecodeOrderedL_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16)
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -17108,13 +19309,26 @@ func zjDecodeOrderedL_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16)
 
 func zjDecodeOrderedFieldL_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_uint16[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		v.F = uint16(l.ReadUint16())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_uint16[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_uint16 are L_uint16's JSON field names by declared index, for error paths.
+var zjFieldNamesL_uint16 = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_uint16 matches and consumes the literal `"name":` for declared
@@ -17147,8 +19361,8 @@ func zjIsDeclaredKeyL_uint16(name string) bool {
 }
 
 // zjDecodeFallbackL_uint16 is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16) {
 	_ = a
 	if !l.EnterObject() {
@@ -17160,6 +19374,10 @@ func zjDecodeFallbackL_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -17172,6 +19390,7 @@ func zjDecodeFallbackL_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -17204,17 +19423,17 @@ func (v *L_uint16_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_uint16_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_uint16_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -17227,22 +19446,24 @@ func (v *L_uint16_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_uint16_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_uint16_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_uint16_oe{}
+	zjDecodeL_uint16_oe(l, v, a)
+}
+
 // zjDecodeL_uint16_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_uint16_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_uint16_oe(l, v, a) {
 		return
 	}
@@ -17272,10 +19493,22 @@ func zjDecodeOrderedL_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_u
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -17330,6 +19563,7 @@ func zjDecodeOrderedL_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_u
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -17339,13 +19573,26 @@ func zjDecodeOrderedL_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_u
 
 func zjDecodeOrderedFieldL_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_uint16_oe, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_uint16_oe[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		v.F = uint16(l.ReadUint16())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_uint16_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_uint16_oe are L_uint16_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesL_uint16_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_uint16_oe matches and consumes the literal `"name":` for declared
@@ -17378,8 +19625,8 @@ func zjIsDeclaredKeyL_uint16_oe(name string) bool {
 }
 
 // zjDecodeFallbackL_uint16_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_uint16_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -17391,6 +19638,10 @@ func zjDecodeFallbackL_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -17403,6 +19654,7 @@ func zjDecodeFallbackL_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -17440,17 +19692,17 @@ func (v *L_uint16_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_uint16_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_uint16_ptr) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -17463,22 +19715,24 @@ func (v *L_uint16_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_uint16_ptr can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_uint16_ptr) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_uint16_ptr{}
+	zjDecodeL_uint16_ptr(l, v, a)
+}
+
 // zjDecodeL_uint16_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArenaL_uint16_ptr) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_uint16_ptr(l, v, a) {
 		return
 	}
@@ -17502,16 +19756,32 @@ func zjDecodeL_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArenaL_uint16
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrderedL_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArenaL_uint16_ptr) bool {
 	_ = a
+	// Caller-owned pointers and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -17566,6 +19836,7 @@ func zjDecodeOrderedL_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArenaL
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -17579,14 +19850,31 @@ func zjDecodeOrderedFieldL_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjA
 		case 0:
 			v.F = nil
 		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_uint16_ptr[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		a.f0 = uint16(l.ReadUint16())
-		v.F = &a.f0
+		if v.F == nil {
+			a.f0 = uint16(l.ReadUint16())
+			v.F = &a.f0
+		} else {
+			*v.F = uint16(l.ReadUint16())
+		}
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_uint16_ptr[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_uint16_ptr are L_uint16_ptr's JSON field names by declared index, for error paths.
+var zjFieldNamesL_uint16_ptr = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_uint16_ptr matches and consumes the literal `"name":` for declared
@@ -17619,8 +19907,8 @@ func zjIsDeclaredKeyL_uint16_ptr(name string) bool {
 }
 
 // zjDecodeFallbackL_uint16_ptr is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArenaL_uint16_ptr) {
 	_ = a
 	if !l.EnterObject() {
@@ -17636,6 +19924,10 @@ func zjDecodeFallbackL_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArena
 			case "f":
 				v.F = nil
 			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -17643,12 +19935,17 @@ func zjDecodeFallbackL_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArena
 		}
 		switch string(key) {
 		case "f":
-			a.f0 = uint16(l.ReadUint16())
-			v.F = &a.f0
+			if v.F == nil {
+				a.f0 = uint16(l.ReadUint16())
+				v.F = &a.f0
+			} else {
+				*v.F = uint16(l.ReadUint16())
+			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -17681,17 +19978,17 @@ func (v *L_uuid) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_uuid) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_uuid) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -17704,22 +20001,24 @@ func (v *L_uuid) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_uuid can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_uuid) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_uuid{}
+	zjDecodeL_uuid(l, v, a)
+}
+
 // zjDecodeL_uuid tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_uuid(l, v, a) {
 		return
 	}
@@ -17749,10 +20048,22 @@ func zjDecodeOrderedL_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) bool 
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -17807,6 +20118,7 @@ func zjDecodeOrderedL_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) bool 
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -17816,13 +20128,26 @@ func zjDecodeOrderedL_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) bool 
 
 func zjDecodeOrderedFieldL_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_uuid[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		v.F = uuid.UUID(l.ReadUUIDBytes())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_uuid[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_uuid are L_uuid's JSON field names by declared index, for error paths.
+var zjFieldNamesL_uuid = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_uuid matches and consumes the literal `"name":` for declared
@@ -17855,8 +20180,8 @@ func zjIsDeclaredKeyL_uuid(name string) bool {
 }
 
 // zjDecodeFallbackL_uuid is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) {
 	_ = a
 	if !l.EnterObject() {
@@ -17868,6 +20193,10 @@ func zjDecodeFallbackL_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) {
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -17880,6 +20209,7 @@ func zjDecodeFallbackL_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) {
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -17912,17 +20242,17 @@ func (v *L_uuid_oe) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_uuid_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_uuid_oe) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -17935,22 +20265,24 @@ func (v *L_uuid_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_uuid_oe can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_uuid_oe) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_uuid_oe{}
+	zjDecodeL_uuid_oe(l, v, a)
+}
+
 // zjDecodeL_uuid_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid_oe) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_uuid_oe(l, v, a) {
 		return
 	}
@@ -17980,10 +20312,22 @@ func zjDecodeOrderedL_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid_
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -18038,6 +20382,7 @@ func zjDecodeOrderedL_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid_
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -18047,13 +20392,26 @@ func zjDecodeOrderedL_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid_
 
 func zjDecodeOrderedFieldL_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid_oe, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_uuid_oe[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		v.F = uuid.UUID(l.ReadUUIDBytes())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_uuid_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_uuid_oe are L_uuid_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesL_uuid_oe = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_uuid_oe matches and consumes the literal `"name":` for declared
@@ -18086,8 +20444,8 @@ func zjIsDeclaredKeyL_uuid_oe(name string) bool {
 }
 
 // zjDecodeFallbackL_uuid_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid_oe) {
 	_ = a
 	if !l.EnterObject() {
@@ -18099,6 +20457,10 @@ func zjDecodeFallbackL_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -18111,6 +20473,7 @@ func zjDecodeFallbackL_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -18148,17 +20511,17 @@ func (v *L_uuid_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *L_uuid_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *L_uuid_ptr) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -18171,22 +20534,24 @@ func (v *L_uuid_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so L_uuid_ptr can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *L_uuid_ptr) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaL_uuid_ptr{}
+	zjDecodeL_uuid_ptr(l, v, a)
+}
+
 // zjDecodeL_uuid_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeL_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uuid_ptr) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedL_uuid_ptr(l, v, a) {
 		return
 	}
@@ -18210,16 +20575,32 @@ func zjDecodeL_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uuid_ptr) 
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrderedL_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uuid_ptr) bool {
 	_ = a
+	// Caller-owned pointers and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -18274,6 +20655,7 @@ func zjDecodeOrderedL_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uui
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -18287,14 +20669,31 @@ func zjDecodeOrderedFieldL_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArena
 		case 0:
 			v.F = nil
 		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesL_uuid_ptr[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		a.f0 = uuid.UUID(l.ReadUUIDBytes())
-		v.F = &a.f0
+		if v.F == nil {
+			a.f0 = uuid.UUID(l.ReadUUIDBytes())
+			v.F = &a.f0
+		} else {
+			*v.F = uuid.UUID(l.ReadUUIDBytes())
+		}
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesL_uuid_ptr[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesL_uuid_ptr are L_uuid_ptr's JSON field names by declared index, for error paths.
+var zjFieldNamesL_uuid_ptr = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyL_uuid_ptr matches and consumes the literal `"name":` for declared
@@ -18327,8 +20726,8 @@ func zjIsDeclaredKeyL_uuid_ptr(name string) bool {
 }
 
 // zjDecodeFallbackL_uuid_ptr is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackL_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uuid_ptr) {
 	_ = a
 	if !l.EnterObject() {
@@ -18344,6 +20743,10 @@ func zjDecodeFallbackL_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uu
 			case "f":
 				v.F = nil
 			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -18351,12 +20754,17 @@ func zjDecodeFallbackL_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uu
 		}
 		switch string(key) {
 		case "f":
-			a.f0 = uuid.UUID(l.ReadUUIDBytes())
-			v.F = &a.f0
+			if v.F == nil {
+				a.f0 = uuid.UUID(l.ReadUUIDBytes())
+				v.F = &a.f0
+			} else {
+				*v.F = uuid.UUID(l.ReadUUIDBytes())
+			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -18393,17 +20801,17 @@ func (v *N_any) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *N_any) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *N_any) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -18416,22 +20824,24 @@ func (v *N_any) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so N_any can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *N_any) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaN_any{}
+	zjDecodeN_any(l, v, a)
+}
+
 // zjDecodeN_any tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeN_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedN_any(l, v, a) {
 		return
 	}
@@ -18455,16 +20865,32 @@ func zjDecodeN_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) {
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrderedN_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) bool {
 	_ = a
+	// Caller-owned pointers and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -18519,6 +20945,7 @@ func zjDecodeOrderedN_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) bool {
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -18530,15 +20957,38 @@ func zjDecodeOrderedFieldN_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any, k i
 	if l.IsNull() {
 		switch k {
 		case 0:
-			v.F = nil
+			if v.F != nil {
+				l.AddError(json_.Unmarshal(l.NullBytes(), &v.F))
+			}
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesN_any[k])
+			return false
 		}
 		return true
 	}
 	switch k {
 	case 0:
-		v.F = l.ReadInterface()
+		if v.F == nil {
+			v.F = l.ReadInterface()
+		} else if rv := reflect_.ValueOf(v.F); rv.Kind() == reflect_.Pointer && !rv.IsNil() {
+			if raw := l.RawValue(); l.Err() == nil {
+				l.AddError(json_.Unmarshal(raw, &v.F))
+			}
+		} else {
+			v.F = l.ReadInterface()
+		}
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesN_any[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesN_any are N_any's JSON field names by declared index, for error paths.
+var zjFieldNamesN_any = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyN_any matches and consumes the literal `"name":` for declared
@@ -18571,8 +21021,8 @@ func zjIsDeclaredKeyN_any(name string) bool {
 }
 
 // zjDecodeFallbackN_any is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackN_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) {
 	_ = a
 	if !l.EnterObject() {
@@ -18586,7 +21036,13 @@ func zjDecodeFallbackN_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) {
 		if l.IsNull() {
 			switch string(key) {
 			case "f":
-				v.F = nil
+				if v.F != nil {
+					l.AddError(json_.Unmarshal(l.NullBytes(), &v.F))
+				}
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -18595,11 +21051,20 @@ func zjDecodeFallbackN_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) {
 		}
 		switch string(key) {
 		case "f":
-			v.F = l.ReadInterface()
+			if v.F == nil {
+				v.F = l.ReadInterface()
+			} else if rv := reflect_.ValueOf(v.F); rv.Kind() == reflect_.Pointer && !rv.IsNil() {
+				if raw := l.RawValue(); l.Err() == nil {
+					l.AddError(json_.Unmarshal(raw, &v.F))
+				}
+			} else {
+				v.F = l.ReadInterface()
+			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -18639,17 +21104,17 @@ func (v *N_rawmsg) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *N_rawmsg) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *N_rawmsg) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -18662,27 +21127,29 @@ func (v *N_rawmsg) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so N_rawmsg can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *N_rawmsg) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaN_rawmsg{}
+	zjDecodeN_rawmsg(l, v, a)
+}
+
 // zjDecodeN_rawmsg tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeN_rawmsg(l *zerojson.Lexer, v *N_rawmsg, a *zjArenaN_rawmsg) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
 	zjDecodeFallbackN_rawmsg(l, v, a)
 }
 
 // zjDecodeFallbackN_rawmsg is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackN_rawmsg(l *zerojson.Lexer, v *N_rawmsg, a *zjArenaN_rawmsg) {
 	_ = a
 	if !l.EnterObject() {
@@ -18696,7 +21163,13 @@ func zjDecodeFallbackN_rawmsg(l *zerojson.Lexer, v *N_rawmsg, a *zjArenaN_rawmsg
 		if l.IsNull() {
 			switch string(key) {
 			case "f":
-				v.F = nil
+				if err := v.F.UnmarshalJSON(l.NullBytes()); err != nil {
+					l.AddError(err)
+				}
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -18705,13 +21178,16 @@ func zjDecodeFallbackN_rawmsg(l *zerojson.Lexer, v *N_rawmsg, a *zjArenaN_rawmsg
 		}
 		switch string(key) {
 		case "f":
-			if err := v.F.UnmarshalJSON(l.RawValue()); err != nil {
-				l.AddError(err)
+			if raw := l.RawValue(); l.Err() == nil {
+				if err := v.F.UnmarshalJSON(raw); err != nil {
+					l.AddError(err)
+				}
 			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -18749,17 +21225,17 @@ func (v *N_struct) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *N_struct) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *N_struct) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -18772,22 +21248,24 @@ func (v *N_struct) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so N_struct can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *N_struct) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaN_struct{}
+	zjDecodeN_struct(l, v, a)
+}
+
 // zjDecodeN_struct tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedN_struct(l, v, a) {
 		return
 	}
@@ -18817,10 +21295,22 @@ func zjDecodeOrderedN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct)
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -18875,6 +21365,7 @@ func zjDecodeOrderedN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct)
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -18884,15 +21375,29 @@ func zjDecodeOrderedN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct)
 
 func zjDecodeOrderedFieldN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesN_struct[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
 		if !zjDecodeOrderedInner(l, &v.F, &a.a0) {
+			l.AnnotateFieldString("f")
 			return false
 		}
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesN_struct[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesN_struct are N_struct's JSON field names by declared index, for error paths.
+var zjFieldNamesN_struct = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyN_struct matches and consumes the literal `"name":` for declared
@@ -18925,8 +21430,8 @@ func zjIsDeclaredKeyN_struct(name string) bool {
 }
 
 // zjDecodeFallbackN_struct is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct) {
 	_ = a
 	if !l.EnterObject() {
@@ -18938,6 +21443,10 @@ func zjDecodeFallbackN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -18950,6 +21459,7 @@ func zjDecodeFallbackN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -18964,7 +21474,6 @@ func zjDecodeFallbackN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct
 // cell per slice/map field so repeated decodes reuse their backing
 // storage instead of reallocating it every time.
 type zjArenaN_struct_ptr struct {
-	s0 bool
 	v0 Inner
 	a0 zjArenaInner
 }
@@ -18993,17 +21502,17 @@ func (v *N_struct_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *N_struct_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *N_struct_ptr) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -19016,23 +21525,24 @@ func (v *N_struct_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so N_struct_ptr can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *N_struct_ptr) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaN_struct_ptr{}
+	zjDecodeN_struct_ptr(l, v, a)
+}
+
 // zjDecodeN_struct_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeN_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArenaN_struct_ptr) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s0 = false
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedN_struct_ptr(l, v, a) {
 		return
 	}
@@ -19056,16 +21566,32 @@ func zjDecodeN_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArenaN_struct
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrderedN_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArenaN_struct_ptr) bool {
 	_ = a
+	// Caller-owned pointers and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -19120,6 +21646,7 @@ func zjDecodeOrderedN_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArenaN
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -19132,27 +21659,35 @@ func zjDecodeOrderedFieldN_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjA
 		switch k {
 		case 0:
 			v.F = nil
-			a.s0 = false
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesN_struct_ptr[k])
+			return false
 		}
 		return true
 	}
 	switch k {
 	case 0:
-		if !a.s0 {
-			a.s0 = true
-			if v.F != nil {
-				a.v0 = *v.F
-			} else {
-				var zjZero Inner
-				a.v0 = zjZero
-			}
+		if v.F == nil {
+			var zjZero Inner
+			a.v0 = zjZero
+			v.F = &a.v0
 		}
-		v.F = &a.v0
 		if !zjDecodeOrderedInner(l, v.F, &a.a0) {
+			l.AnnotateFieldString("f")
 			return false
 		}
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesN_struct_ptr[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesN_struct_ptr are N_struct_ptr's JSON field names by declared index, for error paths.
+var zjFieldNamesN_struct_ptr = [...]string{
+	"f",
 }
 
 // zjTryOrderedKeyN_struct_ptr matches and consumes the literal `"name":` for declared
@@ -19185,8 +21720,8 @@ func zjIsDeclaredKeyN_struct_ptr(name string) bool {
 }
 
 // zjDecodeFallbackN_struct_ptr is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackN_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArenaN_struct_ptr) {
 	_ = a
 	if !l.EnterObject() {
@@ -19201,7 +21736,10 @@ func zjDecodeFallbackN_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArena
 			switch string(key) {
 			case "f":
 				v.F = nil
-				a.s0 = false
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -19210,21 +21748,17 @@ func zjDecodeFallbackN_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArena
 		}
 		switch string(key) {
 		case "f":
-			if !a.s0 {
-				a.s0 = true
-				if v.F != nil {
-					a.v0 = *v.F
-				} else {
-					var zjZero Inner
-					a.v0 = zjZero
-				}
+			if v.F == nil {
+				var zjZero Inner
+				a.v0 = zjZero
+				v.F = &a.v0
 			}
-			v.F = &a.v0
 			zjDecodeInner(l, v.F, &a.a0)
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -19264,17 +21798,17 @@ func (v *T_invalid_tagname) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *T_invalid_tagname) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *T_invalid_tagname) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -19287,22 +21821,24 @@ func (v *T_invalid_tagname) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so T_invalid_tagname can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *T_invalid_tagname) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaT_invalid_tagname{}
+	zjDecodeT_invalid_tagname(l, v, a)
+}
+
 // zjDecodeT_invalid_tagname tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeT_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, a *zjArenaT_invalid_tagname) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedT_invalid_tagname(l, v, a) {
 		return
 	}
@@ -19332,10 +21868,22 @@ func zjDecodeOrderedT_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, a
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -19390,6 +21938,7 @@ func zjDecodeOrderedT_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, a
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -19399,6 +21948,10 @@ func zjDecodeOrderedT_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, a
 
 func zjDecodeOrderedFieldT_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, a *zjArenaT_invalid_tagname, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesT_invalid_tagname[k])
+			return false
+		}
 		return true
 	}
 	switch k {
@@ -19407,7 +21960,17 @@ func zjDecodeOrderedFieldT_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagna
 	case 1:
 		v.B = int(l.ReadInt())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesT_invalid_tagname[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesT_invalid_tagname are T_invalid_tagname's JSON field names by declared index, for error paths.
+var zjFieldNamesT_invalid_tagname = [...]string{
+	"A",
+	"ok",
 }
 
 // zjTryOrderedKeyT_invalid_tagname matches and consumes the literal `"name":` for declared
@@ -19449,8 +22012,8 @@ func zjIsDeclaredKeyT_invalid_tagname(name string) bool {
 }
 
 // zjDecodeFallbackT_invalid_tagname is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackT_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, a *zjArenaT_invalid_tagname) {
 	_ = a
 	if !l.EnterObject() {
@@ -19462,6 +22025,10 @@ func zjDecodeFallbackT_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, 
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -19476,6 +22043,7 @@ func zjDecodeFallbackT_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, 
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -19515,17 +22083,17 @@ func (v *T_string_opt) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *T_string_opt) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *T_string_opt) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -19538,22 +22106,24 @@ func (v *T_string_opt) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so T_string_opt can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *T_string_opt) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaT_string_opt{}
+	zjDecodeT_string_opt(l, v, a)
+}
+
 // zjDecodeT_string_opt tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeT_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArenaT_string_opt) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedT_string_opt(l, v, a) {
 		return
 	}
@@ -19583,10 +22153,22 @@ func zjDecodeOrderedT_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArenaT
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -19641,6 +22223,7 @@ func zjDecodeOrderedT_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArenaT
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -19650,15 +22233,35 @@ func zjDecodeOrderedT_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArenaT
 
 func zjDecodeOrderedFieldT_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArenaT_string_opt, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesT_string_opt[k])
+			return false
+		}
 		return true
 	}
 	switch k {
 	case 0:
-		v.C = uint32(l.ReadQuotedUint32())
+		if l.IsQuotedNull() {
+		} else {
+			v.C = uint32(l.ReadQuotedUint32())
+		}
 	case 1:
-		v.A = int64(l.ReadQuotedInt64())
+		if l.IsQuotedNull() {
+		} else {
+			v.A = int64(l.ReadQuotedInt64())
+		}
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesT_string_opt[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesT_string_opt are T_string_opt's JSON field names by declared index, for error paths.
+var zjFieldNamesT_string_opt = [...]string{
+	"c",
+	"a",
 }
 
 // zjTryOrderedKeyT_string_opt matches and consumes the literal `"name":` for declared
@@ -19700,8 +22303,8 @@ func zjIsDeclaredKeyT_string_opt(name string) bool {
 }
 
 // zjDecodeFallbackT_string_opt is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackT_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArenaT_string_opt) {
 	_ = a
 	if !l.EnterObject() {
@@ -19713,6 +22316,10 @@ func zjDecodeFallbackT_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArena
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -19720,13 +22327,20 @@ func zjDecodeFallbackT_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArena
 		}
 		switch string(key) {
 		case "c":
-			v.C = uint32(l.ReadQuotedUint32())
+			if l.IsQuotedNull() {
+			} else {
+				v.C = uint32(l.ReadQuotedUint32())
+			}
 		case "a":
-			v.A = int64(l.ReadQuotedInt64())
+			if l.IsQuotedNull() {
+			} else {
+				v.A = int64(l.ReadQuotedInt64())
+			}
 		default:
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -19789,17 +22403,17 @@ func (v *Z_omitzero) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *Z_omitzero) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *Z_omitzero) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -19812,22 +22426,24 @@ func (v *Z_omitzero) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so Z_omitzero can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *Z_omitzero) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaZ_omitzero{}
+	zjDecodeZ_omitzero(l, v, a)
+}
+
 // zjDecodeZ_omitzero tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_omitzero) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedZ_omitzero(l, v, a) {
 		return
 	}
@@ -19857,10 +22473,22 @@ func zjDecodeOrderedZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_omi
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -19915,6 +22543,7 @@ func zjDecodeOrderedZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_omi
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -19927,6 +22556,10 @@ func zjDecodeOrderedFieldZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArena
 		switch k {
 		case 1:
 			v.ES = nil
+		}
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesZ_omitzero[k])
+			return false
 		}
 		return true
 	}
@@ -19950,7 +22583,7 @@ func zjDecodeOrderedFieldZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArena
 					a.c1[idx] = l.ReadString()
 				}
 				if l.Err() != nil {
-					return false
+					break
 				}
 				if !l.NextElem() {
 					break
@@ -19964,7 +22597,18 @@ func zjDecodeOrderedFieldZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArena
 	case 2:
 		v.N = int(l.ReadInt())
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesZ_omitzero[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesZ_omitzero are Z_omitzero's JSON field names by declared index, for error paths.
+var zjFieldNamesZ_omitzero = [...]string{
+	"w",
+	"es",
+	"n",
 }
 
 // zjTryOrderedKeyZ_omitzero matches and consumes the literal `"name":` for declared
@@ -20015,8 +22659,8 @@ func zjIsDeclaredKeyZ_omitzero(name string) bool {
 }
 
 // zjDecodeFallbackZ_omitzero is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_omitzero) {
 	_ = a
 	if !l.EnterObject() {
@@ -20031,6 +22675,10 @@ func zjDecodeFallbackZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_om
 			switch string(key) {
 			case "es":
 				v.ES = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
 			}
 			if !l.NextMember() {
 				break
@@ -20057,7 +22705,7 @@ func zjDecodeFallbackZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_om
 						a.c1[idx] = l.ReadString()
 					}
 					if l.Err() != nil {
-						return
+						break
 					}
 					if !l.NextElem() {
 						break
@@ -20074,6 +22722,7 @@ func zjDecodeFallbackZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_om
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {
@@ -20113,17 +22762,17 @@ func (v *Inner) AppendZJSON(dst []byte) ([]byte, error) {
 	return append(dst, '}'), nil
 }
 
-// UnmarshalZJSON decodes data into v. JSON null clears pointer,
-// slice, and map fields and leaves value fields untouched, matching
-// encoding/json semantics for reused targets.
+// UnmarshalZJSON decodes data into v, copying strings and Raw values.
+// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Custom codecs define their own value/null behavior. Errors may leave v
+// partially changed. Use zerojson.Valid first if strict grammar is required.
 func (v *Inner) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
 
-// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string
-// decoding: decoded strings may alias data, so data must stay live and
-// unmodified for the lifetime of v. Never use it with pooled or reused
-// input buffers.
+// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw
+// values. Keep data unmodified while any result refers to it; input
+// buffers may be reused only after those results are no longer needed.
 func (v *Inner) UnmarshalZJSONBorrow(data []byte) error {
 	return v.unmarshalZJSON(data, true)
 }
@@ -20136,22 +22785,24 @@ func (v *Inner) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// ReadZJSON implements zerojson.Reader: it decodes the next JSON value
+// from l into v, so Inner can be a field of a zerojson-generated type in
+// another package. Errors are reported through l, per the Reader contract.
+func (v *Inner) ReadZJSON(l *zerojson.Lexer) {
+	a := &zjArenaInner{}
+	zjDecodeInner(l, v, a)
+}
+
 // zjDecodeInner tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
 func zjDecodeInner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) {
 	if l.IsNull() {
-		// A JSON null decodes to a no-op success, leaving v untouched —
-		// matching encoding/json's reused-target semantics
-		// (json.Unmarshal("null", &v) succeeds without modifying v). A
-		// nested struct field never reaches here on null (the enclosing
-		// decoder consumes null and clears the field itself before this
-		// is called), so this fires only at a top-level entry point;
-		// Finish still runs afterward, so trailing bytes (e.g. "nullx")
-		// are still rejected.
+		// Null leaves a value-typed struct unchanged. The public wrapper
+		// still calls Finish to reject trailing data.
 		return
 	}
-	start := l.Pos()
+	start := l.Mark()
 	if zjDecodeOrderedInner(l, v, a) {
 		return
 	}
@@ -20181,10 +22832,22 @@ func zjDecodeOrderedInner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) bool {
 	}
 	pos++
 	if pos < len(data) && data[pos] == '}' {
+		// An empty object still counts as a nesting level.
+		if !l.DepthOK() {
+			return false
+		}
 		l.SetPos(pos + 1)
 		return true
 	}
 	l.SetPos(pos)
+	// This decoder consumes the braces itself, so it accounts for the
+	// nesting level itself too (EnterObject does this for the fallback):
+	// an inline Skip of an unknown member must measure depth from here.
+	// A bail leaves the level unbalanced; the dispatcher's OrderedBail
+	// restores it along with the position.
+	if !l.Enter() {
+		return false
+	}
 	expected := 0
 	for {
 		matched := -1
@@ -20239,6 +22902,7 @@ func zjDecodeOrderedInner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) bool {
 			l.SetPos(p + 1)
 		case '}':
 			l.SetPos(p + 1)
+			l.Leave()
 			return true
 		default:
 			return false
@@ -20248,6 +22912,10 @@ func zjDecodeOrderedInner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) bool {
 
 func zjDecodeOrderedFieldInner(l *zerojson.Lexer, v *Inner, a *zjArenaInner, k int) bool {
 	if l.IsNull() {
+		if l.Err() != nil {
+			l.AnnotateFieldString(zjFieldNamesInner[k])
+			return false
+		}
 		return true
 	}
 	switch k {
@@ -20256,7 +22924,17 @@ func zjDecodeOrderedFieldInner(l *zerojson.Lexer, v *Inner, a *zjArenaInner, k i
 	case 1:
 		v.B = l.ReadString()
 	}
-	return l.Err() == nil
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesInner[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesInner are Inner's JSON field names by declared index, for error paths.
+var zjFieldNamesInner = [...]string{
+	"a",
+	"b",
 }
 
 // zjTryOrderedKeyInner matches and consumes the literal `"name":` for declared
@@ -20298,8 +22976,8 @@ func zjIsDeclaredKeyInner(name string) bool {
 }
 
 // zjDecodeFallbackInner is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It is always correct and
-// is what the ordered fast path falls back to.
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
 func zjDecodeFallbackInner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) {
 	_ = a
 	if !l.EnterObject() {
@@ -20311,6 +22989,10 @@ func zjDecodeFallbackInner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) {
 			return
 		}
 		if l.IsNull() {
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
 			if !l.NextMember() {
 				break
 			}
@@ -20325,6 +23007,7 @@ func zjDecodeFallbackInner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) {
 			l.Skip()
 		}
 		if l.Err() != nil {
+			l.AnnotateField(key)
 			return
 		}
 		if !l.NextMember() {

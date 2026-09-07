@@ -91,7 +91,1183 @@ func zjFindKeySpellings(v any, field string) (exact, folded bool) {
 	return exact, folded
 }
 
-func zjDecodeStricterAllowed(data []byte) bool { _ = data; return false }
+// zjStdlibJSONV2 reports whether encoding/json is the Go 1.27+ v2-backed
+// implementation (which encodes an invalid UTF-8 byte as a raw U+FFFD
+// rather than the classic \ufffd escape), probed rather than assumed.
+var zjStdlibJSONV2 = func() bool {
+	b, _ := json.Marshal("\x80")
+	return !bytes.Contains(b, []byte(`\ufffd`))
+}()
+
+// zjMemberValueStarts appends to out the start index of the value of every
+// object member named key at exactly the given nesting depth (1 = a member
+// of the top-level object). Keys are compared after JSON-unescaping; strings
+// are consumed whole so braces inside them never affect the depth; malformed
+// input yields no sites.
+func zjMemberValueStarts(data []byte, key string, depth int, out []int) []int {
+	skipWS := func(p int) int {
+		for p < len(data) && (data[p] == ' ' || data[p] == '\t' || data[p] == '\n' || data[p] == '\r') {
+			p++
+		}
+		return p
+	}
+	d := 0
+	for p := 0; p < len(data); {
+		switch data[p] {
+		case '{', '[':
+			d++
+			p++
+		case '}', ']':
+			d--
+			p++
+		case '"':
+			end := zjStringEnd(data, p)
+			if end < 0 {
+				return out
+			}
+			q := skipWS(end)
+			if d == depth && q < len(data) && data[q] == ':' {
+				var name string
+				if json.Unmarshal(data[p:end], &name) == nil && name == key {
+					out = append(out, skipWS(q+1))
+				}
+			}
+			p = end
+		default:
+			p++
+		}
+	}
+	return out
+}
+
+// zjStringEnd returns the index just past the string token starting at p
+// (data[p] == '"'), or -1 if unterminated.
+func zjStringEnd(data []byte, p int) int {
+	for q := p + 1; q < len(data); q++ {
+		switch data[q] {
+		case '\\':
+			q++
+		case '"':
+			return q + 1
+		}
+	}
+	return -1
+}
+
+// zjValueEnd returns the index just past the JSON value starting at p
+// (object, array, string, or scalar), or len(data) if it runs off the end.
+func zjValueEnd(data []byte, p int) int {
+	if p >= len(data) {
+		return len(data)
+	}
+	switch data[p] {
+	case '"':
+		if e := zjStringEnd(data, p); e >= 0 {
+			return e
+		}
+		return len(data)
+	case '{', '[':
+		d := 0
+		for q := p; q < len(data); q++ {
+			switch data[q] {
+			case '{', '[':
+				d++
+			case '}', ']':
+				d--
+				if d == 0 {
+					return q + 1
+				}
+			case '"':
+				if e := zjStringEnd(data, q); e < 0 {
+					return len(data)
+				} else {
+					q = e - 1
+				}
+			}
+		}
+		return len(data)
+	default:
+		q := p
+		for q < len(data) && data[q] != ',' && data[q] != '}' && data[q] != ']' && data[q] != ' ' && data[q] != '\n' && data[q] != '\t' && data[q] != '\r' {
+			q++
+		}
+		return q
+	}
+}
+
+// zjPlusStringMemberSites appends to out the index of the '+' byte of every
+// member named key at the given depth whose value is a string beginning '+'.
+func zjPlusStringMemberSites(data []byte, key string, depth int, out []int) []int {
+	for _, v := range zjMemberValueStarts(data, key, depth, nil) {
+		if v+1 < len(data) && data[v] == '"' && data[v+1] == '+' {
+			out = append(out, v+1)
+		}
+	}
+	return out
+}
+
+// zjMemberIsNull / zjMemberContainsNull report whether some member named key
+// at the given depth has the value null, or has null anywhere inside its
+// value (an array element or map value).
+func zjMemberIsNull(data []byte, key string, depth int) bool {
+	for _, v := range zjMemberValueStarts(data, key, depth, nil) {
+		if bytes.HasPrefix(data[v:], []byte("null")) {
+			return true
+		}
+	}
+	return false
+}
+
+func zjMemberContainsNull(data []byte, key string, depth int) bool {
+	for _, v := range zjMemberValueStarts(data, key, depth, nil) {
+		if bytes.Contains(data[v:zjValueEnd(data, v)], []byte("null")) {
+			return true
+		}
+	}
+	return false
+}
+
+// zjDeleteBytes returns data with the bytes at the given indices removed.
+func zjDeleteBytes(data []byte, at []int) []byte {
+	drop := make(map[int]bool, len(at))
+	for _, i := range at {
+		drop[i] = true
+	}
+	out := make([]byte, 0, len(data))
+	for i, c := range data {
+		if !drop[i] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// zjStripStringOptPlusEvent returns data with the leading '+' removed from every
+// quoted value on one of Event's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusEvent(data []byte) ([]byte, bool) {
+	return data, false // Event has no `,string` fields
+}
+
+// zjStricterCausedByPlusEvent reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusEvent(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusEvent(data)
+	if !ok {
+		return false
+	}
+	var v Event
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerEvent reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from Event — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerEvent(data []byte) bool {
+	return false ||
+		zjMemberIsNull(data, "seq", 1)
+}
+
+// zjDecodeStricterAllowedEvent is the decode-error oracle-direction allowlist for
+// Event: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedEvent(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusEvent(data)
+}
+
+// zjStripStringOptPlusRawHolder returns data with the leading '+' removed from every
+// quoted value on one of RawHolder's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusRawHolder(data []byte) ([]byte, bool) {
+	return data, false // RawHolder has no `,string` fields
+}
+
+// zjStricterCausedByPlusRawHolder reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusRawHolder(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusRawHolder(data)
+	if !ok {
+		return false
+	}
+	var v RawHolder
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerRawHolder reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from RawHolder — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerRawHolder(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from RawHolder
+}
+
+// zjDecodeStricterAllowedRawHolder is the decode-error oracle-direction allowlist for
+// RawHolder: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedRawHolder(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusRawHolder(data)
+}
+
+// zjStripStringOptPlusOmitZeroCases returns data with the leading '+' removed from every
+// quoted value on one of OmitZeroCases's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusOmitZeroCases(data []byte) ([]byte, bool) {
+	return data, false // OmitZeroCases has no `,string` fields
+}
+
+// zjStricterCausedByPlusOmitZeroCases reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusOmitZeroCases(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusOmitZeroCases(data)
+	if !ok {
+		return false
+	}
+	var v OmitZeroCases
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerOmitZeroCases reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from OmitZeroCases — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerOmitZeroCases(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from OmitZeroCases
+}
+
+// zjDecodeStricterAllowedOmitZeroCases is the decode-error oracle-direction allowlist for
+// OmitZeroCases: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedOmitZeroCases(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusOmitZeroCases(data)
+}
+
+// zjStripStringOptPlusStringOptCases returns data with the leading '+' removed from every
+// quoted value on one of StringOptCases's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusStringOptCases(data []byte) ([]byte, bool) {
+	var at []int
+	at = zjPlusStringMemberSites(data, "count", 1, at)
+	at = zjPlusStringMemberSites(data, "amount", 1, at)
+	if len(at) == 0 {
+		return data, false
+	}
+	return zjDeleteBytes(data, at), true
+}
+
+// zjStricterCausedByPlusStringOptCases reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusStringOptCases(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusStringOptCases(data)
+	if !ok {
+		return false
+	}
+	var v StringOptCases
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerStringOptCases reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from StringOptCases — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerStringOptCases(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from StringOptCases
+}
+
+// zjDecodeStricterAllowedStringOptCases is the decode-error oracle-direction allowlist for
+// StringOptCases: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedStringOptCases(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusStringOptCases(data)
+}
+
+// zjStripStringOptPlusAppenderCases returns data with the leading '+' removed from every
+// quoted value on one of AppenderCases's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusAppenderCases(data []byte) ([]byte, bool) {
+	return data, false // AppenderCases has no `,string` fields
+}
+
+// zjStricterCausedByPlusAppenderCases reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusAppenderCases(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusAppenderCases(data)
+	if !ok {
+		return false
+	}
+	var v AppenderCases
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerAppenderCases reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from AppenderCases — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerAppenderCases(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from AppenderCases
+}
+
+// zjDecodeStricterAllowedAppenderCases is the decode-error oracle-direction allowlist for
+// AppenderCases: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedAppenderCases(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusAppenderCases(data)
+}
+
+// zjStripStringOptPlusMapFieldsLike returns data with the leading '+' removed from every
+// quoted value on one of MapFieldsLike's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusMapFieldsLike(data []byte) ([]byte, bool) {
+	return data, false // MapFieldsLike has no `,string` fields
+}
+
+// zjStricterCausedByPlusMapFieldsLike reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusMapFieldsLike(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusMapFieldsLike(data)
+	if !ok {
+		return false
+	}
+	var v MapFieldsLike
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerMapFieldsLike reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from MapFieldsLike — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerMapFieldsLike(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from MapFieldsLike
+}
+
+// zjDecodeStricterAllowedMapFieldsLike is the decode-error oracle-direction allowlist for
+// MapFieldsLike: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedMapFieldsLike(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusMapFieldsLike(data)
+}
+
+// zjStripStringOptPlusEventLeg returns data with the leading '+' removed from every
+// quoted value on one of EventLeg's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusEventLeg(data []byte) ([]byte, bool) {
+	return data, false // EventLeg has no `,string` fields
+}
+
+// zjStricterCausedByPlusEventLeg reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusEventLeg(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusEventLeg(data)
+	if !ok {
+		return false
+	}
+	var v EventLeg
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerEventLeg reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from EventLeg — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerEventLeg(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from EventLeg
+}
+
+// zjDecodeStricterAllowedEventLeg is the decode-error oracle-direction allowlist for
+// EventLeg: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedEventLeg(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusEventLeg(data)
+}
+
+// zjStripStringOptPlusEmbedMid returns data with the leading '+' removed from every
+// quoted value on one of EmbedMid's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusEmbedMid(data []byte) ([]byte, bool) {
+	return data, false // EmbedMid has no `,string` fields
+}
+
+// zjStricterCausedByPlusEmbedMid reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusEmbedMid(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusEmbedMid(data)
+	if !ok {
+		return false
+	}
+	var v EmbedMid
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerEmbedMid reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from EmbedMid — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerEmbedMid(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from EmbedMid
+}
+
+// zjDecodeStricterAllowedEmbedMid is the decode-error oracle-direction allowlist for
+// EmbedMid: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedEmbedMid(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusEmbedMid(data)
+}
+
+// zjStripStringOptPlusEventProjection returns data with the leading '+' removed from every
+// quoted value on one of EventProjection's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusEventProjection(data []byte) ([]byte, bool) {
+	return data, false // EventProjection has no `,string` fields
+}
+
+// zjStricterCausedByPlusEventProjection reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusEventProjection(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusEventProjection(data)
+	if !ok {
+		return false
+	}
+	var v EventProjection
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerEventProjection reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from EventProjection — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerEventProjection(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from EventProjection
+}
+
+// zjDecodeStricterAllowedEventProjection is the decode-error oracle-direction allowlist for
+// EventProjection: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedEventProjection(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusEventProjection(data)
+}
+
+// zjStripStringOptPlusInteractionOmitZero returns data with the leading '+' removed from every
+// quoted value on one of InteractionOmitZero's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusInteractionOmitZero(data []byte) ([]byte, bool) {
+	return data, false // InteractionOmitZero has no `,string` fields
+}
+
+// zjStricterCausedByPlusInteractionOmitZero reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusInteractionOmitZero(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusInteractionOmitZero(data)
+	if !ok {
+		return false
+	}
+	var v InteractionOmitZero
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerInteractionOmitZero reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from InteractionOmitZero — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerInteractionOmitZero(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from InteractionOmitZero
+}
+
+// zjDecodeStricterAllowedInteractionOmitZero is the decode-error oracle-direction allowlist for
+// InteractionOmitZero: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedInteractionOmitZero(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusInteractionOmitZero(data)
+}
+
+// zjStripStringOptPlusMapPointerMethods returns data with the leading '+' removed from every
+// quoted value on one of MapPointerMethods's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusMapPointerMethods(data []byte) ([]byte, bool) {
+	return data, false // MapPointerMethods has no `,string` fields
+}
+
+// zjStricterCausedByPlusMapPointerMethods reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusMapPointerMethods(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusMapPointerMethods(data)
+	if !ok {
+		return false
+	}
+	var v MapPointerMethods
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerMapPointerMethods reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from MapPointerMethods — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerMapPointerMethods(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from MapPointerMethods
+}
+
+// zjDecodeStricterAllowedMapPointerMethods is the decode-error oracle-direction allowlist for
+// MapPointerMethods: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedMapPointerMethods(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusMapPointerMethods(data)
+}
+
+// zjStripStringOptPlusReuseSemantics returns data with the leading '+' removed from every
+// quoted value on one of ReuseSemantics's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusReuseSemantics(data []byte) ([]byte, bool) {
+	return data, false // ReuseSemantics has no `,string` fields
+}
+
+// zjStricterCausedByPlusReuseSemantics reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusReuseSemantics(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusReuseSemantics(data)
+	if !ok {
+		return false
+	}
+	var v ReuseSemantics
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerReuseSemantics reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from ReuseSemantics — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerReuseSemantics(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from ReuseSemantics
+}
+
+// zjDecodeStricterAllowedReuseSemantics is the decode-error oracle-direction allowlist for
+// ReuseSemantics: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedReuseSemantics(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusReuseSemantics(data)
+}
+
+// zjStripStringOptPlusOrderedSideEffects returns data with the leading '+' removed from every
+// quoted value on one of OrderedSideEffects's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusOrderedSideEffects(data []byte) ([]byte, bool) {
+	return data, false // OrderedSideEffects has no `,string` fields
+}
+
+// zjStricterCausedByPlusOrderedSideEffects reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusOrderedSideEffects(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusOrderedSideEffects(data)
+	if !ok {
+		return false
+	}
+	var v OrderedSideEffects
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerOrderedSideEffects reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from OrderedSideEffects — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerOrderedSideEffects(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from OrderedSideEffects
+}
+
+// zjDecodeStricterAllowedOrderedSideEffects is the decode-error oracle-direction allowlist for
+// OrderedSideEffects: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedOrderedSideEffects(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusOrderedSideEffects(data)
+}
+
+// zjStripStringOptPlusPoolAppenderHolder returns data with the leading '+' removed from every
+// quoted value on one of PoolAppenderHolder's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusPoolAppenderHolder(data []byte) ([]byte, bool) {
+	return data, false // PoolAppenderHolder has no `,string` fields
+}
+
+// zjStricterCausedByPlusPoolAppenderHolder reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusPoolAppenderHolder(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusPoolAppenderHolder(data)
+	if !ok {
+		return false
+	}
+	var v PoolAppenderHolder
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerPoolAppenderHolder reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from PoolAppenderHolder — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerPoolAppenderHolder(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from PoolAppenderHolder
+}
+
+// zjDecodeStricterAllowedPoolAppenderHolder is the decode-error oracle-direction allowlist for
+// PoolAppenderHolder: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedPoolAppenderHolder(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusPoolAppenderHolder(data)
+}
+
+// zjStripStringOptPlusBytesCases returns data with the leading '+' removed from every
+// quoted value on one of BytesCases's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusBytesCases(data []byte) ([]byte, bool) {
+	return data, false // BytesCases has no `,string` fields
+}
+
+// zjStricterCausedByPlusBytesCases reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusBytesCases(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusBytesCases(data)
+	if !ok {
+		return false
+	}
+	var v BytesCases
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerBytesCases reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from BytesCases — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerBytesCases(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from BytesCases
+}
+
+// zjDecodeStricterAllowedBytesCases is the decode-error oracle-direction allowlist for
+// BytesCases: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedBytesCases(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusBytesCases(data)
+}
+
+// zjStripStringOptPlusEventList returns data with the leading '+' removed from every
+// quoted value on one of EventList's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusEventList(data []byte) ([]byte, bool) {
+	return data, false // EventList has no `,string` fields
+}
+
+// zjStricterCausedByPlusEventList reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusEventList(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusEventList(data)
+	if !ok {
+		return false
+	}
+	var v EventList
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerEventList reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from EventList — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerEventList(data []byte) bool {
+	return false ||
+		zjMemberIsNull(data, "seq", 2)
+}
+
+// zjDecodeStricterAllowedEventList is the decode-error oracle-direction allowlist for
+// EventList: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedEventList(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusEventList(data)
+}
+
+// zjStripStringOptPlusLegPtrList returns data with the leading '+' removed from every
+// quoted value on one of LegPtrList's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusLegPtrList(data []byte) ([]byte, bool) {
+	return data, false // LegPtrList has no `,string` fields
+}
+
+// zjStricterCausedByPlusLegPtrList reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusLegPtrList(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusLegPtrList(data)
+	if !ok {
+		return false
+	}
+	var v LegPtrList
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerLegPtrList reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from LegPtrList — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerLegPtrList(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from LegPtrList
+}
+
+// zjDecodeStricterAllowedLegPtrList is the decode-error oracle-direction allowlist for
+// LegPtrList: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedLegPtrList(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusLegPtrList(data)
+}
+
+// zjStripStringOptPlusLegIndex returns data with the leading '+' removed from every
+// quoted value on one of LegIndex's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusLegIndex(data []byte) ([]byte, bool) {
+	return data, false // LegIndex has no `,string` fields
+}
+
+// zjStricterCausedByPlusLegIndex reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusLegIndex(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusLegIndex(data)
+	if !ok {
+		return false
+	}
+	var v LegIndex
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerLegIndex reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from LegIndex — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerLegIndex(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from LegIndex
+}
+
+// zjDecodeStricterAllowedLegIndex is the decode-error oracle-direction allowlist for
+// LegIndex: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedLegIndex(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusLegIndex(data)
+}
+
+// zjStripStringOptPlusPointerMethodIndex returns data with the leading '+' removed from every
+// quoted value on one of PointerMethodIndex's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusPointerMethodIndex(data []byte) ([]byte, bool) {
+	return data, false // PointerMethodIndex has no `,string` fields
+}
+
+// zjStricterCausedByPlusPointerMethodIndex reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusPointerMethodIndex(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusPointerMethodIndex(data)
+	if !ok {
+		return false
+	}
+	var v PointerMethodIndex
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerPointerMethodIndex reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from PointerMethodIndex — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerPointerMethodIndex(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from PointerMethodIndex
+}
+
+// zjDecodeStricterAllowedPointerMethodIndex is the decode-error oracle-direction allowlist for
+// PointerMethodIndex: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedPointerMethodIndex(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusPointerMethodIndex(data)
+}
+
+// zjStripStringOptPlusPointerQuotedIndex returns data with the leading '+' removed from every
+// quoted value on one of PointerQuotedIndex's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusPointerQuotedIndex(data []byte) ([]byte, bool) {
+	return data, false // PointerQuotedIndex has no `,string` fields
+}
+
+// zjStricterCausedByPlusPointerQuotedIndex reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusPointerQuotedIndex(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusPointerQuotedIndex(data)
+	if !ok {
+		return false
+	}
+	var v PointerQuotedIndex
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerPointerQuotedIndex reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from PointerQuotedIndex — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerPointerQuotedIndex(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from PointerQuotedIndex
+}
+
+// zjDecodeStricterAllowedPointerQuotedIndex is the decode-error oracle-direction allowlist for
+// PointerQuotedIndex: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedPointerQuotedIndex(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusPointerQuotedIndex(data)
+}
+
+// zjStripStringOptPlusRawList returns data with the leading '+' removed from every
+// quoted value on one of RawList's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusRawList(data []byte) ([]byte, bool) {
+	return data, false // RawList has no `,string` fields
+}
+
+// zjStricterCausedByPlusRawList reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusRawList(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusRawList(data)
+	if !ok {
+		return false
+	}
+	var v RawList
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerRawList reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from RawList — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerRawList(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from RawList
+}
+
+// zjDecodeStricterAllowedRawList is the decode-error oracle-direction allowlist for
+// RawList: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedRawList(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusRawList(data)
+}
+
+// zjStripStringOptPlusRawIndex returns data with the leading '+' removed from every
+// quoted value on one of RawIndex's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusRawIndex(data []byte) ([]byte, bool) {
+	return data, false // RawIndex has no `,string` fields
+}
+
+// zjStricterCausedByPlusRawIndex reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusRawIndex(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusRawIndex(data)
+	if !ok {
+		return false
+	}
+	var v RawIndex
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerRawIndex reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from RawIndex — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerRawIndex(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from RawIndex
+}
+
+// zjDecodeStricterAllowedRawIndex is the decode-error oracle-direction allowlist for
+// RawIndex: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedRawIndex(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusRawIndex(data)
+}
+
+// zjStripStringOptPlusRawHolderList returns data with the leading '+' removed from every
+// quoted value on one of RawHolderList's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusRawHolderList(data []byte) ([]byte, bool) {
+	return data, false // RawHolderList has no `,string` fields
+}
+
+// zjStricterCausedByPlusRawHolderList reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusRawHolderList(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusRawHolderList(data)
+	if !ok {
+		return false
+	}
+	var v RawHolderList
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerRawHolderList reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from RawHolderList — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerRawHolderList(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from RawHolderList
+}
+
+// zjDecodeStricterAllowedRawHolderList is the decode-error oracle-direction allowlist for
+// RawHolderList: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedRawHolderList(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusRawHolderList(data)
+}
+
+// zjStripStringOptPlusDecimalList returns data with the leading '+' removed from every
+// quoted value on one of DecimalList's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusDecimalList(data []byte) ([]byte, bool) {
+	return data, false // DecimalList has no `,string` fields
+}
+
+// zjStricterCausedByPlusDecimalList reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusDecimalList(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusDecimalList(data)
+	if !ok {
+		return false
+	}
+	var v DecimalList
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerDecimalList reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from DecimalList — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerDecimalList(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from DecimalList
+}
+
+// zjDecodeStricterAllowedDecimalList is the decode-error oracle-direction allowlist for
+// DecimalList: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedDecimalList(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusDecimalList(data)
+}
+
+// zjStripStringOptPlusPointerCollections returns data with the leading '+' removed from every
+// quoted value on one of PointerCollections's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusPointerCollections(data []byte) ([]byte, bool) {
+	return data, false // PointerCollections has no `,string` fields
+}
+
+// zjStricterCausedByPlusPointerCollections reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusPointerCollections(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusPointerCollections(data)
+	if !ok {
+		return false
+	}
+	var v PointerCollections
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerPointerCollections reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from PointerCollections — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerPointerCollections(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from PointerCollections
+}
+
+// zjDecodeStricterAllowedPointerCollections is the decode-error oracle-direction allowlist for
+// PointerCollections: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedPointerCollections(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusPointerCollections(data)
+}
+
+// zjStripStringOptPlusNumberCases returns data with the leading '+' removed from every
+// quoted value on one of NumberCases's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusNumberCases(data []byte) ([]byte, bool) {
+	var at []int
+	at = zjPlusStringMemberSites(data, "cnt_s", 1, at)
+	at = zjPlusStringMemberSites(data, "ptr_s", 1, at)
+	if len(at) == 0 {
+		return data, false
+	}
+	return zjDeleteBytes(data, at), true
+}
+
+// zjStricterCausedByPlusNumberCases reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusNumberCases(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusNumberCases(data)
+	if !ok {
+		return false
+	}
+	var v NumberCases
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerNumberCases reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from NumberCases — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerNumberCases(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from NumberCases
+}
+
+// zjDecodeStricterAllowedNumberCases is the decode-error oracle-direction allowlist for
+// NumberCases: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedNumberCases(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusNumberCases(data)
+}
+
+// zjStripStringOptPlusNullCases returns data with the leading '+' removed from every
+// quoted value on one of NullCases's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusNullCases(data []byte) ([]byte, bool) {
+	return data, false // NullCases has no `,string` fields
+}
+
+// zjStricterCausedByPlusNullCases reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusNullCases(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusNullCases(data)
+	if !ok {
+		return false
+	}
+	var v NullCases
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerNullCases reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from NullCases — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerNullCases(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from NullCases
+}
+
+// zjDecodeStricterAllowedNullCases is the decode-error oracle-direction allowlist for
+// NullCases: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedNullCases(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusNullCases(data)
+}
+
+// zjStripStringOptPlusEventMeta returns data with the leading '+' removed from every
+// quoted value on one of EventMeta's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusEventMeta(data []byte) ([]byte, bool) {
+	return data, false // EventMeta has no `,string` fields
+}
+
+// zjStricterCausedByPlusEventMeta reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusEventMeta(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusEventMeta(data)
+	if !ok {
+		return false
+	}
+	var v EventMeta
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerEventMeta reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from EventMeta — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerEventMeta(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from EventMeta
+}
+
+// zjDecodeStricterAllowedEventMeta is the decode-error oracle-direction allowlist for
+// EventMeta: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedEventMeta(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusEventMeta(data)
+}
+
+// zjStripStringOptPlusReuseInner returns data with the leading '+' removed from every
+// quoted value on one of ReuseInner's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusReuseInner(data []byte) ([]byte, bool) {
+	return data, false // ReuseInner has no `,string` fields
+}
+
+// zjStricterCausedByPlusReuseInner reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusReuseInner(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusReuseInner(data)
+	if !ok {
+		return false
+	}
+	var v ReuseInner
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerReuseInner reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from ReuseInner — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerReuseInner(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from ReuseInner
+}
+
+// zjDecodeStricterAllowedReuseInner is the decode-error oracle-direction allowlist for
+// ReuseInner: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedReuseInner(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusReuseInner(data)
+}
 
 func zjFuzzHugeExponent(data []byte) bool {
 	for i, c := range data {
@@ -181,7 +1357,7 @@ func FuzzEventZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw Event
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedEvent(data) {
 				var stdRaw Event
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -200,6 +1376,9 @@ func FuzzEventZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerEvent(canon) {
 			return
 		}
 		var viaStd Event
@@ -427,7 +1606,9 @@ func FuzzRawHolderZJSON(f *testing.F) {
 	f.Add([]byte("{\"table\":\"x\"}"))
 	f.Add([]byte("{\"table\":\"\\u0078\"}"))
 	f.Add(append(append([]byte("{\"table\":\""), byte(0xff)), []byte("\"}")...))
+	f.Add([]byte("{\"set\":{ \"x\": [1, \"y\"] }}"))
 	f.Add([]byte("{\"set\":null}"))
+	f.Add([]byte("{\"where\":{ \"x\": [1, \"y\"] }}"))
 	f.Add([]byte("{\"where\":null}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
@@ -437,48 +1618,121 @@ func FuzzRawHolderZJSON(f *testing.F) {
 			var stdRaw, zjRaw RawHolder
 			stdErr := json.Unmarshal(data, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"table", "set", "where"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Table")) {
+			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"table", "set", "where"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Table") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Set") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Where")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
-		var viaZJ RawHolder
-		if err := viaZJ.UnmarshalZJSON(data); err != nil {
+		{
+			var zjRaw RawHolder
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedRawHolder(data) {
+				var stdRaw RawHolder
+				if json.Unmarshal(data, &stdRaw) == nil {
+					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
+				}
+			}
+		}
+
+		{
+			var viaZJ RawHolder
+			if err := viaZJ.UnmarshalZJSON(data); err == nil {
+				if enc, err := viaZJ.AppendZJSON(nil); err == nil {
+					if !json.Valid(enc) {
+						t.Fatalf("zerojson emitted invalid JSON after Raw decode: %q", enc)
+					}
+					var again RawHolder
+					if err := again.UnmarshalZJSON(enc); err != nil {
+						t.Fatalf("zerojson could not re-decode Raw output %q: %v", enc, err)
+					}
+					before, err := json.Marshal(&viaZJ)
+					if err != nil {
+						t.Fatal(err)
+					}
+					after, err := json.Marshal(&again)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !bytes.Equal(before, after) {
+						t.Fatalf("Raw round-trip changed value\nfirst: %q\nsecond: %q", before, after)
+					}
+				}
+			}
+		}
+		var seed RawHolder
+		if serr := json.Unmarshal(data, &seed); serr != nil {
+			if zjStdlibValueError(data, serr, "table", "set", "where") {
+				var zj RawHolder
+				if zj.UnmarshalZJSON(data) == nil {
+					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
+				}
+			}
 			return
+		}
+		canon, err := json.Marshal(&seed)
+		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerRawHolder(canon) {
+			return
+		}
+		var viaStd RawHolder
+		if json.Unmarshal(canon, &viaStd) != nil {
+			return
+		}
+		var viaZJ RawHolder
+		if err := viaZJ.UnmarshalZJSON(canon); err != nil {
+			t.Fatalf("zerojson rejected canonical %q: %v", canon, err)
+		}
+		x, _ := json.Marshal(&viaStd)
+		y, _ := json.Marshal(&viaZJ)
+		if !bytes.Equal(x, y) {
+			t.Fatalf("decode divergence\ninput: %s\nstdlib: %s\nzerojson: %s", canon, x, y)
+		}
+		var viaFallback RawHolder
+		lFallback := zerojson.NewLexer(canon, false)
+		zjDecodeFallbackRawHolder(&lFallback, &viaFallback, &zjArenaRawHolder{})
+		lFallback.Finish()
+		if err := lFallback.Err(); err != nil {
+			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
+		}
+		if !reflect.DeepEqual(&viaFallback, &viaZJ) {
+			t.Fatalf("ordered-vs-fallback divergence\ninput: %s\nfallback-only: %+v\npublic (ordered+fallback): %+v", canon, &viaFallback, &viaZJ)
 		}
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
 		}
-		if !json.Valid(enc) {
-			t.Fatalf("zerojson emitted invalid JSON after Raw decode: %q", enc)
+		var reZJ RawHolder
+		if err := reZJ.UnmarshalZJSON(enc); err != nil {
+			t.Fatalf("zerojson could not re-decode its own output %q: %v", enc, err)
 		}
-		var again RawHolder
-		if err := again.UnmarshalZJSON(enc); err != nil {
-			t.Fatalf("zerojson could not re-decode Raw output %q: %v", enc, err)
-		}
-		encAgain, err := again.AppendZJSON(nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(enc, encAgain) {
-			t.Fatalf("Raw round-trip did not reach a fixed point\nfirst:  %q\nsecond: %q", enc, encAgain)
+		var reStd RawHolder
+		if err := json.Unmarshal(enc, &reStd); err != nil {
+			t.Fatalf("stdlib rejected zerojson output %q: %v", enc, err)
 		}
 	})
 }
 
 func FuzzRawHolderZJSONSequence(f *testing.F) {
-	f.Add([]byte("{}"), []byte("{}"), []byte("{\"table\":\"x\"}"), []byte("{\"set\":null}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{}"), []byte("{\"table\":\"x\"}"), []byte("{\"set\":{ \"x\": [1, \"y\"] }}"), uint8(0x0))
 	f.Add([]byte("{}"), []byte("{}"), []byte("{"), []byte("{\"table\":\"x\"}"), uint8(0xf))
 	f.Add([]byte("{}"), []byte("{\"table\":\"x\"}"), []byte("{}"), []byte("["), uint8(0x5))
-	f.Add([]byte("{"), []byte("{}"), []byte("{\"set\":null}"), []byte("{}"), uint8(0xa))
-	f.Add([]byte("{\"table\":\"x\"}"), []byte("{}"), []byte("{\"set\":null}"), []byte("{\"where\":null}"), uint8(0x0))
-	f.Add([]byte("{}"), []byte("{\"table\":\"x\"}"), []byte("{"), []byte("{\"set\":null}"), uint8(0xf))
-	f.Add([]byte("{\"table\":\"x\"}"), []byte("{\"set\":null}"), []byte("{}"), []byte("["), uint8(0x5))
-	f.Add([]byte("{"), []byte("{\"table\":\"x\"}"), []byte("{\"where\":null}"), []byte("{}"), uint8(0xa))
-	f.Add([]byte("{\"set\":null}"), []byte("{}"), []byte("{\"where\":null}"), []byte("{}"), uint8(0x0))
-	f.Add([]byte("{}"), []byte("{\"set\":null}"), []byte("{"), []byte("{\"where\":null}"), uint8(0xf))
-	f.Add([]byte("{\"set\":null}"), []byte("{\"where\":null}"), []byte("{}"), []byte("["), uint8(0x5))
-	f.Add([]byte("{"), []byte("{\"set\":null}"), []byte("{}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{"), []byte("{}"), []byte("{\"set\":{ \"x\": [1, \"y\"] }}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"table\":\"x\"}"), []byte("{}"), []byte("{\"set\":{ \"x\": [1, \"y\"] }}"), []byte("{\"set\":null}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"table\":\"x\"}"), []byte("{"), []byte("{\"set\":{ \"x\": [1, \"y\"] }}"), uint8(0xf))
+	f.Add([]byte("{\"table\":\"x\"}"), []byte("{\"set\":{ \"x\": [1, \"y\"] }}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"table\":\"x\"}"), []byte("{\"set\":null}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"set\":{ \"x\": [1, \"y\"] }}"), []byte("{}"), []byte("{\"set\":null}"), []byte("{\"where\":{ \"x\": [1, \"y\"] }}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"set\":{ \"x\": [1, \"y\"] }}"), []byte("{"), []byte("{\"set\":null}"), uint8(0xf))
+	f.Add([]byte("{\"set\":{ \"x\": [1, \"y\"] }}"), []byte("{\"set\":null}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"set\":{ \"x\": [1, \"y\"] }}"), []byte("{\"where\":{ \"x\": [1, \"y\"] }}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"set\":null}"), []byte("{}"), []byte("{\"where\":{ \"x\": [1, \"y\"] }}"), []byte("{\"where\":null}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"set\":null}"), []byte("{"), []byte("{\"where\":{ \"x\": [1, \"y\"] }}"), uint8(0xf))
+	f.Add([]byte("{\"set\":null}"), []byte("{\"where\":{ \"x\": [1, \"y\"] }}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"set\":null}"), []byte("{\"where\":null}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"where\":{ \"x\": [1, \"y\"] }}"), []byte("{}"), []byte("{\"where\":null}"), []byte("{}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"where\":{ \"x\": [1, \"y\"] }}"), []byte("{"), []byte("{\"where\":null}"), uint8(0xf))
+	f.Add([]byte("{\"where\":{ \"x\": [1, \"y\"] }}"), []byte("{\"where\":null}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"where\":{ \"x\": [1, \"y\"] }}"), []byte("{}"), []byte("{}"), uint8(0xa))
 	f.Add([]byte("{\"where\":null}"), []byte("{}"), []byte("{}"), []byte("{\"table\":\"x\"}"), uint8(0x0))
 	f.Add([]byte("{}"), []byte("{\"where\":null}"), []byte("{"), []byte("{}"), uint8(0xf))
 	f.Add([]byte("{\"where\":null}"), []byte("{}"), []byte("{}"), []byte("["), uint8(0x5))
@@ -546,7 +1800,7 @@ func FuzzOmitZeroCasesZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw OmitZeroCases
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedOmitZeroCases(data) {
 				var stdRaw OmitZeroCases
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -565,6 +1819,9 @@ func FuzzOmitZeroCasesZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerOmitZeroCases(canon) {
 			return
 		}
 		var viaStd OmitZeroCases
@@ -701,7 +1958,7 @@ func FuzzStringOptCasesZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw StringOptCases
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedStringOptCases(data) {
 				var stdRaw StringOptCases
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -720,6 +1977,9 @@ func FuzzStringOptCasesZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerStringOptCases(canon) {
 			return
 		}
 		var viaStd StringOptCases
@@ -820,7 +2080,7 @@ func FuzzAppenderCasesZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw AppenderCases
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedAppenderCases(data) {
 				var stdRaw AppenderCases
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -839,6 +2099,9 @@ func FuzzAppenderCasesZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerAppenderCases(canon) {
 			return
 		}
 		var viaStd AppenderCases
@@ -950,7 +2213,7 @@ func FuzzMapFieldsLikeZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw MapFieldsLike
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedMapFieldsLike(data) {
 				var stdRaw MapFieldsLike
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -969,6 +2232,9 @@ func FuzzMapFieldsLikeZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerMapFieldsLike(canon) {
 			return
 		}
 		var viaStd MapFieldsLike
@@ -1086,7 +2352,7 @@ func FuzzEventLegZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw EventLeg
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedEventLeg(data) {
 				var stdRaw EventLeg
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -1105,6 +2371,9 @@ func FuzzEventLegZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerEventLeg(canon) {
 			return
 		}
 		var viaStd EventLeg
@@ -1225,7 +2494,7 @@ func FuzzEmbedMidZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw EmbedMid
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedEmbedMid(data) {
 				var stdRaw EmbedMid
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -1244,6 +2513,9 @@ func FuzzEmbedMidZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerEmbedMid(canon) {
 			return
 		}
 		var viaStd EmbedMid
@@ -1362,7 +2634,7 @@ func FuzzEventProjectionZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw EventProjection
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedEventProjection(data) {
 				var stdRaw EventProjection
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -1381,6 +2653,9 @@ func FuzzEventProjectionZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerEventProjection(canon) {
 			return
 		}
 		var viaStd EventProjection
@@ -1491,7 +2766,7 @@ func FuzzInteractionOmitZeroZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw InteractionOmitZero
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedInteractionOmitZero(data) {
 				var stdRaw InteractionOmitZero
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -1510,6 +2785,9 @@ func FuzzInteractionOmitZeroZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerInteractionOmitZero(canon) {
 			return
 		}
 		var viaStd InteractionOmitZero
@@ -1618,7 +2896,7 @@ func FuzzMapPointerMethodsZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw MapPointerMethods
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedMapPointerMethods(data) {
 				var stdRaw MapPointerMethods
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -1637,6 +2915,9 @@ func FuzzMapPointerMethodsZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerMapPointerMethods(canon) {
 			return
 		}
 		var viaStd MapPointerMethods
@@ -1746,7 +3027,7 @@ func FuzzReuseSemanticsZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw ReuseSemantics
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedReuseSemantics(data) {
 				var stdRaw ReuseSemantics
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -1765,6 +3046,9 @@ func FuzzReuseSemanticsZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerReuseSemantics(canon) {
 			return
 		}
 		var viaStd ReuseSemantics
@@ -1877,7 +3161,7 @@ func FuzzOrderedSideEffectsZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw OrderedSideEffects
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedOrderedSideEffects(data) {
 				var stdRaw OrderedSideEffects
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -1896,6 +3180,9 @@ func FuzzOrderedSideEffectsZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerOrderedSideEffects(canon) {
 			return
 		}
 		var viaStd OrderedSideEffects
@@ -1995,7 +3282,7 @@ func FuzzPoolAppenderHolderZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw PoolAppenderHolder
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedPoolAppenderHolder(data) {
 				var stdRaw PoolAppenderHolder
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -2014,6 +3301,9 @@ func FuzzPoolAppenderHolderZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerPoolAppenderHolder(canon) {
 			return
 		}
 		var viaStd PoolAppenderHolder
@@ -2124,7 +3414,7 @@ func FuzzBytesCasesZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw BytesCases
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedBytesCases(data) {
 				var stdRaw BytesCases
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -2143,6 +3433,9 @@ func FuzzBytesCasesZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerBytesCases(canon) {
 			return
 		}
 		var viaStd BytesCases
@@ -2267,7 +3560,7 @@ func FuzzEventListZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw EventList
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedEventList(data) {
 				var stdRaw EventList
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -2286,6 +3579,9 @@ func FuzzEventListZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerEventList(canon) {
 			return
 		}
 		var viaStd EventList
@@ -2376,7 +3672,7 @@ func FuzzLegPtrListZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw LegPtrList
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedLegPtrList(data) {
 				var stdRaw LegPtrList
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -2395,6 +3691,9 @@ func FuzzLegPtrListZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerLegPtrList(canon) {
 			return
 		}
 		var viaStd LegPtrList
@@ -2485,7 +3784,7 @@ func FuzzLegIndexZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw LegIndex
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedLegIndex(data) {
 				var stdRaw LegIndex
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -2504,6 +3803,9 @@ func FuzzLegIndexZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerLegIndex(canon) {
 			return
 		}
 		var viaStd LegIndex
@@ -2594,7 +3896,7 @@ func FuzzPointerMethodIndexZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw PointerMethodIndex
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedPointerMethodIndex(data) {
 				var stdRaw PointerMethodIndex
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -2613,6 +3915,9 @@ func FuzzPointerMethodIndexZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerPointerMethodIndex(canon) {
 			return
 		}
 		var viaStd PointerMethodIndex
@@ -2703,7 +4008,7 @@ func FuzzPointerQuotedIndexZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw PointerQuotedIndex
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedPointerQuotedIndex(data) {
 				var stdRaw PointerQuotedIndex
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -2722,6 +4027,9 @@ func FuzzPointerQuotedIndexZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerPointerQuotedIndex(canon) {
 			return
 		}
 		var viaStd PointerQuotedIndex
@@ -2804,50 +4112,118 @@ func FuzzPointerQuotedIndexZJSONSequence(f *testing.F) {
 
 func FuzzRawListZJSON(f *testing.F) {
 	f.Add([]byte(`[]`))
+	f.Add([]byte("[{ \"x\": [1, \"y\"] }]"))
 	f.Add([]byte("[null]"))
 	f.Add([]byte(`null`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		var viaZJ RawList
-		if err := viaZJ.UnmarshalZJSON(data); err != nil {
+		{
+			var stdRaw, zjRaw RawList
+			stdErr := json.Unmarshal(data, &stdRaw)
+			zjErr := zjRaw.UnmarshalZJSON(data)
+			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{}) && (!reflect.DeepEqual(&stdRaw, &zjRaw)) {
+				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
+			}
+		}
+		{
+			var zjRaw RawList
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedRawList(data) {
+				var stdRaw RawList
+				if json.Unmarshal(data, &stdRaw) == nil {
+					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
+				}
+			}
+		}
+
+		{
+			var viaZJ RawList
+			if err := viaZJ.UnmarshalZJSON(data); err == nil {
+				if enc, err := viaZJ.AppendZJSON(nil); err == nil {
+					if !json.Valid(enc) {
+						t.Fatalf("zerojson emitted invalid JSON after Raw decode: %q", enc)
+					}
+					var again RawList
+					if err := again.UnmarshalZJSON(enc); err != nil {
+						t.Fatalf("zerojson could not re-decode Raw output %q: %v", enc, err)
+					}
+					before, err := json.Marshal(&viaZJ)
+					if err != nil {
+						t.Fatal(err)
+					}
+					after, err := json.Marshal(&again)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !bytes.Equal(before, after) {
+						t.Fatalf("Raw round-trip changed value\nfirst: %q\nsecond: %q", before, after)
+					}
+				}
+			}
+		}
+		var seed RawList
+		if serr := json.Unmarshal(data, &seed); serr != nil {
+			if zjStdlibValueError(data, serr) {
+				var zj RawList
+				if zj.UnmarshalZJSON(data) == nil {
+					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
+				}
+			}
 			return
+		}
+		canon, err := json.Marshal(&seed)
+		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerRawList(canon) {
+			return
+		}
+		var viaStd RawList
+		if json.Unmarshal(canon, &viaStd) != nil {
+			return
+		}
+		var viaZJ RawList
+		if err := viaZJ.UnmarshalZJSON(canon); err != nil {
+			t.Fatalf("zerojson rejected canonical %q: %v", canon, err)
+		}
+		x, _ := json.Marshal(&viaStd)
+		y, _ := json.Marshal(&viaZJ)
+		if !bytes.Equal(x, y) {
+			t.Fatalf("decode divergence\ninput: %s\nstdlib: %s\nzerojson: %s", canon, x, y)
 		}
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
 		}
-		if !json.Valid(enc) {
-			t.Fatalf("zerojson emitted invalid JSON after Raw decode: %q", enc)
+		var reZJ RawList
+		if err := reZJ.UnmarshalZJSON(enc); err != nil {
+			t.Fatalf("zerojson could not re-decode its own output %q: %v", enc, err)
 		}
-		var again RawList
-		if err := again.UnmarshalZJSON(enc); err != nil {
-			t.Fatalf("zerojson could not re-decode Raw output %q: %v", enc, err)
-		}
-		encAgain, err := again.AppendZJSON(nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(enc, encAgain) {
-			t.Fatalf("Raw round-trip did not reach a fixed point\nfirst:  %q\nsecond: %q", enc, encAgain)
+		var reStd RawList
+		if err := json.Unmarshal(enc, &reStd); err != nil {
+			t.Fatalf("stdlib rejected zerojson output %q: %v", enc, err)
 		}
 	})
 }
 
 func FuzzRawListZJSONSequence(f *testing.F) {
-	f.Add([]byte("[]"), []byte("[]"), []byte("[null]"), []byte("null"), uint8(0x0))
-	f.Add([]byte("[]"), []byte("[]"), []byte("{"), []byte("[null]"), uint8(0xf))
-	f.Add([]byte("[]"), []byte("[null]"), []byte("[]"), []byte("["), uint8(0x5))
+	f.Add([]byte("[]"), []byte("[]"), []byte("[{ \"x\": [1, \"y\"] }]"), []byte("null"), uint8(0x0))
+	f.Add([]byte("[]"), []byte("[]"), []byte("{"), []byte("[{ \"x\": [1, \"y\"] }]"), uint8(0xf))
+	f.Add([]byte("[]"), []byte("[{ \"x\": [1, \"y\"] }]"), []byte("[]"), []byte("["), uint8(0x5))
 	f.Add([]byte("{"), []byte("[]"), []byte("null"), []byte("[]"), uint8(0xa))
-	f.Add([]byte("[null]"), []byte("[]"), []byte("null"), []byte("[]"), uint8(0x0))
-	f.Add([]byte("[]"), []byte("[null]"), []byte("{"), []byte("null"), uint8(0xf))
-	f.Add([]byte("[null]"), []byte("null"), []byte("[]"), []byte("["), uint8(0x5))
-	f.Add([]byte("{"), []byte("[null]"), []byte("[]"), []byte("[]"), uint8(0xa))
-	f.Add([]byte("null"), []byte("[]"), []byte("[]"), []byte("[null]"), uint8(0x0))
-	f.Add([]byte("[]"), []byte("null"), []byte("{"), []byte("[]"), uint8(0xf))
-	f.Add([]byte("null"), []byte("[]"), []byte("[]"), []byte("["), uint8(0x5))
-	f.Add([]byte("{"), []byte("null"), []byte("[null]"), []byte("[]"), uint8(0xa))
+	f.Add([]byte("[{ \"x\": [1, \"y\"] }]"), []byte("[]"), []byte("null"), []byte("[null]"), uint8(0x0))
+	f.Add([]byte("[]"), []byte("[{ \"x\": [1, \"y\"] }]"), []byte("{"), []byte("null"), uint8(0xf))
+	f.Add([]byte("[{ \"x\": [1, \"y\"] }]"), []byte("null"), []byte("[]"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("[{ \"x\": [1, \"y\"] }]"), []byte("[null]"), []byte("[]"), uint8(0xa))
+	f.Add([]byte("null"), []byte("[]"), []byte("[null]"), []byte("[]"), uint8(0x0))
+	f.Add([]byte("[]"), []byte("null"), []byte("{"), []byte("[null]"), uint8(0xf))
+	f.Add([]byte("null"), []byte("[null]"), []byte("[]"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("null"), []byte("[]"), []byte("[]"), uint8(0xa))
+	f.Add([]byte("[null]"), []byte("[]"), []byte("[]"), []byte("[{ \"x\": [1, \"y\"] }]"), uint8(0x0))
+	f.Add([]byte("[]"), []byte("[null]"), []byte("{"), []byte("[]"), uint8(0xf))
+	f.Add([]byte("[null]"), []byte("[]"), []byte("[]"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("[null]"), []byte("[{ \"x\": [1, \"y\"] }]"), []byte("[]"), uint8(0xa))
 	f.Fuzz(func(t *testing.T, first, second, third, fourth []byte, modeMask uint8) {
 		inputs := [4][]byte{first, second, third, fourth}
 		for _, data := range inputs {
@@ -2885,6 +4261,303 @@ func FuzzRawListZJSONSequence(f *testing.F) {
 	})
 }
 
+func FuzzRawIndexZJSON(f *testing.F) {
+	f.Add([]byte(`{}`))
+	f.Add([]byte("{\"k\":{ \"x\": [1, \"y\"] }}"))
+	f.Add([]byte("{\"k\":null}"))
+	f.Add([]byte(`null`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if zjFuzzHugeExponent(data) {
+			return
+		}
+		{
+			var stdRaw, zjRaw RawIndex
+			stdErr := json.Unmarshal(data, &stdRaw)
+			zjErr := zjRaw.UnmarshalZJSON(data)
+			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{}) && (!reflect.DeepEqual(&stdRaw, &zjRaw)) {
+				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
+			}
+		}
+		{
+			var zjRaw RawIndex
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedRawIndex(data) {
+				var stdRaw RawIndex
+				if json.Unmarshal(data, &stdRaw) == nil {
+					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
+				}
+			}
+		}
+
+		{
+			var viaZJ RawIndex
+			if err := viaZJ.UnmarshalZJSON(data); err == nil {
+				if enc, err := viaZJ.AppendZJSON(nil); err == nil {
+					if !json.Valid(enc) {
+						t.Fatalf("zerojson emitted invalid JSON after Raw decode: %q", enc)
+					}
+					var again RawIndex
+					if err := again.UnmarshalZJSON(enc); err != nil {
+						t.Fatalf("zerojson could not re-decode Raw output %q: %v", enc, err)
+					}
+					before, err := json.Marshal(&viaZJ)
+					if err != nil {
+						t.Fatal(err)
+					}
+					after, err := json.Marshal(&again)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !bytes.Equal(before, after) {
+						t.Fatalf("Raw round-trip changed value\nfirst: %q\nsecond: %q", before, after)
+					}
+				}
+			}
+		}
+		var seed RawIndex
+		if serr := json.Unmarshal(data, &seed); serr != nil {
+			if zjStdlibValueError(data, serr) {
+				var zj RawIndex
+				if zj.UnmarshalZJSON(data) == nil {
+					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
+				}
+			}
+			return
+		}
+		canon, err := json.Marshal(&seed)
+		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerRawIndex(canon) {
+			return
+		}
+		var viaStd RawIndex
+		if json.Unmarshal(canon, &viaStd) != nil {
+			return
+		}
+		var viaZJ RawIndex
+		if err := viaZJ.UnmarshalZJSON(canon); err != nil {
+			t.Fatalf("zerojson rejected canonical %q: %v", canon, err)
+		}
+		x, _ := json.Marshal(&viaStd)
+		y, _ := json.Marshal(&viaZJ)
+		if !bytes.Equal(x, y) {
+			t.Fatalf("decode divergence\ninput: %s\nstdlib: %s\nzerojson: %s", canon, x, y)
+		}
+		enc, err := viaZJ.AppendZJSON(nil)
+		if err != nil {
+			return
+		}
+		var reZJ RawIndex
+		if err := reZJ.UnmarshalZJSON(enc); err != nil {
+			t.Fatalf("zerojson could not re-decode its own output %q: %v", enc, err)
+		}
+		var reStd RawIndex
+		if err := json.Unmarshal(enc, &reStd); err != nil {
+			t.Fatalf("stdlib rejected zerojson output %q: %v", enc, err)
+		}
+	})
+}
+
+func FuzzRawIndexZJSONSequence(f *testing.F) {
+	f.Add([]byte("{}"), []byte("{}"), []byte("{\"k\":{ \"x\": [1, \"y\"] }}"), []byte("null"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{}"), []byte("{"), []byte("{\"k\":{ \"x\": [1, \"y\"] }}"), uint8(0xf))
+	f.Add([]byte("{}"), []byte("{\"k\":{ \"x\": [1, \"y\"] }}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{}"), []byte("null"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"k\":{ \"x\": [1, \"y\"] }}"), []byte("{}"), []byte("null"), []byte("{\"k\":null}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"k\":{ \"x\": [1, \"y\"] }}"), []byte("{"), []byte("null"), uint8(0xf))
+	f.Add([]byte("{\"k\":{ \"x\": [1, \"y\"] }}"), []byte("null"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"k\":{ \"x\": [1, \"y\"] }}"), []byte("{\"k\":null}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("null"), []byte("{}"), []byte("{\"k\":null}"), []byte("{}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("null"), []byte("{"), []byte("{\"k\":null}"), uint8(0xf))
+	f.Add([]byte("null"), []byte("{\"k\":null}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("null"), []byte("{}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"k\":null}"), []byte("{}"), []byte("{}"), []byte("{\"k\":{ \"x\": [1, \"y\"] }}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"k\":null}"), []byte("{"), []byte("{}"), uint8(0xf))
+	f.Add([]byte("{\"k\":null}"), []byte("{}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"k\":null}"), []byte("{\"k\":{ \"x\": [1, \"y\"] }}"), []byte("{}"), uint8(0xa))
+	f.Fuzz(func(t *testing.T, first, second, third, fourth []byte, modeMask uint8) {
+		inputs := [4][]byte{first, second, third, fourth}
+		for _, data := range inputs {
+			if zjFuzzHugeExponent(data) {
+				return
+			}
+		}
+		var d RawIndexDecoder
+		for op, data := range inputs {
+			borrow := modeMask&(1<<uint(op)) != 0
+			pooledInput := append([]byte(nil), data...)
+			freshInput := append([]byte(nil), data...)
+			var got, want RawIndex
+			var gotErr, wantErr error
+			if borrow {
+				gotErr, wantErr = d.DecodeBorrow(pooledInput, &got), want.UnmarshalZJSONBorrow(freshInput)
+			} else {
+				gotErr, wantErr = d.Decode(pooledInput, &got), want.UnmarshalZJSON(freshInput)
+			}
+			if (gotErr != nil) != (wantErr != nil) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: decode error mismatch\ninput: %q\npooled: %v\nfresh: %v", op, borrow, modeMask, data, gotErr, wantErr)
+			}
+			if gotErr == nil && !reflect.DeepEqual(&got, &want) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: pooled result differs from fresh\ninput: %q\npooled: %#v\nfresh: %#v", op, borrow, modeMask, data, &got, &want)
+			}
+			if gotErr == nil && !borrow {
+				for i := range pooledInput {
+					pooledInput[i] = 0xa5
+				}
+				if !reflect.DeepEqual(&got, &want) {
+					t.Fatalf("op=%d mask=0x%x: copy-mode result aliases caller input after scribble\ninput: %q\npooled: %#v\nfresh: %#v", op, modeMask, data, &got, &want)
+				}
+			}
+		}
+	})
+}
+
+func FuzzRawHolderListZJSON(f *testing.F) {
+	f.Add([]byte(`[]`))
+	f.Add([]byte("[{}]"))
+	f.Add([]byte(`null`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if zjFuzzHugeExponent(data) {
+			return
+		}
+		{
+			var stdRaw, zjRaw RawHolderList
+			stdErr := json.Unmarshal(data, &stdRaw)
+			zjErr := zjRaw.UnmarshalZJSON(data)
+			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{}) && (!reflect.DeepEqual(&stdRaw, &zjRaw)) {
+				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
+			}
+		}
+		{
+			var zjRaw RawHolderList
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedRawHolderList(data) {
+				var stdRaw RawHolderList
+				if json.Unmarshal(data, &stdRaw) == nil {
+					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
+				}
+			}
+		}
+
+		{
+			var viaZJ RawHolderList
+			if err := viaZJ.UnmarshalZJSON(data); err == nil {
+				if enc, err := viaZJ.AppendZJSON(nil); err == nil {
+					if !json.Valid(enc) {
+						t.Fatalf("zerojson emitted invalid JSON after Raw decode: %q", enc)
+					}
+					var again RawHolderList
+					if err := again.UnmarshalZJSON(enc); err != nil {
+						t.Fatalf("zerojson could not re-decode Raw output %q: %v", enc, err)
+					}
+					before, err := json.Marshal(&viaZJ)
+					if err != nil {
+						t.Fatal(err)
+					}
+					after, err := json.Marshal(&again)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !bytes.Equal(before, after) {
+						t.Fatalf("Raw round-trip changed value\nfirst: %q\nsecond: %q", before, after)
+					}
+				}
+			}
+		}
+		var seed RawHolderList
+		if serr := json.Unmarshal(data, &seed); serr != nil {
+			if zjStdlibValueError(data, serr) {
+				var zj RawHolderList
+				if zj.UnmarshalZJSON(data) == nil {
+					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
+				}
+			}
+			return
+		}
+		canon, err := json.Marshal(&seed)
+		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerRawHolderList(canon) {
+			return
+		}
+		var viaStd RawHolderList
+		if json.Unmarshal(canon, &viaStd) != nil {
+			return
+		}
+		var viaZJ RawHolderList
+		if err := viaZJ.UnmarshalZJSON(canon); err != nil {
+			t.Fatalf("zerojson rejected canonical %q: %v", canon, err)
+		}
+		x, _ := json.Marshal(&viaStd)
+		y, _ := json.Marshal(&viaZJ)
+		if !bytes.Equal(x, y) {
+			t.Fatalf("decode divergence\ninput: %s\nstdlib: %s\nzerojson: %s", canon, x, y)
+		}
+		enc, err := viaZJ.AppendZJSON(nil)
+		if err != nil {
+			return
+		}
+		var reZJ RawHolderList
+		if err := reZJ.UnmarshalZJSON(enc); err != nil {
+			t.Fatalf("zerojson could not re-decode its own output %q: %v", enc, err)
+		}
+		var reStd RawHolderList
+		if err := json.Unmarshal(enc, &reStd); err != nil {
+			t.Fatalf("stdlib rejected zerojson output %q: %v", enc, err)
+		}
+	})
+}
+
+func FuzzRawHolderListZJSONSequence(f *testing.F) {
+	f.Add([]byte("[]"), []byte("[]"), []byte("[{}]"), []byte("null"), uint8(0x0))
+	f.Add([]byte("[]"), []byte("[]"), []byte("{"), []byte("[{}]"), uint8(0xf))
+	f.Add([]byte("[]"), []byte("[{}]"), []byte("[]"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("[]"), []byte("null"), []byte("[]"), uint8(0xa))
+	f.Add([]byte("[{}]"), []byte("[]"), []byte("null"), []byte("[]"), uint8(0x0))
+	f.Add([]byte("[]"), []byte("[{}]"), []byte("{"), []byte("null"), uint8(0xf))
+	f.Add([]byte("[{}]"), []byte("null"), []byte("[]"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("[{}]"), []byte("[]"), []byte("[]"), uint8(0xa))
+	f.Add([]byte("null"), []byte("[]"), []byte("[]"), []byte("[{}]"), uint8(0x0))
+	f.Add([]byte("[]"), []byte("null"), []byte("{"), []byte("[]"), uint8(0xf))
+	f.Add([]byte("null"), []byte("[]"), []byte("[]"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("null"), []byte("[{}]"), []byte("[]"), uint8(0xa))
+	f.Fuzz(func(t *testing.T, first, second, third, fourth []byte, modeMask uint8) {
+		inputs := [4][]byte{first, second, third, fourth}
+		for _, data := range inputs {
+			if zjFuzzHugeExponent(data) {
+				return
+			}
+		}
+		var d RawHolderListDecoder
+		for op, data := range inputs {
+			borrow := modeMask&(1<<uint(op)) != 0
+			pooledInput := append([]byte(nil), data...)
+			freshInput := append([]byte(nil), data...)
+			var got, want RawHolderList
+			var gotErr, wantErr error
+			if borrow {
+				gotErr, wantErr = d.DecodeBorrow(pooledInput, &got), want.UnmarshalZJSONBorrow(freshInput)
+			} else {
+				gotErr, wantErr = d.Decode(pooledInput, &got), want.UnmarshalZJSON(freshInput)
+			}
+			if (gotErr != nil) != (wantErr != nil) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: decode error mismatch\ninput: %q\npooled: %v\nfresh: %v", op, borrow, modeMask, data, gotErr, wantErr)
+			}
+			if gotErr == nil && !reflect.DeepEqual(&got, &want) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: pooled result differs from fresh\ninput: %q\npooled: %#v\nfresh: %#v", op, borrow, modeMask, data, &got, &want)
+			}
+			if gotErr == nil && !borrow {
+				for i := range pooledInput {
+					pooledInput[i] = 0xa5
+				}
+				if !reflect.DeepEqual(&got, &want) {
+					t.Fatalf("op=%d mask=0x%x: copy-mode result aliases caller input after scribble\ninput: %q\npooled: %#v\nfresh: %#v", op, modeMask, data, &got, &want)
+				}
+			}
+		}
+	})
+}
+
 func FuzzDecimalListZJSON(f *testing.F) {
 	f.Add([]byte(`[]`))
 	f.Add([]byte("[null]"))
@@ -2895,7 +4568,7 @@ func FuzzDecimalListZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw DecimalList
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedDecimalList(data) {
 				var stdRaw DecimalList
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -2914,6 +4587,9 @@ func FuzzDecimalListZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerDecimalList(canon) {
 			return
 		}
 		var viaStd DecimalList
@@ -2994,6 +4670,437 @@ func FuzzDecimalListZJSONSequence(f *testing.F) {
 	})
 }
 
+func FuzzPointerCollectionsZJSON(f *testing.F) {
+	f.Add([]byte(`{}`))
+	f.Add([]byte("{\"names\":[\"x\"]}"))
+	f.Add([]byte("{\"index\":{\"k\":1}}"))
+	f.Add([]byte("{\"legs\":[{}]}"))
+	f.Add([]byte("{\"tags\":{\"k\":\"x\"}}"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if zjFuzzHugeExponent(data) {
+			return
+		}
+		{
+			var stdRaw, zjRaw PointerCollections
+			stdErr := json.Unmarshal(data, &stdRaw)
+			zjErr := zjRaw.UnmarshalZJSON(data)
+			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"names", "index", "legs", "tags"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Names") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Index") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Tags")) {
+				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
+			}
+		}
+		{
+			var zjRaw PointerCollections
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedPointerCollections(data) {
+				var stdRaw PointerCollections
+				if json.Unmarshal(data, &stdRaw) == nil {
+					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
+				}
+			}
+		}
+		var seed PointerCollections
+		if serr := json.Unmarshal(data, &seed); serr != nil {
+			if zjStdlibValueError(data, serr, "names", "index", "legs", "tags") {
+				var zj PointerCollections
+				if zj.UnmarshalZJSON(data) == nil {
+					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
+				}
+			}
+			return
+		}
+		canon, err := json.Marshal(&seed)
+		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerPointerCollections(canon) {
+			return
+		}
+		var viaStd PointerCollections
+		if json.Unmarshal(canon, &viaStd) != nil {
+			return
+		}
+		var viaZJ PointerCollections
+		if err := viaZJ.UnmarshalZJSON(canon); err != nil {
+			t.Fatalf("zerojson rejected canonical %q: %v", canon, err)
+		}
+		x, _ := json.Marshal(&viaStd)
+		y, _ := json.Marshal(&viaZJ)
+		if !bytes.Equal(x, y) {
+			t.Fatalf("decode divergence\ninput: %s\nstdlib: %s\nzerojson: %s", canon, x, y)
+		}
+		var viaFallback PointerCollections
+		lFallback := zerojson.NewLexer(canon, false)
+		zjDecodeFallbackPointerCollections(&lFallback, &viaFallback, &zjArenaPointerCollections{})
+		lFallback.Finish()
+		if err := lFallback.Err(); err != nil {
+			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
+		}
+		if !reflect.DeepEqual(&viaFallback, &viaZJ) {
+			t.Fatalf("ordered-vs-fallback divergence\ninput: %s\nfallback-only: %+v\npublic (ordered+fallback): %+v", canon, &viaFallback, &viaZJ)
+		}
+		enc, err := viaZJ.AppendZJSON(nil)
+		if err != nil {
+			return
+		}
+		var reZJ PointerCollections
+		if err := reZJ.UnmarshalZJSON(enc); err != nil {
+			t.Fatalf("zerojson could not re-decode its own output %q: %v", enc, err)
+		}
+		var reStd PointerCollections
+		if err := json.Unmarshal(enc, &reStd); err != nil {
+			t.Fatalf("stdlib rejected zerojson output %q: %v", enc, err)
+		}
+	})
+}
+
+func FuzzPointerCollectionsZJSONSequence(f *testing.F) {
+	f.Add([]byte("{}"), []byte("{}"), []byte("{\"names\":[\"x\"]}"), []byte("{\"index\":{\"k\":1}}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{}"), []byte("{"), []byte("{\"names\":[\"x\"]}"), uint8(0xf))
+	f.Add([]byte("{}"), []byte("{\"names\":[\"x\"]}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{}"), []byte("{\"index\":{\"k\":1}}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"names\":[\"x\"]}"), []byte("{}"), []byte("{\"index\":{\"k\":1}}"), []byte("{\"legs\":[{}]}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"names\":[\"x\"]}"), []byte("{"), []byte("{\"index\":{\"k\":1}}"), uint8(0xf))
+	f.Add([]byte("{\"names\":[\"x\"]}"), []byte("{\"index\":{\"k\":1}}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"names\":[\"x\"]}"), []byte("{\"legs\":[{}]}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"index\":{\"k\":1}}"), []byte("{}"), []byte("{\"legs\":[{}]}"), []byte("{\"tags\":{\"k\":\"x\"}}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"index\":{\"k\":1}}"), []byte("{"), []byte("{\"legs\":[{}]}"), uint8(0xf))
+	f.Add([]byte("{\"index\":{\"k\":1}}"), []byte("{\"legs\":[{}]}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"index\":{\"k\":1}}"), []byte("{\"tags\":{\"k\":\"x\"}}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"legs\":[{}]}"), []byte("{}"), []byte("{\"tags\":{\"k\":\"x\"}}"), []byte("{}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"legs\":[{}]}"), []byte("{"), []byte("{\"tags\":{\"k\":\"x\"}}"), uint8(0xf))
+	f.Add([]byte("{\"legs\":[{}]}"), []byte("{\"tags\":{\"k\":\"x\"}}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"legs\":[{}]}"), []byte("{}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"tags\":{\"k\":\"x\"}}"), []byte("{}"), []byte("{}"), []byte("{\"names\":[\"x\"]}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"tags\":{\"k\":\"x\"}}"), []byte("{"), []byte("{}"), uint8(0xf))
+	f.Add([]byte("{\"tags\":{\"k\":\"x\"}}"), []byte("{}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"tags\":{\"k\":\"x\"}}"), []byte("{\"names\":[\"x\"]}"), []byte("{}"), uint8(0xa))
+	f.Fuzz(func(t *testing.T, first, second, third, fourth []byte, modeMask uint8) {
+		inputs := [4][]byte{first, second, third, fourth}
+		for _, data := range inputs {
+			if zjFuzzHugeExponent(data) {
+				return
+			}
+		}
+		var d PointerCollectionsDecoder
+		for op, data := range inputs {
+			borrow := modeMask&(1<<uint(op)) != 0
+			pooledInput := append([]byte(nil), data...)
+			freshInput := append([]byte(nil), data...)
+			var got, want PointerCollections
+			var gotErr, wantErr error
+			if borrow {
+				gotErr, wantErr = d.DecodeBorrow(pooledInput, &got), want.UnmarshalZJSONBorrow(freshInput)
+			} else {
+				gotErr, wantErr = d.Decode(pooledInput, &got), want.UnmarshalZJSON(freshInput)
+			}
+			if (gotErr != nil) != (wantErr != nil) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: decode error mismatch\ninput: %q\npooled: %v\nfresh: %v", op, borrow, modeMask, data, gotErr, wantErr)
+			}
+			if gotErr == nil && !reflect.DeepEqual(&got, &want) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: pooled result differs from fresh\ninput: %q\npooled: %#v\nfresh: %#v", op, borrow, modeMask, data, &got, &want)
+			}
+			if gotErr == nil && !borrow {
+				for i := range pooledInput {
+					pooledInput[i] = 0xa5
+				}
+				if !reflect.DeepEqual(&got, &want) {
+					t.Fatalf("op=%d mask=0x%x: copy-mode result aliases caller input after scribble\ninput: %q\npooled: %#v\nfresh: %#v", op, modeMask, data, &got, &want)
+				}
+			}
+		}
+	})
+}
+
+func FuzzNumberCasesZJSON(f *testing.F) {
+	f.Add([]byte(`{}`))
+	f.Add([]byte("{\"n\":1}"))
+	f.Add([]byte("{\"no\":1}"))
+	f.Add([]byte("{\"np\":1}"))
+	f.Add([]byte("{\"ns\":[1]}"))
+	f.Add([]byte("{\"nm\":{\"k\":1}}"))
+	f.Add([]byte("{\"cnt_s\":\"1\"}"))
+	f.Add([]byte("{\"cnt_s\":\"\\u0031\"}"))
+	f.Add([]byte("{\"cnt_s\":\"+00\"}"))
+	f.Add([]byte("{\"ptr_s\":\"1\"}"))
+	f.Add([]byte("{\"ptr_s\":\"\\u0031\"}"))
+	f.Add([]byte("{\"ptr_s\":\"+00\"}"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if zjFuzzHugeExponent(data) {
+			return
+		}
+		{
+			var stdRaw, zjRaw NumberCases
+			stdErr := json.Unmarshal(data, &stdRaw)
+			zjErr := zjRaw.UnmarshalZJSON(data)
+			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"n", "no", "np", "ns", "nm", "cnt_s", "ptr_s"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "N") || !zjRawFieldEqual(&stdRaw, &zjRaw, "NO") || !zjRawFieldEqual(&stdRaw, &zjRaw, "NP") || !zjRawFieldEqual(&stdRaw, &zjRaw, "NS") || !zjRawFieldEqual(&stdRaw, &zjRaw, "NM") || !zjRawFieldEqual(&stdRaw, &zjRaw, "CntS") || !zjRawFieldEqual(&stdRaw, &zjRaw, "PtrS")) {
+				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
+			}
+		}
+		{
+			var zjRaw NumberCases
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedNumberCases(data) {
+				var stdRaw NumberCases
+				if json.Unmarshal(data, &stdRaw) == nil {
+					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
+				}
+			}
+		}
+		var seed NumberCases
+		if serr := json.Unmarshal(data, &seed); serr != nil {
+			if zjStdlibValueError(data, serr, "n", "no", "np", "ns", "nm", "cnt_s", "ptr_s") {
+				var zj NumberCases
+				if zj.UnmarshalZJSON(data) == nil {
+					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
+				}
+			}
+			return
+		}
+		canon, err := json.Marshal(&seed)
+		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerNumberCases(canon) {
+			return
+		}
+		var viaStd NumberCases
+		if json.Unmarshal(canon, &viaStd) != nil {
+			return
+		}
+		var viaZJ NumberCases
+		if err := viaZJ.UnmarshalZJSON(canon); err != nil {
+			t.Fatalf("zerojson rejected canonical %q: %v", canon, err)
+		}
+		x, _ := json.Marshal(&viaStd)
+		y, _ := json.Marshal(&viaZJ)
+		if !bytes.Equal(x, y) {
+			t.Fatalf("decode divergence\ninput: %s\nstdlib: %s\nzerojson: %s", canon, x, y)
+		}
+		var viaFallback NumberCases
+		lFallback := zerojson.NewLexer(canon, false)
+		zjDecodeFallbackNumberCases(&lFallback, &viaFallback, &zjArenaNumberCases{})
+		lFallback.Finish()
+		if err := lFallback.Err(); err != nil {
+			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
+		}
+		if !reflect.DeepEqual(&viaFallback, &viaZJ) {
+			t.Fatalf("ordered-vs-fallback divergence\ninput: %s\nfallback-only: %+v\npublic (ordered+fallback): %+v", canon, &viaFallback, &viaZJ)
+		}
+		enc, err := viaZJ.AppendZJSON(nil)
+		if err != nil {
+			return
+		}
+		var reZJ NumberCases
+		if err := reZJ.UnmarshalZJSON(enc); err != nil {
+			t.Fatalf("zerojson could not re-decode its own output %q: %v", enc, err)
+		}
+		var reStd NumberCases
+		if err := json.Unmarshal(enc, &reStd); err != nil {
+			t.Fatalf("stdlib rejected zerojson output %q: %v", enc, err)
+		}
+	})
+}
+
+func FuzzNumberCasesZJSONSequence(f *testing.F) {
+	f.Add([]byte("{}"), []byte("{}"), []byte("{\"n\":1}"), []byte("{\"no\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{}"), []byte("{"), []byte("{\"n\":1}"), uint8(0xf))
+	f.Add([]byte("{}"), []byte("{\"n\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{}"), []byte("{\"no\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"n\":1}"), []byte("{}"), []byte("{\"no\":1}"), []byte("{\"np\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"n\":1}"), []byte("{"), []byte("{\"no\":1}"), uint8(0xf))
+	f.Add([]byte("{\"n\":1}"), []byte("{\"no\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"n\":1}"), []byte("{\"np\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"no\":1}"), []byte("{}"), []byte("{\"np\":1}"), []byte("{\"ns\":[1]}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"no\":1}"), []byte("{"), []byte("{\"np\":1}"), uint8(0xf))
+	f.Add([]byte("{\"no\":1}"), []byte("{\"np\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"no\":1}"), []byte("{\"ns\":[1]}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"np\":1}"), []byte("{}"), []byte("{\"ns\":[1]}"), []byte("{\"nm\":{\"k\":1}}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"np\":1}"), []byte("{"), []byte("{\"ns\":[1]}"), uint8(0xf))
+	f.Add([]byte("{\"np\":1}"), []byte("{\"ns\":[1]}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"np\":1}"), []byte("{\"nm\":{\"k\":1}}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"ns\":[1]}"), []byte("{}"), []byte("{\"nm\":{\"k\":1}}"), []byte("{\"cnt_s\":\"1\"}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"ns\":[1]}"), []byte("{"), []byte("{\"nm\":{\"k\":1}}"), uint8(0xf))
+	f.Add([]byte("{\"ns\":[1]}"), []byte("{\"nm\":{\"k\":1}}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"ns\":[1]}"), []byte("{\"cnt_s\":\"1\"}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"nm\":{\"k\":1}}"), []byte("{}"), []byte("{\"cnt_s\":\"1\"}"), []byte("{\"ptr_s\":\"1\"}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"nm\":{\"k\":1}}"), []byte("{"), []byte("{\"cnt_s\":\"1\"}"), uint8(0xf))
+	f.Add([]byte("{\"nm\":{\"k\":1}}"), []byte("{\"cnt_s\":\"1\"}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"nm\":{\"k\":1}}"), []byte("{\"ptr_s\":\"1\"}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"cnt_s\":\"1\"}"), []byte("{}"), []byte("{\"ptr_s\":\"1\"}"), []byte("{}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"cnt_s\":\"1\"}"), []byte("{"), []byte("{\"ptr_s\":\"1\"}"), uint8(0xf))
+	f.Add([]byte("{\"cnt_s\":\"1\"}"), []byte("{\"ptr_s\":\"1\"}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"cnt_s\":\"1\"}"), []byte("{}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"ptr_s\":\"1\"}"), []byte("{}"), []byte("{}"), []byte("{\"n\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"ptr_s\":\"1\"}"), []byte("{"), []byte("{}"), uint8(0xf))
+	f.Add([]byte("{\"ptr_s\":\"1\"}"), []byte("{}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"ptr_s\":\"1\"}"), []byte("{\"n\":1}"), []byte("{}"), uint8(0xa))
+	f.Fuzz(func(t *testing.T, first, second, third, fourth []byte, modeMask uint8) {
+		inputs := [4][]byte{first, second, third, fourth}
+		for _, data := range inputs {
+			if zjFuzzHugeExponent(data) {
+				return
+			}
+		}
+		var d NumberCasesDecoder
+		for op, data := range inputs {
+			borrow := modeMask&(1<<uint(op)) != 0
+			pooledInput := append([]byte(nil), data...)
+			freshInput := append([]byte(nil), data...)
+			var got, want NumberCases
+			var gotErr, wantErr error
+			if borrow {
+				gotErr, wantErr = d.DecodeBorrow(pooledInput, &got), want.UnmarshalZJSONBorrow(freshInput)
+			} else {
+				gotErr, wantErr = d.Decode(pooledInput, &got), want.UnmarshalZJSON(freshInput)
+			}
+			if (gotErr != nil) != (wantErr != nil) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: decode error mismatch\ninput: %q\npooled: %v\nfresh: %v", op, borrow, modeMask, data, gotErr, wantErr)
+			}
+			if gotErr == nil && !reflect.DeepEqual(&got, &want) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: pooled result differs from fresh\ninput: %q\npooled: %#v\nfresh: %#v", op, borrow, modeMask, data, &got, &want)
+			}
+			if gotErr == nil && !borrow {
+				for i := range pooledInput {
+					pooledInput[i] = 0xa5
+				}
+				if !reflect.DeepEqual(&got, &want) {
+					t.Fatalf("op=%d mask=0x%x: copy-mode result aliases caller input after scribble\ninput: %q\npooled: %#v\nfresh: %#v", op, modeMask, data, &got, &want)
+				}
+			}
+		}
+	})
+}
+
+func FuzzNullCasesZJSON(f *testing.F) {
+	f.Add([]byte(`{}`))
+	f.Add([]byte("{\"one\":null}"))
+	f.Add([]byte("{\"many\":[null]}"))
+	f.Add([]byte("{\"index\":{\"k\":null}}"))
+	f.Add([]byte("{\"ptr\":null}"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if zjFuzzHugeExponent(data) {
+			return
+		}
+		{
+			var zjRaw NullCases
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedNullCases(data) {
+				var stdRaw NullCases
+				if json.Unmarshal(data, &stdRaw) == nil {
+					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
+				}
+			}
+		}
+		var seed NullCases
+		if serr := json.Unmarshal(data, &seed); serr != nil {
+			if zjStdlibValueError(data, serr, "one", "many", "index", "ptr") {
+				var zj NullCases
+				if zj.UnmarshalZJSON(data) == nil {
+					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
+				}
+			}
+			return
+		}
+		canon, err := json.Marshal(&seed)
+		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerNullCases(canon) {
+			return
+		}
+		var viaStd NullCases
+		if json.Unmarshal(canon, &viaStd) != nil {
+			return
+		}
+		var viaZJ NullCases
+		if err := viaZJ.UnmarshalZJSON(canon); err != nil {
+			t.Fatalf("zerojson rejected canonical %q: %v", canon, err)
+		}
+		x, _ := json.Marshal(&viaStd)
+		y, _ := json.Marshal(&viaZJ)
+		if !bytes.Equal(x, y) {
+			t.Fatalf("decode divergence\ninput: %s\nstdlib: %s\nzerojson: %s", canon, x, y)
+		}
+		var viaFallback NullCases
+		lFallback := zerojson.NewLexer(canon, false)
+		zjDecodeFallbackNullCases(&lFallback, &viaFallback, &zjArenaNullCases{})
+		lFallback.Finish()
+		if err := lFallback.Err(); err != nil {
+			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
+		}
+		if !reflect.DeepEqual(&viaFallback, &viaZJ) {
+			t.Fatalf("ordered-vs-fallback divergence\ninput: %s\nfallback-only: %+v\npublic (ordered+fallback): %+v", canon, &viaFallback, &viaZJ)
+		}
+		enc, err := viaZJ.AppendZJSON(nil)
+		if err != nil {
+			return
+		}
+		var reZJ NullCases
+		if err := reZJ.UnmarshalZJSON(enc); err != nil {
+			t.Fatalf("zerojson could not re-decode its own output %q: %v", enc, err)
+		}
+		var reStd NullCases
+		if err := json.Unmarshal(enc, &reStd); err != nil {
+			t.Fatalf("stdlib rejected zerojson output %q: %v", enc, err)
+		}
+	})
+}
+
+func FuzzNullCasesZJSONSequence(f *testing.F) {
+	f.Add([]byte("{}"), []byte("{}"), []byte("{\"one\":null}"), []byte("{\"many\":[null]}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{}"), []byte("{"), []byte("{\"one\":null}"), uint8(0xf))
+	f.Add([]byte("{}"), []byte("{\"one\":null}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{}"), []byte("{\"many\":[null]}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"one\":null}"), []byte("{}"), []byte("{\"many\":[null]}"), []byte("{\"index\":{\"k\":null}}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"one\":null}"), []byte("{"), []byte("{\"many\":[null]}"), uint8(0xf))
+	f.Add([]byte("{\"one\":null}"), []byte("{\"many\":[null]}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"one\":null}"), []byte("{\"index\":{\"k\":null}}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"many\":[null]}"), []byte("{}"), []byte("{\"index\":{\"k\":null}}"), []byte("{\"ptr\":null}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"many\":[null]}"), []byte("{"), []byte("{\"index\":{\"k\":null}}"), uint8(0xf))
+	f.Add([]byte("{\"many\":[null]}"), []byte("{\"index\":{\"k\":null}}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"many\":[null]}"), []byte("{\"ptr\":null}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"index\":{\"k\":null}}"), []byte("{}"), []byte("{\"ptr\":null}"), []byte("{}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"index\":{\"k\":null}}"), []byte("{"), []byte("{\"ptr\":null}"), uint8(0xf))
+	f.Add([]byte("{\"index\":{\"k\":null}}"), []byte("{\"ptr\":null}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"index\":{\"k\":null}}"), []byte("{}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"ptr\":null}"), []byte("{}"), []byte("{}"), []byte("{\"one\":null}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"ptr\":null}"), []byte("{"), []byte("{}"), uint8(0xf))
+	f.Add([]byte("{\"ptr\":null}"), []byte("{}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"ptr\":null}"), []byte("{\"one\":null}"), []byte("{}"), uint8(0xa))
+	f.Fuzz(func(t *testing.T, first, second, third, fourth []byte, modeMask uint8) {
+		inputs := [4][]byte{first, second, third, fourth}
+		for _, data := range inputs {
+			if zjFuzzHugeExponent(data) {
+				return
+			}
+		}
+		var d NullCasesDecoder
+		for op, data := range inputs {
+			borrow := modeMask&(1<<uint(op)) != 0
+			pooledInput := append([]byte(nil), data...)
+			freshInput := append([]byte(nil), data...)
+			var got, want NullCases
+			var gotErr, wantErr error
+			if borrow {
+				gotErr, wantErr = d.DecodeBorrow(pooledInput, &got), want.UnmarshalZJSONBorrow(freshInput)
+			} else {
+				gotErr, wantErr = d.Decode(pooledInput, &got), want.UnmarshalZJSON(freshInput)
+			}
+			if (gotErr != nil) != (wantErr != nil) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: decode error mismatch\ninput: %q\npooled: %v\nfresh: %v", op, borrow, modeMask, data, gotErr, wantErr)
+			}
+			if gotErr == nil && !reflect.DeepEqual(&got, &want) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: pooled result differs from fresh\ninput: %q\npooled: %#v\nfresh: %#v", op, borrow, modeMask, data, &got, &want)
+			}
+			if gotErr == nil && !borrow {
+				for i := range pooledInput {
+					pooledInput[i] = 0xa5
+				}
+				if !reflect.DeepEqual(&got, &want) {
+					t.Fatalf("op=%d mask=0x%x: copy-mode result aliases caller input after scribble\ninput: %q\npooled: %#v\nfresh: %#v", op, modeMask, data, &got, &want)
+				}
+			}
+		}
+	})
+}
+
 func FuzzEventMetaZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
 	f.Add([]byte("{\"note\":\"x\"}"))
@@ -3015,7 +5122,7 @@ func FuzzEventMetaZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw EventMeta
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedEventMeta(data) {
 				var stdRaw EventMeta
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -3034,6 +5141,9 @@ func FuzzEventMetaZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerEventMeta(canon) {
 			return
 		}
 		var viaStd EventMeta
@@ -3092,7 +5202,7 @@ func FuzzReuseInnerZJSON(f *testing.F) {
 		}
 		{
 			var zjRaw ReuseInner
-			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedReuseInner(data) {
 				var stdRaw ReuseInner
 				if json.Unmarshal(data, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
@@ -3111,6 +5221,9 @@ func FuzzReuseInnerZJSON(f *testing.F) {
 		}
 		canon, err := json.Marshal(&seed)
 		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerReuseInner(canon) {
 			return
 		}
 		var viaStd ReuseInner

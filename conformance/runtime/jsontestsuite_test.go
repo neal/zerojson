@@ -142,13 +142,14 @@ func loadIGolden(t *testing.T) map[string]bool {
 // never the reverse. There are exactly two classes:
 //
 //   - Lenient numbers: ReadInterface reads a numeric token with the
-//     trusted-path readNumericBytes (a greedy [0-9+\-.eE] run) and hands
-//     it to strconv.ParseFloat, which accepts forms RFC 8259 forbids —
-//     a leading '+', a leading zero, a bare/trailing '.', or a missing
-//     integer or fractional part. (For untrusted number grammar, callers
-//     use zerojson.Valid, which rejects all of these — see
-//     TestJSONTestSuiteValid above, where every one of these files is a
-//     correctly-rejected n_.)
+//     trusted-path bare-number scanner and hands it to strconv.ParseFloat
+//     after a cheap grammar check (bareFloatOK) that rejects the forms
+//     strconv would otherwise take — a leading '+', a missing integer
+//     part, a bare/trailing '.'. The ONE remaining leniency is a leading
+//     zero (`007`, `-01`), the documented trusted-path trade. (For
+//     untrusted number grammar, callers use zerojson.Valid, which rejects
+//     that too — see TestJSONTestSuiteValid above, where every one of
+//     these files is a correctly-rejected n_.)
 //
 //   - Lenient strings: ReadInterface reads a string value with the
 //     trusted-path readStringBytes/unescapeString, which accepts raw
@@ -164,19 +165,9 @@ func loadIGolden(t *testing.T) map[string]bool {
 // would a new lenient acceptance in some third class.
 var decodeSurfaceDivergences = map[string]string{
 	// --- lenient numbers (strconv.ParseFloat accepts, RFC 8259 rejects) ---
-	"n_number_+1.json":                           "leading '+' sign",
-	"n_number_-01.json":                          "leading zero after sign",
-	"n_number_-2..json":                          "trailing '.' with no fraction",
-	"n_number_.2e-3.json":                        "no integer part before '.'",
-	"n_number_0.e1.json":                         "no fraction digits before exponent",
-	"n_number_2.e+3.json":                        "trailing '.' before exponent",
-	"n_number_2.e-3.json":                        "trailing '.' before exponent",
-	"n_number_2.e3.json":                         "trailing '.' before exponent",
-	"n_number_neg_int_starting_with_zero.json":   "leading zero after sign",
-	"n_number_neg_real_without_int_part.json":    "no integer part before '.'",
-	"n_number_real_without_fractional_part.json": "trailing '.' with no fraction",
-	"n_number_starting_with_dot.json":            "no integer part before '.'",
-	"n_number_with_leading_zero.json":            "leading zero",
+	"n_number_-01.json":                        "leading zero after sign",
+	"n_number_neg_int_starting_with_zero.json": "leading zero after sign",
+	"n_number_with_leading_zero.json":          "leading zero",
 
 	// --- lenient strings (readStringBytes/unescapeString accept, RFC rejects) ---
 	"n_string_1_surrogate_then_escape_u.json":           "incomplete \\u escape after lone surrogate -> U+FFFD",

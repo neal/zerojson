@@ -144,8 +144,9 @@ func daysSinceUnixEpoch(year, month, day int) int64 {
 func (l *Lexer) ReadTime() time.Time {
 	b, plain, _ := l.readStringBytes()
 	if !plain {
-		l.setErr("escaped timestamp")
-		return time.Time{}
+		// An escaped spelling (`\u0032024-...`) is exotic but valid JSON
+		// for the same string; unescape and parse it like any other.
+		b = unescapeStringBytes(b)
 	}
 	if t, ok := parseRFC3339Z(b); ok {
 		return t

@@ -19,7 +19,7 @@ import (
 )
 
 // EventLeg and EventMeta are auto-discovered from Event's fields.
-//go:generate go run github.com/neal/zerojson/cmd/zerojsongen -dir . -types Event,RawHolder,OmitZeroCases,StringOptCases,AppenderCases,MapFieldsLike,EventLeg,EmbedMid,EventProjection,InteractionOmitZero,MapPointerMethods,ReuseSemantics,OrderedSideEffects,PoolAppenderHolder,BytesCases,EventList,LegPtrList,LegIndex,PointerMethodIndex,PointerQuotedIndex,RawList,DecimalList -leaf github.com/neal/zerojson/conformance/internal/testleaf.Decimal=github.com/neal/zerojson/conformance/internal/testleaf.Append,github.com/neal/zerojson/conformance/internal/testleaf.Read -pool -out zerojson_gen.go -tests zerojson_gen_fuzz_test.go
+//go:generate go run github.com/neal/zerojson/cmd/zerojsongen -dir . -types Event,RawHolder,OmitZeroCases,StringOptCases,AppenderCases,MapFieldsLike,EventLeg,EmbedMid,EventProjection,InteractionOmitZero,MapPointerMethods,ReuseSemantics,OrderedSideEffects,PoolAppenderHolder,BytesCases,EventList,LegPtrList,LegIndex,PointerMethodIndex,PointerQuotedIndex,RawList,RawIndex,RawHolderList,DecimalList,PointerCollections,NumberCases,NullCases -leaf github.com/neal/zerojson/conformance/internal/testleaf.Decimal=github.com/neal/zerojson/conformance/internal/testleaf.Append,github.com/neal/zerojson/conformance/internal/testleaf.Read -pool -out zerojson_gen.go -tests zerojson_gen_fuzz_test.go
 
 // EventList, LegPtrList, and LegIndex exercise the generator's named
 // slice/map ROOT support (root.go) — a top-level shape easyjson handles.
@@ -47,6 +47,11 @@ type LegIndex map[string]EventLeg
 // compiles and round-trips. RawList exercises the always-registered
 // built-in Raw leaf; DecimalList exercises an explicitly registered -leaf.
 type RawList []zerojson.Raw
+
+// RawIndex and RawHolderList keep direct and nested Raw roots in every
+// dynamically discovered fuzz campaign, alongside the flat RawList.
+type RawIndex map[string]zerojson.Raw
+type RawHolderList []RawHolder
 
 // DecimalList is a []decimal.Decimal leaf-element root.
 type DecimalList []decimal.Decimal
@@ -606,4 +611,64 @@ type BytesCases struct {
 	Ptr   *[]byte           `json:"ptr"`
 	Lists [][]byte          `json:"lists"`
 	Index map[string][]byte `json:"index"`
+}
+
+// PointerCollections exercises pointer-to-slice and pointer-to-map fields
+// (*[]T, *map[string]T — shapes encoding/json supports): a nil pointer
+// encodes as null and omitempty gates on the pointer, not the pointee; on
+// decode a pointer to a NIL map must not be adopted as the arena's map
+// cell (the first assignment would panic), and `{}` / `[]` yield a
+// pointer to a non-nil empty collection, as stdlib does.
+type PointerCollections struct {
+	Names *[]string          `json:"names"`
+	Index *map[string]int    `json:"index"`
+	Legs  *[]EventLeg        `json:"legs,omitempty"`
+	Tags  *map[string]string `json:"tags,omitempty"`
+}
+
+// NumberCases exercises encoding/json.Number (the literal verbatim, bare on
+// the wire — NOT a quoted enum, which its named-string shape would
+// otherwise suggest) in every position, plus the `,string` quoted-null
+// no-op on value and pointer fields.
+type NumberCases struct {
+	N    json.Number            `json:"n"`
+	NO   json.Number            `json:"no,omitempty"`
+	NP   *json.Number           `json:"np"`
+	NS   []json.Number          `json:"ns"`
+	NM   map[string]json.Number `json:"nm"`
+	CntS uint32                 `json:"cnt_s,string"`
+	PtrS *int64                 `json:"ptr_s,string"`
+}
+
+// NullAware is a nullable custom type: UnmarshalJSON("null") clears Valid,
+// which is exactly the case where a decoder that skipped the callback on
+// null (as easyjson does) would silently leave a stale Valid=true.
+type NullAware struct {
+	Valid bool
+	N     int
+}
+
+func (v NullAware) MarshalJSON() ([]byte, error) {
+	if !v.Valid {
+		return []byte("null"), nil
+	}
+	return json.Marshal(v.N)
+}
+
+func (v *NullAware) UnmarshalJSON(b []byte) error {
+	if string(b) == "null" {
+		*v = NullAware{}
+		return nil
+	}
+	v.Valid = true
+	return json.Unmarshal(b, &v.N)
+}
+
+// NullCases exercises null delivery to value-typed Unmarshalers in every
+// position, and the pointer position (cleared).
+type NullCases struct {
+	One   NullAware            `json:"one"`
+	Many  []NullAware          `json:"many"`
+	Index map[string]NullAware `json:"index"`
+	Ptr   *NullAware           `json:"ptr"`
 }

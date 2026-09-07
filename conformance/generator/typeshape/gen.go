@@ -400,10 +400,14 @@ func main() {
 	}
 	sort.Strings(names)
 
-	run("easyjson", "go", "run", "github.com/mailru/easyjson/easyjson", "-all", "oracle_gen.go")
+	// zerojsongen first: it tolerates its own stale output (a previous
+	// zerojson_gen.go that no longer compiles against the runtime is
+	// blanked out while the package is loaded), whereas easyjson's
+	// bootstrap compiles the whole package and would fail on that file.
 	run("zerojsongen", "go", "run", "github.com/neal/zerojson/cmd/zerojsongen",
 		"-dir", ".", "-types", strings.Join(names, ","), "-leaf", testLeafSpec,
 		"-out", "zerojson_gen.go")
+	run("easyjson", "go", "run", "github.com/mailru/easyjson/easyjson", "-all", "oracle_gen.go")
 	fmt.Printf("typeshape matrix: %d cells\n", len(cells))
 }
 

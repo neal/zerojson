@@ -2,3 +2,5 @@ cpu*.out
 *.test
 /zerojsongen
 /cmd/zerojsongen/zerojsongen
+/conformance/zj*/
+/conformance/testdata/schema-failures/

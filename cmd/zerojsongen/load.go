@@ -12,9 +12,9 @@ import (
 )
 
 func (g *generator) collectFields(typeName string, st *types.Struct) []fieldInfo {
-	var fields []fieldInfo
-	seen := map[string]bool{}
-	g.collectInto(typeName, st, "", "", seen, &fields)
+	var candidates []fieldInfo
+	g.collectInto(typeName, st, "", "", &candidates)
+	fields := resolveDominance(typeName, candidates)
 	// Arena cell identifiers must not be derived by joining selector names:
 	// an embedded A.B and a direct A_B otherwise both become A_B and emit
 	// duplicate arena fields. Stable numeric ids are unambiguous and private
@@ -23,6 +23,62 @@ func (g *generator) collectFields(typeName string, st *types.Struct) []fieldInfo
 		fields[i].cellName = fmt.Sprintf("%d", i)
 	}
 	return fields
+}
+
+// resolveDominance applies encoding/json's rule for JSON-name collisions
+// between direct and promoted (embedded) fields, once every candidate has
+// been collected so declaration order cannot change the outcome: among
+// the candidates for a name, those at the shallowest embedding depth
+// compete; a single one wins; if several tie, the one with an explicit
+// tag name wins if there is exactly one such; otherwise stdlib silently
+// drops them all — which is refused here instead, with a pointer at the
+// fix. Survivors keep their collection order (declaration order, with
+// promoted fields at their embed's position — stdlib's index order).
+func resolveDominance(typeName string, candidates []fieldInfo) []fieldInfo {
+	byName := map[string][]int{}
+	var names []string
+	for i, f := range candidates {
+		if _, seen := byName[f.jsonName]; !seen {
+			names = append(names, f.jsonName)
+		}
+		byName[f.jsonName] = append(byName[f.jsonName], i)
+	}
+	keep := make(map[int]bool, len(candidates))
+	for _, name := range names {
+		idxs := byName[name]
+		if len(idxs) == 1 {
+			keep[idxs[0]] = true
+			continue
+		}
+		minDepth := candidates[idxs[0]].embedDepth
+		for _, i := range idxs[1:] {
+			minDepth = min(minDepth, candidates[i].embedDepth)
+		}
+		var shallow, tagged []int
+		for _, i := range idxs {
+			if candidates[i].embedDepth == minDepth {
+				shallow = append(shallow, i)
+				if candidates[i].explicitName {
+					tagged = append(tagged, i)
+				}
+			}
+		}
+		switch {
+		case len(shallow) == 1:
+			keep[shallow[0]] = true
+		case len(tagged) == 1:
+			keep[tagged[0]] = true
+		default:
+			log.Fatalf("%s: JSON field %q is claimed by %d fields at the same embedding depth with no single explicitly tagged one — encoding/json would silently drop all of them; give one an explicit distinct tag or json:\"-\"", typeName, name, len(shallow))
+		}
+	}
+	out := make([]fieldInfo, 0, len(candidates))
+	for i, f := range candidates {
+		if keep[i] {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // collectRoot classifies a named slice/map root type (type X []T, []*T, or
@@ -54,26 +110,28 @@ func (g *generator) collectRoot(typeName string, under types.Type) *fieldInfo {
 // embedded value structs so their fields are promoted (flattened) into the
 // parent — matching encoding/json. accessPrefix/cellPrefix thread the Go
 // selector and arena-id path for promoted fields.
-func (g *generator) collectInto(typeName string, st *types.Struct, accessPrefix, cellPrefix string, seen map[string]bool, out *[]fieldInfo) {
+func (g *generator) collectInto(typeName string, st *types.Struct, accessPrefix, cellPrefix string, out *[]fieldInfo) {
+	depth := strings.Count(accessPrefix, ".")
 	for i := 0; i < st.NumFields(); i++ {
 		f := st.Field(i)
 		tag := reflect.StructTag(st.Tag(i)).Get("json")
-		// An unexported field is dropped — UNLESS it is an embedded struct,
-		// whose EXPORTED fields encoding/json still promotes through the
-		// (invisible) embedded value (e.g. an unexported `hidden` with an
-		// exported `Visible` contributes `{"visible":...}`). An unexported
-		// embedded field with an explicit json tag is dropped like any
-		// other unexported field (stdlib treats a tag on an unexported
-		// embedded field as making it a non-promoted, therefore ignored,
-		// field). flattenEmbedded refuses the unexported-embedded-POINTER
-		// case with a clear error rather than silently ignoring it (see
-		// there): stdlib cannot allocate through an unexported embedded
-		// pointer on decode, so round-trip parity is impossible.
+		// Unexported embedded structs still expose exported descendants.
+		// A tag name nests them; an option-only tag still promotes them.
 		if !f.Exported() {
-			if f.Embedded() && tag == "" {
-				g.flattenEmbedded(typeName, f, accessPrefix, cellPrefix, seen, out)
+			t := types.Unalias(f.Type())
+			p, pointer := t.(*types.Pointer)
+			if pointer {
+				t = p.Elem()
 			}
-			continue
+			if _, structType := t.Underlying().(*types.Struct); !f.Embedded() || !structType {
+				continue
+			}
+			if f.Pkg() != g.pkg.Types && tag != "-" {
+				log.Fatalf("%s.%s: inaccessible embedded field from %s — use an exported wrapper or generate its codec in the declaring package", typeName, f.Name(), f.Pkg().Path())
+			}
+			if pointer && tag != "-" {
+				log.Fatalf("%s.%s: unexported embedded pointer types are not supported — encoding/json cannot allocate the pointee", typeName, f.Name())
+			}
 		}
 		if tag == "-" {
 			continue
@@ -86,28 +144,32 @@ func (g *generator) collectInto(typeName string, st *types.Struct, accessPrefix,
 		// embedded-promotion decision so that, like stdlib, an embedded
 		// field whose tag name is invalid is treated as untagged (name
 		// "") and its fields are promoted.
+		invalidTag := false
 		if name != "" && !isValidTag(name) {
 			name = ""
+			invalidTag = true
 		}
 
 		if f.Embedded() && name == "" {
-			g.flattenEmbedded(typeName, f, accessPrefix, cellPrefix, seen, out)
+			g.flattenEmbedded(typeName, f, accessPrefix, cellPrefix, out)
 			continue
 		}
 
+		explicitName := name != ""
 		if name == "" {
 			name = f.Name()
 		}
-		if seen[name] {
-			log.Fatalf("%s: duplicate JSON field %q after embedding — give one an explicit distinct tag", typeName, name)
-		}
-		seen[name] = true
+		// Collisions between this name and a promoted or outer field are
+		// resolved by resolveDominance once every candidate is collected.
 
 		fi := fieldInfo{
-			goName:   f.Name(),
-			access:   accessPrefix + f.Name(),
-			cellName: cellPrefix + f.Name(),
-			jsonName: name,
+			goName:       f.Name(),
+			access:       accessPrefix + f.Name(),
+			cellName:     cellPrefix + f.Name(),
+			jsonName:     name,
+			embedDepth:   depth,
+			explicitName: explicitName,
+			invalidTag:   invalidTag,
 		}
 		ctx := typeName + "." + f.Name()
 		if err := g.parseJSONOptions(&fi, parts[1:], ctx); err != nil {
@@ -117,8 +179,11 @@ func (g *generator) collectInto(typeName string, st *types.Struct, accessPrefix,
 			log.Fatal(err)
 		}
 
+		// Inspect aliases for pointer shape, but preserve the spelled type
+		// for classify's emitted casts (an exported alias may be the only
+		// accessible name for an otherwise unexported external type).
 		t := f.Type()
-		if p, ok := t.(*types.Pointer); ok {
+		if p, ok := types.Unalias(t).(*types.Pointer); ok {
 			fi.ptr = true
 			t = p.Elem()
 		}
@@ -215,16 +280,29 @@ func (g *generator) validateFieldOptions(fi fieldInfo, ctx string) error {
 	if fi.omitzero && !fi.ptr {
 		switch fi.kind {
 		case kString, kEnum, kBool, kQuotedInt, kInt, kUint, kFloat32, kFloat64,
-			kSlice, kLeafSlice, kMap, kByteSlice, kInterface, kUUID:
+			kSlice, kLeafSlice, kMap, kByteSlice, kInterface, kUUID, kJSONNumber:
 			// Always representable: scalar zero value, or nil for
 			// reference kinds (uuid.UUID falls back to a comparable
 			// zero-value check in zeroGate when it has no IsZero method).
-		case kTime, kCustomLeaf, kStruct, kTextMarshaler, kAppender:
+		case kTime, kStruct:
 			if !fi.hasIsZero {
 				return fmt.Errorf("%s: omitzero requires an IsZero() bool method on %s (none found) — implement one or drop omitzero", ctx, fi.typeStr)
 			}
+		case kCustomLeaf, kTextMarshaler, kAppender:
+			// A scalar-, slice-, or map-underlying custom type gates on
+			// its underlying zero value (stdlib semantics) when it has no
+			// IsZero; only a struct-shaped one needs the method.
+			if !fi.hasIsZero && (fi.scalarEmpty == "" || fi.scalarEmpty == "array") {
+				return fmt.Errorf("%s: omitzero requires an IsZero() bool method on %s (none found) — implement one or drop omitzero", ctx, fi.typeStr)
+			}
+			// Preserve the existing Raw option restriction. Empty Raw now
+			// safely encodes as null, but enabling this option is separate
+			// from custom-type emptiness classification.
+			if fi.kind == kCustomLeaf && fi.leaf != nil && fi.leaf.appendPkg == runtimePath && fi.leaf.appendFn == "AppendRaw" {
+				return fmt.Errorf("%s: omitzero is not supported on zerojson.Raw — use omitempty, or a *zerojson.Raw", ctx)
+			}
 		case kMarshaler:
-			if !fi.marshalerIsSlice && !fi.marshalerIsMap && !fi.hasIsZero {
+			if !fi.marshalerIsSlice && !fi.marshalerIsMap && !fi.hasIsZero && (fi.scalarEmpty == "" || fi.scalarEmpty == "array") {
 				return fmt.Errorf("%s: omitzero requires an IsZero() bool method on %s (none found) — implement one or drop omitzero", ctx, fi.typeStr)
 			}
 		default:
@@ -238,8 +316,8 @@ func (g *generator) validateFieldOptions(fi fieldInfo, ctx string) error {
 // embedded value structs without their own JSON methods are supported;
 // embedded pointers and Marshaler-bearing embeds change encoding/json
 // semantics in subtle ways and are refused loudly.
-func (g *generator) flattenEmbedded(typeName string, f *types.Var, accessPrefix, cellPrefix string, seen map[string]bool, out *[]fieldInfo) {
-	t := f.Type()
+func (g *generator) flattenEmbedded(typeName string, f *types.Var, accessPrefix, cellPrefix string, out *[]fieldInfo) {
+	t := types.Unalias(f.Type())
 	if _, ok := t.(*types.Pointer); ok {
 		log.Fatalf("%s.%s: embedded pointer types are not supported — unembed it or give it a json tag", typeName, f.Name())
 	}
@@ -253,15 +331,32 @@ func (g *generator) flattenEmbedded(typeName string, f *types.Var, accessPrefix,
 		// silently reimplement.
 		log.Fatalf("%s.%s: embedded type %s has its own JSON/Text methods; embedding it changes marshaling of the whole parent — unembed it or add an explicit tag", typeName, f.Name(), named.Obj().Name())
 	}
+	if g.handwritten(named, "AppendZJSON") || g.handwritten(named, "ReadZJSON") {
+		// Same trap for zerojson's own extension pair: the promoted
+		// AppendZJSON/ReadZJSON would make the PARENT look like an
+		// Appender/Reader to any generator that sees it, and stdlib
+		// (which knows nothing of those methods) would still encode the
+		// parent structurally — the two can never agree.
+		log.Fatalf("%s.%s: embedded type %s has its own AppendZJSON/ReadZJSON methods, which embedding would promote to the parent — unembed it or add an explicit tag", typeName, f.Name(), named.Obj().Name())
+	}
 	est, ok := named.Underlying().(*types.Struct)
 	if !ok {
 		log.Fatalf("%s.%s: embedded non-struct type %s is not supported", typeName, f.Name(), named.Obj().Name())
 	}
-	g.collectInto(typeName, est, accessPrefix+f.Name()+".", cellPrefix+f.Name()+"_", seen, out)
+	g.collectInto(typeName, est, accessPrefix+f.Name()+".", cellPrefix+f.Name()+"_", out)
 }
 
 func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
+	// The emitted type expression keeps the alias name the user wrote
+	// (json.RawMessage, not jsontext.Value — which would drag an import
+	// of a package the user never named into the generated file); every
+	// classification decision below looks through the alias to the type
+	// it denotes. Without this, an alias is neither *types.Named nor
+	// anything else the switch recognizes and silently falls through to
+	// its underlying type — on Go 1.27, where json.RawMessage became an
+	// alias, that meant base64-encoding it as a plain []byte.
 	fi.typeStr = g.typeExpr(t)
+	t = types.Unalias(t)
 
 	if named, ok := t.(*types.Named); ok {
 		// Recorded uniformly for every named-type kind so omitzero can
@@ -270,18 +365,27 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 		// uuid.UUID and most struct/Marshaler types don't, and fall back
 		// to a zero-value comparison or a generate-time error).
 		fi.hasIsZero = hasIsZeroMethod(named)
-		// Record the underlying scalar category (if any) so omitempty on a
-		// Marshaler/Appender/TextMarshaler value field can gate on the zero
-		// value like encoding/json does (see fieldInfo.scalarEmpty).
-		if b, ok := named.Underlying().(*types.Basic); ok {
+		// Record the underlying emptiness category (if any) so omitempty
+		// on a Marshaler/Appender/TextMarshaler/custom-leaf value field
+		// can gate on it like encoding/json's isEmptyValue does — which
+		// inspects the underlying kind: zero for a scalar, len 0 for a
+		// slice or map (see fieldInfo.scalarEmpty).
+		switch u := named.Underlying().(type) {
+		case *types.Basic:
 			switch {
-			case b.Info()&types.IsNumeric != 0:
+			case u.Info()&types.IsNumeric != 0:
 				fi.scalarEmpty = "num"
-			case b.Info()&types.IsString != 0:
+			case u.Info()&types.IsString != 0:
 				fi.scalarEmpty = "str"
-			case b.Info()&types.IsBoolean != 0:
+			case u.Info()&types.IsBoolean != 0:
 				fi.scalarEmpty = "bool"
 			}
+		case *types.Slice, *types.Map:
+			fi.scalarEmpty = "len"
+		case *types.Array:
+			// Keep arrays distinct: unlike slices/maps, null must not
+			// clear them and omitzero is not a nil comparison.
+			fi.scalarEmpty = "array"
 		}
 		obj := named.Obj()
 		qual := ""
@@ -297,6 +401,13 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 		switch qual + "." + obj.Name() {
 		case "time.Time":
 			fi.kind = kTime
+			return
+		case "encoding/json.Number":
+			// A named string type, but NOT an enum: encoding/json (and
+			// easyjson) write the literal bare and read a bare number —
+			// classifying it as a quoted enum would silently change the
+			// wire format.
+			fi.kind = kJSONNumber
 			return
 		case uuidPath + ".UUID":
 			fi.kind = kUUID
@@ -316,6 +427,10 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 		hasRead := hasReadZJSONSig(named) && g.handwritten(named, "ReadZJSON")
 		if hasAppend && hasRead {
 			fi.kind = kAppender
+			// encoding/json delivers a null through UnmarshalJSON on the
+			// strength of that method alone (MarshalJSON is irrelevant to
+			// decoding), so the null-delivery decision follows it alone.
+			fi.appenderHasUnmarshalJSON = hasUnmarshalJSON(named)
 			return
 		}
 		if hasAppend != hasRead {
@@ -331,6 +446,7 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 		if obj.Pkg() == g.pkg.Types {
 			if _, isStruct := named.Underlying().(*types.Struct); isStruct &&
 				(g.explicit[obj.Name()] || g.replaceableMethods(named)) {
+				rejectGeneric(named, ctx)
 				g.discover(obj.Name())
 				fi.kind = kStruct
 				fi.elem = obj.Name()
@@ -348,7 +464,11 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 				log.Fatalf("%s: %s declares ZeroJSONQuotedInt64 but must be an int64-backed type with value MarshalJSON and UnmarshalJSON", ctx, t)
 			}
 			fi.kind = kQuotedInt
-			fi.intRead = "l.ReadInt64()"
+			// The marker promises the quoted form on the wire; the read
+			// stays tolerant of a bare number too (as the type's own
+			// UnmarshalJSON typically is), unlike the strict bare-only
+			// readers plain int fields use.
+			fi.intRead = "l.ReadQuotedOrBareInt64()"
 			fi.marshalOnValue = hasMarshalJSONValue(named)
 			return
 		}
@@ -435,19 +555,28 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 		// (e.g. json.RawMessage, zerojson.Raw) was already classified as a
 		// Marshaler/leaf above and never reaches here.
 		if eb, ok := s.Elem().Underlying().(*types.Basic); ok && eb.Kind() == types.Uint8 {
-			if en, isNamed := s.Elem().(*types.Named); !isNamed || (!hasMarshalJSON(en) && !hasMarshalText(en)) {
+			if en, isNamed := types.Unalias(s.Elem()).(*types.Named); !isNamed || (!hasMarshalJSON(en) && !hasMarshalText(en)) {
 				fi.kind = kByteSlice
+				if !types.Identical(s.Elem(), types.Typ[types.Uint8]) {
+					fi.byteElem = g.typeExpr(s.Elem())
+				}
 				return
 			}
 		}
+		// The element type is handed to classify WITH any alias intact, so
+		// the emitted element type expression keeps the user's spelling
+		// (json.RawMessage, not the jsontext.Value it aliases on Go 1.27 —
+		// which would add an import the user never wrote); classify looks
+		// through the alias itself for every decision.
 		elem := s.Elem()
-		if p, ok := elem.(*types.Pointer); ok {
+		if p, ok := types.Unalias(elem).(*types.Pointer); ok {
 			fi.elemPtr = true
 			elem = p.Elem()
 		}
-		if en, ok := elem.(*types.Named); ok && en.Obj().Pkg() == g.pkg.Types {
+		if en, ok := types.Unalias(elem).(*types.Named); ok && en.Obj().Pkg() == g.pkg.Types {
 			if _, isStruct := en.Underlying().(*types.Struct); isStruct &&
 				(g.explicit[en.Obj().Name()] || g.replaceableMethods(en)) {
+				rejectGeneric(en, ctx+"[elem]")
 				g.discover(en.Obj().Name())
 				fi.kind = kSlice
 				fi.elem = en.Obj().Name()
@@ -456,6 +585,14 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 		}
 		vi := &fieldInfo{}
 		g.classify(vi, elem, ctx+"[elem]")
+		if vi.kind == kAppender {
+			// Appender/Reader elements have no slice codec yet; a type
+			// that ALSO carries MarshalJSON/UnmarshalJSON is delegated to
+			// those in this position (its own fields keep the fast pair).
+			if !g.demoteAppenderToMarshaler(vi, elem) {
+				log.Fatalf("%s: slice of an Appender-interface type (%s) is not supported yet — add MarshalJSON/UnmarshalJSON to the element type, which are used in this position while fields keep AppendZJSON/ReadZJSON", ctx, t)
+			}
+		}
 		if fi.elemPtr {
 			// Pointer elements: only self-marshaling types (nil -> null).
 			switch vi.kind {
@@ -468,12 +605,10 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 		}
 		switch vi.kind {
 		case kString, kEnum, kBool, kInt, kUint, kFloat32, kFloat64,
-			kQuotedInt, kTime, kUUID, kCustomLeaf, kMarshaler, kTextMarshaler, kInterface, kByteSlice:
+			kQuotedInt, kTime, kUUID, kCustomLeaf, kMarshaler, kTextMarshaler, kInterface, kByteSlice, kJSONNumber:
 			fi.kind = kLeafSlice
 			fi.valInfo = vi
 			return
-		case kAppender:
-			log.Fatalf("%s: slice of an Appender-interface type (%s) is not supported yet — implement MarshalJSON/UnmarshalJSON for slice elements instead", ctx, t)
 		}
 	}
 
@@ -482,16 +617,28 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 		if !ok || kb.Kind() != types.String {
 			log.Fatalf("%s: unsupported map key type %s (string-kind keys only)", ctx, m.Key())
 		}
+		if kn, ok := types.Unalias(m.Key()).(*types.Named); ok && (hasMarshalText(kn) || hasUnmarshalText(kn)) {
+			// encoding/json routes such keys through MarshalText/
+			// UnmarshalText; the generated map codec converts the raw
+			// key string directly, which would silently bypass them.
+			log.Fatalf("%s: map key type %s has MarshalText/UnmarshalText, which encoding/json would apply to the keys — not supported; use a plain string-kind key type", ctx, m.Key())
+		}
 		vi := &fieldInfo{}
-		if st, ok := m.Elem().Underlying().(*types.Struct); ok && st.NumFields() == 0 {
+		if _, named := types.Unalias(m.Elem()).(*types.Named); !named && isEmptyStruct(m.Elem()) {
 			vi.kind = kEmptyStruct
 			vi.typeStr = g.typeExpr(m.Elem())
 		} else {
 			g.classify(vi, m.Elem(), ctx+"[value]")
+			if vi.kind == kStruct {
+				rejectGenericType(m.Elem(), ctx+"[value]")
+			}
+			if vi.kind == kAppender && !g.demoteAppenderToMarshaler(vi, m.Elem()) {
+				log.Fatalf("%s: map of an Appender-interface type (%s) is not supported yet — add MarshalJSON/UnmarshalJSON to the value type, which are used in this position while fields keep AppendZJSON/ReadZJSON", ctx, m.Elem())
+			}
 		}
 		switch vi.kind {
 		case kString, kEnum, kBool, kInt, kUint, kFloat32, kFloat64,
-			kQuotedInt, kTime, kUUID, kCustomLeaf, kEmptyStruct, kStruct, kMarshaler, kTextMarshaler, kInterface, kByteSlice:
+			kQuotedInt, kTime, kUUID, kCustomLeaf, kEmptyStruct, kStruct, kMarshaler, kTextMarshaler, kInterface, kByteSlice, kJSONNumber:
 		default:
 			log.Fatalf("%s: unsupported map value kind for %s", ctx, m.Elem())
 		}
@@ -501,8 +648,14 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 		return
 	}
 
-	// Empty interface (interface{} / any): fall back to encoding/json,
-	// matching easyjson's handling of interface-typed fields.
+	// Named empty structs without methods (including external set-map
+	// values) reach here only AFTER custom codec classification.
+	if isEmptyStruct(t) {
+		fi.kind = kEmptyStruct
+		return
+	}
+	// Empty interfaces use generic readers unless an existing concrete
+	// pointer requires encoding/json's receiver semantics.
 	if iface, ok := t.Underlying().(*types.Interface); ok && iface.NumMethods() == 0 {
 		fi.kind = kInterface
 		fi.typeStr = "any"
@@ -510,6 +663,49 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 	}
 
 	log.Fatalf("%s: unsupported field type %s — add it to the generator's leaf table or implement MarshalJSON/UnmarshalJSON", ctx, t)
+}
+
+func isEmptyStruct(t types.Type) bool {
+	s, ok := t.Underlying().(*types.Struct)
+	return ok && s.NumFields() == 0
+}
+
+// demoteAppenderToMarshaler re-classifies an Appender/Reader element or
+// map value as a Marshaler when its type also implements
+// MarshalJSON/UnmarshalJSON, since the generator has no slice/map codec
+// for the Appender pair yet. Reports whether it could.
+func (g *generator) demoteAppenderToMarshaler(vi *fieldInfo, t types.Type) bool {
+	named, ok := types.Unalias(t).(*types.Named)
+	if !ok || !hasMarshalJSON(named) || !hasUnmarshalJSON(named) {
+		return false
+	}
+	vi.kind = kMarshaler
+	vi.marshalOnValue = hasMarshalJSONValue(named)
+	switch named.Underlying().(type) {
+	case *types.Slice:
+		vi.marshalerIsSlice = true
+	case *types.Map:
+		vi.marshalerIsMap = true
+	}
+	return true
+}
+
+// rejectGeneric refuses to generate a codec for a generic type (or an
+// instantiation of one). The generator emits methods on the bare type
+// name — `func (v *Box) ...` — which does not compile for a generic
+// `Box[T]`, and it would previously report success and leave the user
+// with a broken file. A generic type from another package that carries
+// its own MarshalJSON is unaffected: it is delegated to, never generated.
+func rejectGeneric(named *types.Named, ctx string) {
+	if named.TypeParams().Len() > 0 || named.TypeArgs().Len() > 0 {
+		log.Fatalf("%s: generic type %s is not supported — wrap it in a non-generic named type, or implement MarshalJSON/UnmarshalJSON on it so it is delegated to", ctx, named)
+	}
+}
+
+func rejectGenericType(t types.Type, ctx string) {
+	if named, ok := types.Unalias(t).(*types.Named); ok {
+		rejectGeneric(named, ctx)
+	}
 }
 
 // signedReadCall / unsignedReadCall pick the width-aware, range-checked
@@ -567,6 +763,13 @@ func (g *generator) replaceableMethods(named *types.Named) bool {
 			proper = sigIs(sig, nil, []types.Type{tByteSlice, tError})
 		case "UnmarshalJSON", "UnmarshalText":
 			proper = sigIs(sig, []types.Type{tByteSlice}, []types.Type{tError})
+		case "AppendZJSON":
+			// A hand-written zerojson extension pair defines the wire
+			// format just as firmly as MarshalJSON does; generating a
+			// second AppendZJSON for the type would not even compile.
+			proper = hasAppendZJSONSig(named)
+		case "ReadZJSON":
+			proper = hasReadZJSONSig(named)
 		default:
 			continue
 		}
@@ -708,11 +911,14 @@ func hasReadZJSONSig(named *types.Named) bool {
 	if sig == nil || sig.Variadic() || sig.Params().Len() != 1 || sig.Results().Len() != 0 {
 		return false
 	}
-	ptr, ok := sig.Params().At(0).Type().(*types.Pointer)
+	// Look through aliases on both the parameter (`type L = *zerojson.Lexer`)
+	// and the pointee (`type LexerAlias = zerojson.Lexer`): either is the
+	// same type and must be recognized.
+	ptr, ok := types.Unalias(sig.Params().At(0).Type()).(*types.Pointer)
 	if !ok {
 		return false
 	}
-	n, ok := ptr.Elem().(*types.Named)
+	n, ok := types.Unalias(ptr.Elem()).(*types.Named)
 	return ok && n.Obj().Name() == "Lexer" && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == runtimePath
 }
 
@@ -814,6 +1020,7 @@ func (g *generator) handwritten(named *types.Named, name string) bool {
 // deduplicated by value.
 func (g *generator) enumConstants(named *types.Named) []enumConst {
 	scope := named.Obj().Pkg().Scope()
+	foreign := named.Obj().Pkg() != g.pkg.Types
 	seen := map[string]bool{}
 	var consts []enumConst
 	names := scope.Names()
@@ -821,6 +1028,14 @@ func (g *generator) enumConstants(named *types.Named) []enumConst {
 	for _, n := range names {
 		c, ok := scope.Lookup(n).(*types.Const)
 		if !ok || !types.Identical(c.Type(), named) {
+			continue
+		}
+		// An enum from another package can only switch on the constants
+		// that package exports; its unexported ones are unnameable from
+		// the generated file (they were previously emitted verbatim and
+		// failed to compile) and decode through the copy/intern default
+		// case like any other unknown value.
+		if foreign && !c.Exported() {
 			continue
 		}
 		val := constant.StringVal(c.Val())

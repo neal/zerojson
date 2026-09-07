@@ -3,8 +3,19 @@ package main
 import (
 	stdjson "encoding/json"
 	"fmt"
+	"go/ast"
 	"strings"
 )
+
+// Go rejects Fuzz followed by a lowercase rune. Prefix every unexported
+// type (including underscore-prefixed names) to keep the mapping injective:
+// hidden, Hidden, and _hidden must never share a generated fuzz name.
+func fuzzTypeName(name string) string {
+	if ast.IsExported(name) {
+		return name
+	}
+	return "_" + name
+}
 
 // fuzzSeedValue returns a small, syntax-valid JSON value that reaches the
 // generated read path for f. Seeds do not need to be semantically accepted by
@@ -20,7 +31,7 @@ func fuzzSeedValue(f fieldInfo) string {
 		return `"x"`
 	case kBool:
 		return `true`
-	case kInt, kUint, kFloat32, kFloat64:
+	case kInt, kUint, kFloat32, kFloat64, kJSONNumber:
 		return `1`
 	case kQuotedInt:
 		return `"1"`
@@ -30,6 +41,11 @@ func fuzzSeedValue(f fieldInfo) string {
 		return `"00000000-0000-0000-0000-000000000000"`
 	case kByteSlice:
 		return `""`
+	case kCustomLeaf:
+		if isRawLeaf(f) {
+			return `{ "x": [1, "y"] }`
+		}
+		return `null`
 	case kSlice:
 		return `[{}]`
 	case kLeafSlice:
@@ -60,6 +76,10 @@ func fuzzObjectSeedValue(f fieldInfo, value string) string {
 
 func fuzzAlternateSeedValue(f fieldInfo) (string, bool) {
 	switch f.kind {
+	case kCustomLeaf:
+		if isRawLeaf(f) {
+			return `null`, true
+		}
 	case kByteSlice:
 		return `[0,1,255]`, true
 	case kLeafSlice:
@@ -189,7 +209,12 @@ func (g *generator) emitRawValueComparison(b *strings.Builder, n string, fields 
 // or Raw field doesn't blind the oracle to nil/empty differences elsewhere.
 func (g *generator) fieldRawComparable(f fieldInfo, seen map[string]bool) bool {
 	switch f.kind {
-	case kCustomLeaf, kAppender, kMarshaler, kTextMarshaler:
+	case kCustomLeaf:
+		// zerojson.Raw stores the exact value bytes and, through its own
+		// UnmarshalJSON, stdlib stores the same span — comparable. Other
+		// custom leaves own opaque state.
+		return isRawLeaf(f)
+	case kAppender, kMarshaler, kTextMarshaler:
 		return false
 	case kStruct, kSlice:
 		return !g.typeContainsOpaque(f.elem, seen)
@@ -267,21 +292,28 @@ func (g *generator) typeContainsRaw(name string, seen map[string]bool) bool {
 }
 
 // emitRawGraphRoundTrip emits the oracle for type graphs containing
-// zerojson.Raw. encoding/json treats that named []byte as base64 data rather
-// than as a captured JSON token, so typed stdlib comparisons are invalid for
-// these graphs. Successful zerojson decodes must instead emit valid JSON and
-// reach a byte-stable fixed point after one decode/encode cycle.
+// zerojson.Raw, in addition to (not instead of) the independent stdlib
+// comparisons. Raw implements MarshalJSON/UnmarshalJSON, so both decoders
+// capture the same value span. Round-trip equality is semantic: stdlib
+// marshaling normalizes map order and Raw whitespace before comparison.
 func emitRawGraphRoundTrip(b *strings.Builder, n string) {
-	fmt.Fprintf(b, "\t\tvar viaZJ %s\n", n)
-	fmt.Fprintf(b, "\t\tif err := viaZJ.UnmarshalZJSON(data); err != nil { return }\n")
-	fmt.Fprintf(b, "\t\tenc, err := viaZJ.AppendZJSON(nil)\n")
-	fmt.Fprintf(b, "\t\tif err != nil { return }\n")
-	fmt.Fprintf(b, "\t\tif !json.Valid(enc) { t.Fatalf(\"zerojson emitted invalid JSON after Raw decode: %%q\", enc) }\n")
-	fmt.Fprintf(b, "\t\tvar again %s\n", n)
-	fmt.Fprintf(b, "\t\tif err := again.UnmarshalZJSON(enc); err != nil { t.Fatalf(\"zerojson could not re-decode Raw output %%q: %%v\", enc, err) }\n")
-	fmt.Fprintf(b, "\t\tencAgain, err := again.AppendZJSON(nil)\n")
-	fmt.Fprintf(b, "\t\tif err != nil { t.Fatal(err) }\n")
-	fmt.Fprintf(b, "\t\tif !bytes.Equal(enc, encAgain) { t.Fatalf(\"Raw round-trip did not reach a fixed point\\nfirst:  %%q\\nsecond: %%q\", enc, encAgain) }\n")
+	fmt.Fprintf(b, `
+		{
+			var viaZJ %[1]s
+			if err := viaZJ.UnmarshalZJSON(data); err == nil {
+				if enc, err := viaZJ.AppendZJSON(nil); err == nil {
+					if !json.Valid(enc) { t.Fatalf("zerojson emitted invalid JSON after Raw decode: %%q", enc) }
+					var again %[1]s
+					if err := again.UnmarshalZJSON(enc); err != nil { t.Fatalf("zerojson could not re-decode Raw output %%q: %%v", enc, err) }
+					before, err := json.Marshal(&viaZJ)
+					if err != nil { t.Fatal(err) }
+					after, err := json.Marshal(&again)
+					if err != nil { t.Fatal(err) }
+					if !bytes.Equal(before, after) { t.Fatalf("Raw round-trip changed value\nfirst: %%q\nsecond: %%q", before, after) }
+				}
+			}
+		}
+`, n)
 }
 
 // emitDecodeErrorDirection emits the decode-error ORACLE DIRECTION arm:
@@ -295,13 +327,73 @@ func emitRawGraphRoundTrip(b *strings.Builder, n string) {
 func emitDecodeErrorDirection(b *strings.Builder, n string) {
 	fmt.Fprintf(b, "\t\t{\n")
 	fmt.Fprintf(b, "\t\t\tvar zjRaw %s\n", n)
-	fmt.Fprintf(b, "\t\t\tif zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed(data) {\n")
+	fmt.Fprintf(b, "\t\t\tif zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed%s(data) {\n", n)
 	fmt.Fprintf(b, "\t\t\t\tvar stdRaw %s\n", n)
 	fmt.Fprintf(b, "\t\t\t\tif json.Unmarshal(data, &stdRaw) == nil {\n")
 	fmt.Fprintf(b, "\t\t\t\t\tt.Fatalf(\"zerojson rejected %%q that encoding/json accepted: %%v\", data, zjErr)\n")
 	fmt.Fprintf(b, "\t\t\t\t}\n")
 	fmt.Fprintf(b, "\t\t\t}\n")
 	fmt.Fprintf(b, "\t\t}\n")
+}
+
+// emitNoOracleCall emits the guard that hands a v2-backed run to the
+// oracle-free checks. See emitNoOracleFuzz.
+func emitNoOracleCall(b *strings.Builder, n string, invalidTag bool) {
+	if !invalidTag {
+		return
+	}
+	fmt.Fprintf(b, "\t\tif zjStdlibJSONV2 {\n")
+	fmt.Fprintf(b, "\t\t\tzjFuzzNoOracle%s(t, data)\n", n)
+	fmt.Fprintf(b, "\t\t\treturn\n")
+	fmt.Fprintf(b, "\t\t}\n")
+}
+
+// emitNoOracleFuzz emits the oracle-free half of a fuzz target, used for a
+// type whose graph carries a field tag naming it with characters classic
+// encoding/json rejects (the Go field name is used instead). Go 1.27's
+// v2-backed encoding/json truncates such a name, so the two implementations
+// read and write DIFFERENT members for that field — a documented drift that
+// invalidates every stdlib comparison for the type, and only those. What
+// does not involve the oracle still runs on the v2-backed toolchain:
+// zerojson must not panic on arbitrary input, its own output must be valid
+// JSON, must re-decode, and (for struct roots) the speculative ordered fast
+// path and the fallback decoder must agree on it.
+func (g *generator) emitNoOracleFuzz(b *strings.Builder, ti typeInfo) {
+	n := ti.name
+	fmt.Fprintf(b, "// zjFuzzNoOracle%s runs the checks that do not compare against\n", n)
+	fmt.Fprintf(b, "// encoding/json: %s has a field whose tag name classic encoding/json\n", n)
+	fmt.Fprintf(b, "// rejects (the Go field name is used), and Go 1.27's v2-backed\n")
+	fmt.Fprintf(b, "// implementation truncates it instead — a documented drift, so only the\n")
+	fmt.Fprintf(b, "// stdlib oracle is dropped for this type there, not the whole target.\n")
+	fmt.Fprintf(b, "func zjFuzzNoOracle%s(t *testing.T, data []byte) {\n", n)
+	fmt.Fprintf(b, "\tvar viaZJ %s\n", n)
+	fmt.Fprintf(b, "\tif err := viaZJ.UnmarshalZJSON(data); err != nil { return }\n")
+	fmt.Fprintf(b, "\tenc, err := viaZJ.AppendZJSON(nil)\n")
+	fmt.Fprintf(b, "\tif err != nil { return }\n")
+	// json.Valid is a pure grammar check: it reads no struct tags, so it is
+	// unaffected by the drift that disqualifies the typed comparisons.
+	fmt.Fprintf(b, "\tif !json.Valid(enc) { t.Fatalf(\"zerojson emitted invalid JSON %%q\", enc) }\n")
+	fmt.Fprintf(b, "\tvar reZJ %s\n", n)
+	fmt.Fprintf(b, "\tif err := reZJ.UnmarshalZJSON(enc); err != nil {\n")
+	fmt.Fprintf(b, "\t\tt.Fatalf(\"zerojson could not re-decode its own output %%q: %%v\", enc, err)\n")
+	fmt.Fprintf(b, "\t}\n")
+	if ti.rootField != nil {
+		// Slice/map roots have a single decode path: no ordered/fallback
+		// split to compare (mirrors emitRootFuzz).
+		fmt.Fprintf(b, "}\n\n")
+		return
+	}
+	fmt.Fprintf(b, "\tvar viaFallback %s\n", n)
+	fmt.Fprintf(b, "\tlFallback := zerojson.NewLexer(enc, false)\n")
+	fmt.Fprintf(b, "\t%s(&lFallback, &viaFallback, &%s{})\n", fallbackDecodeName(n), arenaName(n))
+	fmt.Fprintf(b, "\tlFallback.Finish()\n")
+	fmt.Fprintf(b, "\tif err := lFallback.Err(); err != nil {\n")
+	fmt.Fprintf(b, "\t\tt.Fatalf(\"fallback-only decode rejected zerojson output %%q: %%v\", enc, err)\n")
+	fmt.Fprintf(b, "\t}\n")
+	fmt.Fprintf(b, "\tif !reflect.DeepEqual(&viaFallback, &reZJ) {\n")
+	fmt.Fprintf(b, "\t\tt.Fatalf(\"ordered-vs-fallback divergence\\ninput: %%s\\nfallback-only: %%+v\\npublic (ordered+fallback): %%+v\", enc, &viaFallback, &reZJ)\n")
+	fmt.Fprintf(b, "\t}\n")
+	fmt.Fprintf(b, "}\n\n")
 }
 
 // generateTests emits a differential fuzz test per generated type. The
@@ -314,7 +406,7 @@ func (g *generator) generateTests() string {
 	fmt.Fprintf(&b, "package %s\n\n", g.pkg.Types.Name())
 	// The runtime import (the directly-called fallback decoder) is used only
 	// by struct-root fuzzers. reflect is used by that comparison too, and by
-	// raw value comparisons for roots that don't contain zerojson.Raw.
+	// raw value comparisons for comparable roots, including zerojson.Raw.
 	hasStruct := false
 	needsReflect := false
 	for _, ti := range g.types {
@@ -418,7 +510,97 @@ func (g *generator) generateTests() string {
 	// no exception here.
 	// Trailing data is NOT stricter than stdlib (encoding/json rejects it
 	// too), so it is deliberately not listed.
-	fmt.Fprintf(&b, "func zjDecodeStricterAllowed(data []byte) bool { _ = data; return false }\n\n")
+	// One toolchain-dependent exception: Go 1.27 re-based encoding/json on
+	// the v2 implementation, which accepts a '+' sign inside a `,string`
+	// quoted number (`"+00"`) that classic v1, easyjson, and zerojson all
+	// reject. Detected at init by probing the oracle rather than by Go
+	// version, so the test keeps working under GOEXPERIMENT=nojsonv2.
+	fmt.Fprintf(&b, "// zjStdlibJSONV2 reports whether encoding/json is the Go 1.27+ v2-backed\n")
+	fmt.Fprintf(&b, "// implementation (which encodes an invalid UTF-8 byte as a raw U+FFFD\n")
+	fmt.Fprintf(&b, "// rather than the classic \\ufffd escape), probed rather than assumed.\n")
+	fmt.Fprintf(&b, "var zjStdlibJSONV2 = func() bool {\n")
+	fmt.Fprintf(&b, "\tb, _ := json.Marshal(\"\\x80\")\n")
+	fmt.Fprintf(&b, "\treturn !bytes.Contains(b, []byte(`\\ufffd`))\n")
+	fmt.Fprintf(&b, "}()\n\n")
+	// The exemption is generated PER FUZZ TARGET (zjDecodeStricterAllowed<T>)
+	// and scoped to the exact `,string` fields reachable from that type,
+	// each matched only as an object member at the nesting depth where the
+	// field actually lives — so `{"unknown":{"count":"+00"}}` earns no pass
+	// for a type whose `count` is not a `,string` field at depth 1, and a
+	// `"+` beginning any other string value never does.
+	fmt.Fprintf(&b, "// zjMemberValueStarts appends to out the start index of the value of every\n")
+	fmt.Fprintf(&b, "// object member named key at exactly the given nesting depth (1 = a member\n")
+	fmt.Fprintf(&b, "// of the top-level object). Keys are compared after JSON-unescaping; strings\n")
+	fmt.Fprintf(&b, "// are consumed whole so braces inside them never affect the depth; malformed\n")
+	fmt.Fprintf(&b, "// input yields no sites.\n")
+	fmt.Fprintf(&b, "func zjMemberValueStarts(data []byte, key string, depth int, out []int) []int {\n")
+	fmt.Fprintf(&b, "\tskipWS := func(p int) int {\n")
+	fmt.Fprintf(&b, "\t\tfor p < len(data) && (data[p] == ' ' || data[p] == '\\t' || data[p] == '\\n' || data[p] == '\\r') {\n\t\t\tp++\n\t\t}\n\t\treturn p\n\t}\n")
+	fmt.Fprintf(&b, "\td := 0\n")
+	fmt.Fprintf(&b, "\tfor p := 0; p < len(data); {\n")
+	fmt.Fprintf(&b, "\t\tswitch data[p] {\n")
+	fmt.Fprintf(&b, "\t\tcase '{', '[':\n\t\t\td++\n\t\t\tp++\n")
+	fmt.Fprintf(&b, "\t\tcase '}', ']':\n\t\t\td--\n\t\t\tp++\n")
+	fmt.Fprintf(&b, "\t\tcase '\"':\n")
+	fmt.Fprintf(&b, "\t\t\tend := zjStringEnd(data, p)\n\t\t\tif end < 0 {\n\t\t\t\treturn out\n\t\t\t}\n")
+	fmt.Fprintf(&b, "\t\t\tq := skipWS(end)\n")
+	fmt.Fprintf(&b, "\t\t\tif d == depth && q < len(data) && data[q] == ':' {\n")
+	fmt.Fprintf(&b, "\t\t\t\tvar name string\n")
+	fmt.Fprintf(&b, "\t\t\t\tif json.Unmarshal(data[p:end], &name) == nil && name == key {\n")
+	fmt.Fprintf(&b, "\t\t\t\t\tout = append(out, skipWS(q+1))\n")
+	fmt.Fprintf(&b, "\t\t\t\t}\n\t\t\t}\n")
+	fmt.Fprintf(&b, "\t\t\tp = end\n")
+	fmt.Fprintf(&b, "\t\tdefault:\n\t\t\tp++\n")
+	fmt.Fprintf(&b, "\t\t}\n\t}\n\treturn out\n}\n\n")
+	fmt.Fprintf(&b, "// zjStringEnd returns the index just past the string token starting at p\n")
+	fmt.Fprintf(&b, "// (data[p] == '\"'), or -1 if unterminated.\n")
+	fmt.Fprintf(&b, "func zjStringEnd(data []byte, p int) int {\n")
+	fmt.Fprintf(&b, "\tfor q := p + 1; q < len(data); q++ {\n")
+	fmt.Fprintf(&b, "\t\tswitch data[q] {\n\t\tcase '\\\\':\n\t\t\tq++\n\t\tcase '\"':\n\t\t\treturn q + 1\n\t\t}\n\t}\n\treturn -1\n}\n\n")
+	fmt.Fprintf(&b, "// zjValueEnd returns the index just past the JSON value starting at p\n")
+	fmt.Fprintf(&b, "// (object, array, string, or scalar), or len(data) if it runs off the end.\n")
+	fmt.Fprintf(&b, "func zjValueEnd(data []byte, p int) int {\n")
+	fmt.Fprintf(&b, "\tif p >= len(data) {\n\t\treturn len(data)\n\t}\n")
+	fmt.Fprintf(&b, "\tswitch data[p] {\n")
+	fmt.Fprintf(&b, "\tcase '\"':\n\t\tif e := zjStringEnd(data, p); e >= 0 {\n\t\t\treturn e\n\t\t}\n\t\treturn len(data)\n")
+	fmt.Fprintf(&b, "\tcase '{', '[':\n")
+	fmt.Fprintf(&b, "\t\td := 0\n")
+	fmt.Fprintf(&b, "\t\tfor q := p; q < len(data); q++ {\n")
+	fmt.Fprintf(&b, "\t\t\tswitch data[q] {\n")
+	fmt.Fprintf(&b, "\t\t\tcase '{', '[':\n\t\t\t\td++\n")
+	fmt.Fprintf(&b, "\t\t\tcase '}', ']':\n\t\t\t\td--\n\t\t\t\tif d == 0 {\n\t\t\t\t\treturn q + 1\n\t\t\t\t}\n")
+	fmt.Fprintf(&b, "\t\t\tcase '\"':\n\t\t\t\tif e := zjStringEnd(data, q); e < 0 {\n\t\t\t\t\treturn len(data)\n\t\t\t\t} else {\n\t\t\t\t\tq = e - 1\n\t\t\t\t}\n")
+	fmt.Fprintf(&b, "\t\t\t}\n\t\t}\n\t\treturn len(data)\n")
+	fmt.Fprintf(&b, "\tdefault:\n")
+	fmt.Fprintf(&b, "\t\tq := p\n\t\tfor q < len(data) && data[q] != ',' && data[q] != '}' && data[q] != ']' && data[q] != ' ' && data[q] != '\\n' && data[q] != '\\t' && data[q] != '\\r' {\n\t\t\tq++\n\t\t}\n\t\treturn q\n")
+	fmt.Fprintf(&b, "\t}\n}\n\n")
+	fmt.Fprintf(&b, "// zjPlusStringMemberSites appends to out the index of the '+' byte of every\n")
+	fmt.Fprintf(&b, "// member named key at the given depth whose value is a string beginning '+'.\n")
+	fmt.Fprintf(&b, "func zjPlusStringMemberSites(data []byte, key string, depth int, out []int) []int {\n")
+	fmt.Fprintf(&b, "\tfor _, v := range zjMemberValueStarts(data, key, depth, nil) {\n")
+	fmt.Fprintf(&b, "\t\tif v+1 < len(data) && data[v] == '\"' && data[v+1] == '+' {\n\t\t\tout = append(out, v+1)\n\t\t}\n")
+	fmt.Fprintf(&b, "\t}\n\treturn out\n}\n\n")
+	fmt.Fprintf(&b, "// zjMemberIsNull / zjMemberContainsNull report whether some member named key\n")
+	fmt.Fprintf(&b, "// at the given depth has the value null, or has null anywhere inside its\n")
+	fmt.Fprintf(&b, "// value (an array element or map value).\n")
+	fmt.Fprintf(&b, "func zjMemberIsNull(data []byte, key string, depth int) bool {\n")
+	fmt.Fprintf(&b, "\tfor _, v := range zjMemberValueStarts(data, key, depth, nil) {\n")
+	fmt.Fprintf(&b, "\t\tif bytes.HasPrefix(data[v:], []byte(\"null\")) {\n\t\t\treturn true\n\t\t}\n")
+	fmt.Fprintf(&b, "\t}\n\treturn false\n}\n\n")
+	fmt.Fprintf(&b, "func zjMemberContainsNull(data []byte, key string, depth int) bool {\n")
+	fmt.Fprintf(&b, "\tfor _, v := range zjMemberValueStarts(data, key, depth, nil) {\n")
+	fmt.Fprintf(&b, "\t\tif bytes.Contains(data[v:zjValueEnd(data, v)], []byte(\"null\")) {\n\t\t\treturn true\n\t\t}\n")
+	fmt.Fprintf(&b, "\t}\n\treturn false\n}\n\n")
+	fmt.Fprintf(&b, "// zjDeleteBytes returns data with the bytes at the given indices removed.\n")
+	fmt.Fprintf(&b, "func zjDeleteBytes(data []byte, at []int) []byte {\n")
+	fmt.Fprintf(&b, "\tdrop := make(map[int]bool, len(at))\n\tfor _, i := range at {\n\t\tdrop[i] = true\n\t}\n")
+	fmt.Fprintf(&b, "\tout := make([]byte, 0, len(data))\n\tfor i, c := range data {\n\t\tif !drop[i] {\n\t\t\tout = append(out, c)\n\t\t}\n\t}\n\treturn out\n}\n\n")
+	for _, ti := range g.types {
+		g.emitStricterAllowed(&b, ti)
+		if g.typeHasInvalidTag(ti.name, map[string]bool{}) {
+			g.emitNoOracleFuzz(&b, ti)
+		}
+	}
 	fmt.Fprintf(&b, "func zjFuzzHugeExponent(data []byte) bool {\n")
 	fmt.Fprintf(&b, "\tfor i, c := range data {\n")
 	fmt.Fprintf(&b, "\t\tif c != 'e' && c != 'E' {\n\t\t\tcontinue\n\t\t}\n")
@@ -435,18 +617,16 @@ func (g *generator) generateTests() string {
 			g.emitPoolSequenceFuzz(&b, ti)
 			continue
 		}
-		fmt.Fprintf(&b, "func Fuzz%sZJSON(f *testing.F) {\n", n)
+		fmt.Fprintf(&b, "func Fuzz%sZJSON(f *testing.F) {\n", fuzzTypeName(n))
 		emitStructFuzzSeeds(&b, ti)
 		fmt.Fprintf(&b, "\tf.Fuzz(func(t *testing.T, data []byte) {\n")
 		fmt.Fprintf(&b, "\t\tif zjFuzzHugeExponent(data) { return }\n")
+		emitNoOracleCall(&b, n, g.typeHasInvalidTag(n, map[string]bool{}))
 		g.emitRawValueComparison(&b, n, ti.fields, false)
+		emitDecodeErrorDirection(&b, n)
 		if g.typeContainsRaw(ti.name, map[string]bool{}) {
 			emitRawGraphRoundTrip(&b, n)
-			fmt.Fprintf(&b, "\t})\n}\n\n")
-			g.emitPoolSequenceFuzz(&b, ti)
-			continue
 		}
-		emitDecodeErrorDirection(&b, n)
 		// Decode arm: canonicalize via stdlib, then zerojson must match.
 		// When stdlib REJECTS data, a value-class failure (see
 		// zjStdlibValueError) additionally requires zerojson to reject it too
@@ -455,6 +635,7 @@ func (g *generator) generateTests() string {
 		emitStdlibRejectClassify(&b, n, ti.fields)
 		fmt.Fprintf(&b, "\t\tcanon, err := json.Marshal(&seed)\n")
 		fmt.Fprintf(&b, "\t\tif err != nil { return }\n")
+		fmt.Fprintf(&b, "\t\tif zjNullOnValueUnmarshaler%s(canon) { return }\n", n)
 		fmt.Fprintf(&b, "\t\tvar viaStd %s\n", n)
 		fmt.Fprintf(&b, "\t\tif json.Unmarshal(canon, &viaStd) != nil { return }\n")
 		fmt.Fprintf(&b, "\t\tvar viaZJ %s\n", n)
@@ -501,7 +682,7 @@ func (g *generator) generateTests() string {
 		fmt.Fprintf(&b, "\t})\n}\n\n")
 		g.emitPoolSequenceFuzz(&b, ti)
 	}
-	return b.String()
+	return g.aliasTestImports(b.String())
 }
 
 // emitPoolSequenceFuzz generates the stateful complement to each stateless
@@ -522,7 +703,7 @@ func (g *generator) emitPoolSequenceFuzz(b *strings.Builder, ti typeInfo) {
 	if ti.rootField != nil && ti.rootField.kind != kMap {
 		base = "[]"
 	}
-	fmt.Fprintf(b, "func Fuzz%sZJSONSequence(f *testing.F) {\n", n)
+	fmt.Fprintf(b, "func Fuzz%sZJSONSequence(f *testing.F) {\n", fuzzTypeName(n))
 	for i, seed := range seeds {
 		next := seeds[(i+1)%len(seeds)]
 		third := seeds[(i+2)%len(seeds)]
@@ -565,7 +746,7 @@ func (g *generator) emitRootFuzz(b *strings.Builder, ti typeInfo) {
 	if ti.rootField.kind == kMap {
 		seed = "{}"
 	}
-	fmt.Fprintf(b, "func Fuzz%sZJSON(f *testing.F) {\n", n)
+	fmt.Fprintf(b, "func Fuzz%sZJSON(f *testing.F) {\n", fuzzTypeName(n))
 	fmt.Fprintf(b, "\tf.Add([]byte(`%s`))\n", seed)
 	fmt.Fprintf(b, "\tf.Add([]byte(%q))\n", fuzzSeedValue(*ti.rootField))
 	if alternate, ok := fuzzAlternateSeedValue(*ti.rootField); ok {
@@ -574,19 +755,19 @@ func (g *generator) emitRootFuzz(b *strings.Builder, ti typeInfo) {
 	fmt.Fprintf(b, "\tf.Add([]byte(`null`))\n")
 	fmt.Fprintf(b, "\tf.Fuzz(func(t *testing.T, data []byte) {\n")
 	fmt.Fprintf(b, "\t\tif zjFuzzHugeExponent(data) { return }\n")
-	if g.typeContainsRaw(ti.name, map[string]bool{}) {
-		emitRawGraphRoundTrip(b, n)
-		fmt.Fprintf(b, "\t})\n}\n\n")
-		return
-	}
+	emitNoOracleCall(b, n, g.typeHasInvalidTag(n, map[string]bool{}))
 	if g.fieldRawComparable(*ti.rootField, map[string]bool{}) {
 		g.emitRawValueComparison(b, n, nil, true)
 	}
 	emitDecodeErrorDirection(b, n)
+	if g.typeContainsRaw(ti.name, map[string]bool{}) {
+		emitRawGraphRoundTrip(b, n)
+	}
 	fmt.Fprintf(b, "\t\tvar seed %s\n", n)
 	emitStdlibRejectClassify(b, n, nil)
 	fmt.Fprintf(b, "\t\tcanon, err := json.Marshal(&seed)\n")
 	fmt.Fprintf(b, "\t\tif err != nil { return }\n")
+	fmt.Fprintf(b, "\t\tif zjNullOnValueUnmarshaler%s(canon) { return }\n", n)
 	fmt.Fprintf(b, "\t\tvar viaStd %s\n", n)
 	fmt.Fprintf(b, "\t\tif json.Unmarshal(canon, &viaStd) != nil { return }\n")
 	fmt.Fprintf(b, "\t\tvar viaZJ %s\n", n)
@@ -609,4 +790,215 @@ func (g *generator) emitRootFuzz(b *strings.Builder, ti typeInfo) {
 	fmt.Fprintf(b, "\t\t\tt.Fatalf(\"stdlib rejected zerojson output %%q: %%v\", enc, err)\n")
 	fmt.Fprintf(b, "\t\t}\n")
 	fmt.Fprintf(b, "\t})\n}\n\n")
+}
+
+// stringOptSite is one `,string` field reachable from a fuzz target: its
+// JSON name and the object nesting depth at which it appears in a
+// document for that target (1 = member of the top-level object).
+type stringOptSite struct {
+	key   string
+	depth int
+}
+
+// stringOptSites walks the generated type graph from name, recording every
+// `,string` field with the depth it sits at: a nested struct field adds
+// one level, a slice or map of structs adds two (the array/object plus
+// the element object). The graph is acyclic (recursive schemas are
+// refused), so no cycle guard is needed.
+func (g *generator) stringOptSites(name string, depth int, out *[]stringOptSite) {
+	for _, ti := range g.types {
+		if ti.name != name {
+			continue
+		}
+		if ti.rootField != nil {
+			g.fieldStringOptSites(*ti.rootField, depth-1, out)
+			return
+		}
+		for _, f := range ti.fields {
+			g.fieldStringOptSites(f, depth, out)
+		}
+		return
+	}
+}
+
+func (g *generator) fieldStringOptSites(f fieldInfo, depth int, out *[]stringOptSite) {
+	if f.stringOpt {
+		*out = append(*out, stringOptSite{key: f.jsonName, depth: depth})
+	}
+	switch f.kind {
+	case kStruct:
+		g.stringOptSites(f.elem, depth+1, out)
+	case kSlice:
+		g.stringOptSites(f.elem, depth+2, out)
+	case kMap:
+		if f.valInfo != nil && f.valInfo.kind == kStruct {
+			g.stringOptSites(f.valInfo.elem, depth+2, out)
+		}
+	}
+}
+
+// emitStricterAllowed emits, for fuzz target ti, three functions:
+//
+//	zjStripStringOptPlus<T>(data) ([]byte, bool) — data with the '+' removed
+//	    from every `,string` member of T (at its own depth); false if none
+//	zjStricterCausedByPlus<T>(data) bool — true iff such a '+' existed AND
+//	    zerojson accepts the stripped document: the '+' was the sole cause
+//	    of zerojson's rejection, so the documented v1-on-v2 drift explains it
+//	zjDecodeStricterAllowed<T>(data) bool — the above, gated on zjStdlibJSONV2
+//
+// Proving causality (rather than mere presence of a "+" member) means a
+// document that zerojson also rejects for some OTHER reason is never
+// exempted, and makes the exact object path irrelevant: stripping a '+'
+// that was not the cause leaves zerojson rejecting, and the comparison
+// runs. The first two are toolchain-independent and tested negatively.
+func (g *generator) emitStricterAllowed(b *strings.Builder, ti typeInfo) {
+	n := ti.name
+	var sites []stringOptSite
+	g.stringOptSites(n, 1, &sites)
+	fmt.Fprintf(b, "// zjStripStringOptPlus%s returns data with the leading '+' removed from every\n", n)
+	fmt.Fprintf(b, "// quoted value on one of %s's `,string` fields (at that field's own nesting\n", n)
+	fmt.Fprintf(b, "// depth), and whether there was any to remove.\n")
+	fmt.Fprintf(b, "func zjStripStringOptPlus%s(data []byte) ([]byte, bool) {\n", n)
+	if len(sites) == 0 {
+		fmt.Fprintf(b, "\treturn data, false // %s has no `,string` fields\n}\n\n", n)
+	} else {
+		fmt.Fprintf(b, "\tvar at []int\n")
+		for _, st := range sites {
+			fmt.Fprintf(b, "\tat = zjPlusStringMemberSites(data, %q, %d, at)\n", st.key, st.depth)
+		}
+		fmt.Fprintf(b, "\tif len(at) == 0 {\n\t\treturn data, false\n\t}\n")
+		fmt.Fprintf(b, "\treturn zjDeleteBytes(data, at), true\n}\n\n")
+	}
+	fmt.Fprintf(b, "// zjStricterCausedByPlus%s reports whether zerojson's rejection of data is\n", n)
+	fmt.Fprintf(b, "// explained by a leading '+' on a `,string` member alone: with those '+'\n")
+	fmt.Fprintf(b, "// bytes removed (and nothing else changed) zerojson must accept the document.\n")
+	fmt.Fprintf(b, "func zjStricterCausedByPlus%s(data []byte) bool {\n", n)
+	fmt.Fprintf(b, "\tfixed, ok := zjStripStringOptPlus%s(data)\n", n)
+	fmt.Fprintf(b, "\tif !ok {\n\t\treturn false\n\t}\n")
+	fmt.Fprintf(b, "\tvar v %s\n", n)
+	fmt.Fprintf(b, "\treturn v.UnmarshalZJSON(fixed) == nil\n}\n\n")
+	g.emitNullDivergenceGuard(b, ti)
+	fmt.Fprintf(b, "// zjDecodeStricterAllowed%s is the decode-error oracle-direction allowlist for\n", n)
+	fmt.Fprintf(b, "// %s: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and\n", n)
+	fmt.Fprintf(b, "// only when that drift alone accounts for the rejection.\n")
+	fmt.Fprintf(b, "func zjDecodeStricterAllowed%s(data []byte) bool {\n", n)
+	fmt.Fprintf(b, "\treturn zjStdlibJSONV2 && zjStricterCausedByPlus%s(data)\n}\n\n", n)
+}
+
+// nullSite is one place in a fuzz target's document where a JSON null
+// reaches a VALUE-typed ZeroJSONQuotedInt64 marker type: encoding/json
+// invokes the type's own UnmarshalJSON("null") there (which conventionally
+// errors), while zerojson decodes such a type through the quoted-int64
+// fast path and leaves the value untouched on null — the documented
+// divergence. Value-typed json.Unmarshalers are delivered the null by
+// both decoders and need no exemption. exact sites are struct fields (the
+// member value itself is null); contains sites are slices/maps of such
+// values (a null element or map value).
+type nullSite struct {
+	key      string
+	depth    int
+	contains bool
+}
+
+func (g *generator) nullSites(name string, depth int, out *[]nullSite) {
+	for _, ti := range g.types {
+		if ti.name != name {
+			continue
+		}
+		if ti.rootField != nil {
+			g.fieldNullSites(*ti.rootField, depth-1, out)
+			return
+		}
+		for _, f := range ti.fields {
+			g.fieldNullSites(f, depth, out)
+		}
+		return
+	}
+}
+
+func (g *generator) fieldNullSites(f fieldInfo, depth int, out *[]nullSite) {
+	switch f.kind {
+	case kQuotedInt:
+		if !f.ptr {
+			*out = append(*out, nullSite{key: f.jsonName, depth: depth})
+		}
+	case kLeafSlice:
+		if f.valInfo != nil && f.valInfo.kind == kQuotedInt && !f.elemPtr {
+			*out = append(*out, nullSite{key: f.jsonName, depth: depth, contains: true})
+		}
+	case kMap:
+		if f.valInfo != nil && f.valInfo.kind == kQuotedInt {
+			*out = append(*out, nullSite{key: f.jsonName, depth: depth, contains: true})
+		}
+		if f.valInfo != nil && f.valInfo.kind == kStruct {
+			g.nullSites(f.valInfo.elem, depth+2, out)
+		}
+	case kStruct:
+		g.nullSites(f.elem, depth+1, out)
+	case kSlice:
+		g.nullSites(f.elem, depth+2, out)
+	}
+}
+
+// emitNullDivergenceGuard emits zjNullOnValueUnmarshaler<T>(data) bool: true
+// when the canonical document delivers a null to a value-typed
+// json.Unmarshaler reachable from T, where the two decoders are documented
+// to differ; the decode-arm comparison is skipped for such inputs rather
+// than reporting the documented divergence as a failure.
+func (g *generator) emitNullDivergenceGuard(b *strings.Builder, ti typeInfo) {
+	n := ti.name
+	var sites []nullSite
+	g.nullSites(n, 1, &sites)
+	fmt.Fprintf(b, "// zjNullOnValueUnmarshaler%s reports whether data delivers a JSON null to a\n", n)
+	fmt.Fprintf(b, "// value-typed ZeroJSONQuotedInt64 marker type reachable from %s — the\n", n)
+	fmt.Fprintf(b, "// documented divergence where encoding/json calls the type's UnmarshalJSON\n")
+	fmt.Fprintf(b, "// (\"null\") and zerojson's quoted-int64 fast path leaves the value untouched.\n")
+	fmt.Fprintf(b, "func zjNullOnValueUnmarshaler%s(data []byte) bool {\n", n)
+	if len(sites) == 0 {
+		fmt.Fprintf(b, "\t_ = data\n\treturn false // no value-typed quoted-int64 marker reachable from %s\n}\n\n", n)
+		return
+	}
+	fmt.Fprintf(b, "\treturn false")
+	for _, st := range sites {
+		fn := "zjMemberIsNull"
+		if st.contains {
+			fn = "zjMemberContainsNull"
+		}
+		fmt.Fprintf(b, " ||\n\t\t%s(data, %q, %d)", fn, st.key, st.depth)
+	}
+	fmt.Fprintf(b, "\n}\n\n")
+}
+
+// typeHasInvalidTag reports whether name or any struct type reachable from
+// it has a field whose tag name fell back to the Go field name.
+func (g *generator) typeHasInvalidTag(name string, visiting map[string]bool) bool {
+	if visiting[name] {
+		return false
+	}
+	visiting[name] = true
+	for _, ti := range g.types {
+		if ti.name != name {
+			continue
+		}
+		fields := ti.fields
+		if ti.rootField != nil {
+			fields = []fieldInfo{*ti.rootField}
+		}
+		for _, f := range fields {
+			if f.invalidTag {
+				return true
+			}
+			switch f.kind {
+			case kStruct, kSlice:
+				if g.typeHasInvalidTag(f.elem, visiting) {
+					return true
+				}
+			case kMap:
+				if f.valInfo != nil && f.valInfo.kind == kStruct && g.typeHasInvalidTag(f.valInfo.elem, visiting) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

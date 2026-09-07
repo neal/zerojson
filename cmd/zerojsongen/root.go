@@ -1,5 +1,7 @@
 package main
 
+import "fmt"
+
 // root.go emits codecs for named slice/map ROOT types — a top-level shape
 // easyjson supports:
 //
@@ -11,8 +13,8 @@ package main
 // element/value codecs — element structs keep their ordered fast path. The
 // root loop itself is the plain array/object protocol: nil encodes as
 // null; a non-nil empty root as [] (slice) or {} (map); JSON null decodes
-// to nil and [] / {} to a non-nil empty root — the same null/empty rules
-// the slice/map FIELD code already establishes. Roots deliberately have no
+// to nil. Empty arrays clear slices; empty objects preserve existing map
+// entries. These are the same rules as slice/map fields. Roots have no
 // ordered fast path of their own (only their element structs do), so no
 // zjDecodeFallback/zjDecodeOrdered is emitted for them.
 
@@ -170,14 +172,14 @@ func (g *generator) genRootDecode(ti typeInfo) {
 	}
 	g.p("")
 	g.p("// UnmarshalZJSON decodes data into v. JSON null sets v to nil; %s decodes", empty)
-	g.p("// to a non-nil empty %s, matching encoding/json and easyjson.", n)
+	g.p("// to a non-nil container; reused maps retain keys absent from the input.")
 	g.p("func (v *%s) UnmarshalZJSON(data []byte) error {", n)
 	g.p("\treturn v.unmarshalZJSON(data, false)")
 	g.p("}")
 	g.p("")
 	g.p("// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string decoding:")
-	g.p("// decoded strings (and, in a pooled Decoder, the root's backing storage)")
-	g.p("// may alias data, so data must stay live and unmodified for v's lifetime.")
+	g.p("// decoded strings and Raw values may alias data, which must stay")
+	g.p("// live and unmodified for the result's lifetime.")
 	g.p("func (v *%s) UnmarshalZJSONBorrow(data []byte) error {", n)
 	g.p("\treturn v.unmarshalZJSON(data, true)")
 	g.p("}")
@@ -189,6 +191,7 @@ func (g *generator) genRootDecode(ti typeInfo) {
 	g.p("\tl.Finish()")
 	g.p("\treturn l.Err()")
 	g.p("}")
+	g.genReadZJSON(n)
 
 	g.p("")
 	g.p("// %s decodes a JSON array/object root directly into v. Element (slice)", decodeName(n))
@@ -265,9 +268,9 @@ func (g *generator) emitRootLeafSliceBody(rf *fieldInfo, cell, ind string) {
 		g.p("%s\t\te = new(%s)", ind, vi.typeStr)
 		switch vi.kind {
 		case kMarshaler:
-			g.p("%s\t\tif err := e.UnmarshalJSON(l.RawValue()); err != nil { l.AddError(err) }", ind)
+			g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := e.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
 		case kTextMarshaler:
-			g.p("%s\t\tif err := e.UnmarshalText(l.ReadTextBytes()); err != nil { l.AddError(err) }", ind)
+			g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := e.UnmarshalText(txt); err != nil { l.AddError(err) } }", ind)
 		}
 		g.p("%s\t}", ind)
 		g.p("%s\tif l.Err() != nil { return }", ind)
@@ -284,20 +287,20 @@ func (g *generator) emitRootLeafSliceBody(rf *fieldInfo, cell, ind string) {
 	g.p("%s\t\t%s[len(%s)-1] = zjZero", ind, cell, cell)
 	g.p("%s\t}", ind)
 	g.p("%s\tidx := len(%s) - 1", ind, cell)
-	g.p("%s\tif !l.IsNull() {", ind)
+	g.emitElemNullOpen(vi, fmt.Sprintf("%s[idx]", cell), ind+"\t")
 	switch vi.kind {
 	case kCustomLeaf:
 		// The leaf read func takes *T; a slice element cell[idx] is a T, so
 		// pass its address (matching the kLeafSlice field emit in decode.go).
 		g.leafRead(vi.leaf, "&"+cell+"[idx]", ind+"\t\t")
 	case kMarshaler:
-		g.p("%s\t\tif err := %s[idx].UnmarshalJSON(l.RawValue()); err != nil { l.AddError(err) }", ind, cell)
+		g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := %s[idx].UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind, cell)
 	case kTextMarshaler:
-		g.p("%s\t\tif err := %s[idx].UnmarshalText(l.ReadTextBytes()); err != nil { l.AddError(err) }", ind, cell)
+		g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := %s[idx].UnmarshalText(txt); err != nil { l.AddError(err) } }", ind, cell)
 	case kInterface:
 		g.p("%s\t\t%s[idx] = l.ReadInterface()", ind, cell)
 	default:
-		g.p("%s\t\t%s[idx] = %s", ind, cell, vi.leafReadExpr())
+		g.p("%s\t\t%s[idx] = %s", ind, cell, g.leafReadExpr(vi))
 	}
 	g.p("%s\t}", ind)
 	g.p("%s\tif l.Err() != nil { return }", ind)
@@ -331,7 +334,7 @@ func (g *generator) emitRootMapDecode(ti typeInfo) {
 	// keys are copied (string() — ReadKey aliases the buffer), never interned.
 	g.p("%s\tmk := %s(string(l.ReadKey()))", ind, rf.keyTypeStr)
 	g.p("%s\tvar mv %s", ind, vi.typeStr)
-	g.p("%s\tif !l.IsNull() {", ind)
+	g.emitElemNullOpen(vi, "mv", ind+"\t")
 	switch vi.kind {
 	case kCustomLeaf:
 		g.leafRead(vi.leaf, "&mv", ind+"\t\t")
@@ -344,19 +347,19 @@ func (g *generator) emitRootMapDecode(ti typeInfo) {
 		g.p("%s\t\tvar ea %s", ind, arenaName(vi.elem))
 		g.p("%s\t\t%s(l, &mv, &ea)", ind, decodeName(vi.elem))
 	case kMarshaler:
-		g.p("%s\t\tif err := mv.UnmarshalJSON(l.RawValue()); err != nil { l.AddError(err) }", ind)
+		g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := mv.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
 	case kTextMarshaler:
-		g.p("%s\t\tif err := mv.UnmarshalText(l.ReadTextBytes()); err != nil { l.AddError(err) }", ind)
+		g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := mv.UnmarshalText(txt); err != nil { l.AddError(err) } }", ind)
 	case kQuotedInt:
 		if !vi.marshalOnValue {
-			g.p("%s\t\tif err := mv.UnmarshalJSON(l.RawValue()); err != nil { l.AddError(err) }", ind)
+			g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := mv.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
 		} else {
-			g.p("%s\t\tmv = %s", ind, vi.leafReadExpr())
+			g.p("%s\t\tmv = %s", ind, g.leafReadExpr(vi))
 		}
 	case kInterface:
 		g.p("%s\t\tmv = l.ReadInterface()", ind)
 	default:
-		g.p("%s\t\tmv = %s", ind, vi.leafReadExpr())
+		g.p("%s\t\tmv = %s", ind, g.leafReadExpr(vi))
 	}
 	g.p("%s\t}", ind)
 	g.p("%s\tif l.Err() != nil { return }", ind)

@@ -1,42 +1,46 @@
 package zerojson
 
-import "bytes"
+import (
+	"bytes"
+	"errors"
+)
 
-// Raw holds an unprocessed JSON value: it decodes by capturing the exact
-// byte span of the next value and encodes by appending those bytes back
-// verbatim — the caller guarantees they are valid JSON, matching
-// encoding/json.RawMessage's contract exactly (including its "nil
-// encodes as null, everything else is appended as-is, even if empty or
-// invalid" behavior).
+// Raw holds a JSON value without materializing its contents. Decoding
+// grammar-checks and captures the exact span; generated encoding validates
+// non-empty values and appends them verbatim. Nil and empty Raw values encode
+// as null, unlike an empty non-nil encoding/json.RawMessage.
 //
-// This enables passthrough/projection patterns: a struct that declares
-// only the fields a reader actually needs, routing the rest through
-// unexamined —
+// In borrow mode, the bytes alias the input and must remain unmodified while
+// the result is used. Copy mode detaches them. JSON null stores the literal
+// bytes in a Raw field and clears a *Raw field.
 //
-//	type Route struct {
-//		Table  string       `json:"table"`
-//		Set    zerojson.Raw `json:"set"`
-//	}
-//
-// decodes only Table and Set (the rest of the wire object is skipped by
-// the ordered decoder's inline-skip, or the fallback's default case)
-// without materializing or even parsing the skipped fields, and
-// re-encodes Set byte-for-byte unchanged — the passthrough/routing case
-// this was built for.
-//
-// In borrow-mode decodes the bytes alias the input buffer (same rule as
-// borrowed strings — the caller must guarantee the input outlives the
-// decoded struct); in copy-mode decodes they're copied.
+// Unknown fields in a projection are still grammar-checked and skipped;
+// Raw is for fields whose bytes must also be retained and re-encoded.
 type Raw []byte
 
-// AppendRaw appends r to dst verbatim, or the literal null if r is nil
-// (matching json.RawMessage.MarshalJSON). It satisfies the zerojson leaf
-// append contract and is registered as a built-in leaf for Raw.
+// AppendRaw appends *r verbatim, or null if *r is nil or empty.
+// It does not validate non-empty values; use AppendRawChecked for unchecked
+// input. Generated codecs use the checked form.
 func AppendRaw(dst []byte, r *Raw) []byte {
-	if *r == nil {
+	if len(*r) == 0 {
 		return append(dst, "null"...)
 	}
 	return append(dst, *r...)
+}
+
+// ReadRawNull stores the literal null in r, for a value-typed Raw field
+// whose member is null: json.RawMessage's UnmarshalJSON is invoked with
+// "null" by encoding/json in that position and ends up holding those four
+// bytes, and Raw matches it (a *Raw is cleared instead, like any pointer
+// field). Aliases the input in Borrow mode, copies otherwise. Called by
+// generated code right after IsNull consumed the literal.
+func ReadRawNull(l *Lexer, r *Raw) {
+	b := l.NullBytes()
+	if l.Borrow {
+		*r = b
+		return
+	}
+	*r = bytes.Clone(b)
 }
 
 // ReadRaw captures the next JSON value's exact bytes (object, array,
@@ -54,4 +58,41 @@ func ReadRaw(l *Lexer, r *Raw) {
 		return
 	}
 	*r = bytes.Clone(b)
+}
+
+// MarshalJSON returns null for nil/empty Raw, or the stored bytes otherwise.
+// When called through encoding/json, that package validates and reformats
+// the returned JSON according to its own encoding policy.
+func (r Raw) MarshalJSON() ([]byte, error) {
+	if len(r) == 0 {
+		return []byte("null"), nil
+	}
+	return r, nil
+}
+
+// UnmarshalJSON stores a copy of data, as json.RawMessage does (so a
+// null member leaves the bytes null in it).
+func (r *Raw) UnmarshalJSON(data []byte) error {
+	if r == nil {
+		return errors.New("zerojson.Raw: UnmarshalJSON on nil pointer")
+	}
+	// The old slice may be borrowed from somebody else's input buffer.
+	// Reusing its capacity would mutate that buffer during a later stdlib
+	// decode. Detach even when the old capacity is sufficient.
+	*r = bytes.Clone(data)
+	return nil
+}
+
+// AppendRawChecked is AppendRaw with the validation encoding/json applies
+// to a RawMessage: a non-empty Raw that is not a single valid JSON value
+// is an encode error rather than invalid output. Generated code uses this
+// for every Raw field; the check is skipped for nil/empty (null) values.
+func AppendRawChecked(dst []byte, r *Raw) ([]byte, error) {
+	if len(*r) == 0 {
+		return append(dst, "null"...), nil
+	}
+	if err := Valid(*r); err != nil {
+		return dst, err
+	}
+	return append(dst, *r...), nil
 }

@@ -6,9 +6,9 @@
 // the full 1e8 ParseEightDigits grid. They are the pre-RELEASE gate, not the
 // per-commit gate — run with:
 //
-//	go test -tags exhaustive -timeout 30m ./conformance/
+//	go test -tags exhaustive -timeout 30m ./conformance/runtime
 //
-// Each test's measured wall-clock is recorded in ../DOMAINS.md. Every check
+// The enumerated domains are recorded in ../DOMAINS.md. Every check
 // still uses an INDEPENDENT oracle: strconv formats what zerojson decodes
 // (mutual-inverse check), strconv formats what zerojson encodes, and
 // encoding/json decodes what zerojson decodes.

@@ -22,34 +22,16 @@ func syntaxErrorf(offset int, format string, args ...any) error {
 	return &SyntaxError{Offset: int64(offset), msg: fmt.Sprintf(format, args...)}
 }
 
-// Valid reports whether data is syntactically valid JSON: a single
-// top-level value (object, array, string, number, or literal) followed
-// by nothing but optional whitespace, with every byte of every value
-// walked against the full RFC 8259 grammar — unlike the trusted-path
-// Lexer, which is deliberately not a validator (see the package doc and
-// README's composition story: Valid is the separate, opt-in full-payload
-// guarantee for untrusted-boundary call sites; decode itself stays fast
-// and lenient by design for trusted input).
+// Valid checks that data contains one JSON value and optional whitespace.
+// Its acceptance policy matches encoding/json.Valid, including invalid UTF-8
+// inside strings, unpaired Unicode escapes, and a maximum nesting depth of
+// 10,000 containers. It does not validate a schema or business rules.
 //
-// Valid's validity verdict is guaranteed to match encoding/json.Valid's
-// for every input — see conformance's FuzzValidAgainstStdlib — including:
+// Unlike ordinary Lexer value readers, Valid checks complete JSON grammar.
+// Call it before decoding when strict grammar is required.
 //
-//   - accepting invalid UTF-8 inside strings, matching v1's byte-oriented
-//     scanner, which never decodes UTF-8 (a stricter UTF-8-checking
-//     variant, matching encoding/json/v2's default, is a possible future
-//     opt-in for a caller that needs to guarantee valid Unicode
-//     downstream, not just valid JSON grammar — no current caller needs
-//     it);
-//   - lone/unpaired \u-escaped surrogates are grammar-valid (four hex
-//     digits is the whole requirement; stdlib does not check surrogate
-//     pairing at the grammar level either — only a value-level unescape
-//     step, which Valid never performs, replaces one with U+FFFD);
-//   - the same maxNestingDepth of 10000 nested objects/arrays stdlib
-//     enforces (matches this package's existing ReadInterface depth cap).
-//
-// On success (data is valid), Valid performs zero allocations (see
-// TestValidAllocs); on failure it returns a *SyntaxError, which does
-// allocate.
+// Valid returns nil without allocating on success, or a *SyntaxError on
+// failure. Error messages and offsets need not match encoding/json.
 func Valid(data []byte) error {
 	pos, err := validValue(data, 0, 0)
 	if err != nil {
@@ -224,11 +206,11 @@ func skipDigitRun(data []byte, pos int) int {
 // validNumber validates and consumes one JSON number per RFC 8259's
 // strict grammar: [ "-" ] int [ frac ] [ exp ], int = "0" / 1-9 *DIGIT,
 // frac = "." 1*DIGIT, exp = ("e"|"E") ["-"|"+"] 1*DIGIT. Unlike the
-// trusted-path Lexer's readNumericBytes (which greedily accepts any run
-// of number-ish characters, including leading zeros and other forms
-// RFC 8259 forbids — see numbers.go), this rejects exactly what
-// encoding/json.Valid rejects: no leading zeros (01), no bare/trailing
-// sign (-, 1e+), no missing fraction/exponent digits (1., 1e). It does
+// trusted-path Lexer's bare-number readers (which still accept a leading
+// zero — the one documented number leniency — see numbers.go), this
+// rejects exactly what encoding/json.Valid rejects: no leading zeros
+// (01), no bare/trailing sign (-, 1e+), no missing fraction/exponent
+// digits (1., 1e). It does
 // not evaluate the number's magnitude, so pathological exponents
 // (1e999999999) are grammar-valid and validated in O(len(exponent)), same
 // as stdlib.

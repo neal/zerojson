@@ -56,12 +56,35 @@ func jsonNameNeedsEscape(name string) bool {
 // path: every declared field's JSON name must be a plain-ASCII literal and
 // no reachable field may invoke a user callback that speculation could replay.
 func (g *generator) canOrderType(ti typeInfo) bool {
-	for _, f := range ti.fields {
-		if jsonNameNeedsEscape(f.jsonName) {
-			return false
+	return g.namesOrderable(ti.name, map[string]bool{}) && !g.typeHasReplayCallbacks(ti.name, map[string]bool{})
+}
+
+// namesOrderable reports whether every JSON name of the type AND of every
+// struct type its ordered decoder would call directly (kStruct fields,
+// value or pointer — the ordered decoder recurses into zjDecodeOrdered<elem>
+// for those, so the nested type must have one) is a plain-ASCII literal.
+// Slice elements and map values go through the nested type's dispatcher
+// instead, which always exists, so they do not constrain the parent.
+func (g *generator) namesOrderable(name string, visiting map[string]bool) bool {
+	if visiting[name] {
+		return true
+	}
+	visiting[name] = true
+	defer delete(visiting, name)
+	for i := range g.types {
+		if g.types[i].name != name || g.types[i].rootField != nil {
+			continue
+		}
+		for _, f := range g.types[i].fields {
+			if jsonNameNeedsEscape(f.jsonName) {
+				return false
+			}
+			if f.kind == kStruct && !g.namesOrderable(f.elem, visiting) {
+				return false
+			}
 		}
 	}
-	return !g.typeHasReplayCallbacks(ti.name, map[string]bool{})
+	return true
 }
 
 // typeHasReplayCallbacks reports whether speculative decoding could invoke a
@@ -114,6 +137,28 @@ func (g *generator) fieldHasReplayCallbacks(f fieldInfo, visiting map[string]boo
 	return false
 }
 
+// Existing pointers can share storage with other fields, and an existing
+// interface can carry an arbitrary callback. Neither can safely be replayed
+// after speculative writes. Check only reachable direct/value-struct fields:
+// collection elements are decoded from zero. Fresh/pool targets still order.
+func (g *generator) orderedReuseGuards(ti typeInfo, prefix string) []string {
+	var guards []string
+	for _, f := range ti.fields {
+		target := prefix + f.access
+		if f.ptr || f.kind == kInterface {
+			guards = append(guards, target+" != nil")
+		} else if f.kind == kStruct {
+			for _, child := range g.types {
+				if child.name == f.elem {
+					guards = append(guards, g.orderedReuseGuards(child, target+".")...)
+					break
+				}
+			}
+		}
+	}
+	return guards
+}
+
 // leLiteral packs n bytes of s starting at off into a little-endian
 // integer constant, for word-compare key literal checks: a handful of
 // integer compares fold the quote+key+quote+colon sequence into one
@@ -136,19 +181,19 @@ func leLiteral(s string, off, n int) uint64 {
 // little-endian target binary.LittleEndian.UintN compiles to the identical
 // single unaligned load, and the enclosing `if n-pos < len(lit)` guard lets
 // the bounds check on each chunk be eliminated.
-func emitLiteralMismatchChecks(lit, posExpr string) []string {
+func emitLiteralMismatchChecks(lit, posExpr, binaryQ string) []string {
 	var conds []string
 	off := 0
 	for len(lit)-off >= 8 {
-		conds = append(conds, fmt.Sprintf("binary.LittleEndian.Uint64(data[%s+%d:]) != %#x", posExpr, off, leLiteral(lit, off, 8)))
+		conds = append(conds, fmt.Sprintf("%s.LittleEndian.Uint64(data[%s+%d:]) != %#x", binaryQ, posExpr, off, leLiteral(lit, off, 8)))
 		off += 8
 	}
 	if len(lit)-off >= 4 {
-		conds = append(conds, fmt.Sprintf("binary.LittleEndian.Uint32(data[%s+%d:]) != %#x", posExpr, off, uint32(leLiteral(lit, off, 4))))
+		conds = append(conds, fmt.Sprintf("%s.LittleEndian.Uint32(data[%s+%d:]) != %#x", binaryQ, posExpr, off, uint32(leLiteral(lit, off, 4))))
 		off += 4
 	}
 	if len(lit)-off >= 2 {
-		conds = append(conds, fmt.Sprintf("binary.LittleEndian.Uint16(data[%s+%d:]) != %#x", posExpr, off, uint16(leLiteral(lit, off, 2))))
+		conds = append(conds, fmt.Sprintf("%s.LittleEndian.Uint16(data[%s+%d:]) != %#x", binaryQ, posExpr, off, uint16(leLiteral(lit, off, 2))))
 		off += 2
 	}
 	if len(lit)-off == 1 {
@@ -175,7 +220,7 @@ func (g *generator) emitOrderedTryKey(ti typeInfo) {
 		g.p("}")
 		return
 	}
-	g.imports["encoding/binary"] = "binary"
+	binaryQ := g.importAlias("encoding/binary", "binary")
 	g.p("\tdata, pos := l.DataAndPos()")
 	g.p("\tn := len(data)")
 	g.p("\tswitch k {")
@@ -185,7 +230,7 @@ func (g *generator) emitOrderedTryKey(ti typeInfo) {
 		g.p("\t\tif n-pos < %d {", len(lit))
 		g.p("\t\t\treturn false")
 		g.p("\t\t}")
-		conds := emitLiteralMismatchChecks(lit, "pos")
+		conds := emitLiteralMismatchChecks(lit, "pos", binaryQ)
 		if len(conds) > 0 {
 			g.p("\t\tif %s {", joinOr(conds))
 			g.p("\t\t\treturn false")
@@ -243,16 +288,16 @@ func (g *generator) emitOrderedDeclaredKey(ti typeInfo) {
 // emitOrderedField emits zjDecodeOrderedField<T>(l, v, a, k) bool: decodes
 // the value for declared field index k (the matching key+colon literal
 // has already been consumed), using the exact same lexer read functions
-// and arena assignments as the fallback decoder, so both paths produce
-// identical results by construction. Returns false (a bail, propagated by
-// the caller) on any value parse error or nested ordered-decode failure.
+// and arena assignments as the fallback decoder. False propagates either a
+// structural mismatch or an error; the dispatcher checks l.Err() to decide
+// whether to retry or return the error.
 func (g *generator) emitOrderedField(ti typeInfo) {
 	n := ti.name
 	g.p("")
 	g.p("func %s(l *zerojson.Lexer, v *%s, a *%s, k int) bool {", orderedFieldFuncName(n), n, arenaName(n))
 	var nullable []int
 	for i, f := range ti.fields {
-		if isNullableField(f) {
+		if isNullableField(f) || isNullDelivered(f) {
 			nullable = append(nullable, i)
 		}
 	}
@@ -261,6 +306,14 @@ func (g *generator) emitOrderedField(ti typeInfo) {
 		g.p("\t\tswitch k {")
 		for _, i := range nullable {
 			g.p("\t\tcase %d:", i)
+			if isNullDelivered(ti.fields[i]) {
+				g.emitNullDelivery(ti.fields[i], "v."+ti.fields[i].access, "\t\t\t")
+				continue
+			}
+			if ti.fields[i].kind == kInterface && !ti.fields[i].ptr {
+				g.emitInterfaceNull("v."+ti.fields[i].access, "\t\t\t")
+				continue
+			}
 			g.p("\t\t\tv.%s = nil", ti.fields[i].access)
 			if needsSeenState(ti.fields[i]) {
 				g.p("\t\t\ta.s%s = false", ti.fields[i].cellName)
@@ -268,6 +321,10 @@ func (g *generator) emitOrderedField(ti typeInfo) {
 		}
 		g.p("\t\t}")
 	}
+	g.p("\t\tif l.Err() != nil {")
+	g.p("\t\t\tl.AnnotateFieldString(%s[k])", fieldNamesVar(n))
+	g.p("\t\t\treturn false")
+	g.p("\t\t}")
 	g.p("\t\treturn true")
 	g.p("\t}")
 	g.p("\tswitch k {")
@@ -276,9 +333,22 @@ func (g *generator) emitOrderedField(ti typeInfo) {
 		g.emitDecode(f, true)
 	}
 	g.p("\t}")
-	g.p("\treturn l.Err() == nil")
+	g.p("\tif l.Err() != nil {")
+	g.p("\t\tl.AnnotateFieldString(%s[k])", fieldNamesVar(n))
+	g.p("\t\treturn false")
+	g.p("\t}")
+	g.p("\treturn true")
+	g.p("}")
+	g.p("")
+	g.p("// %s are %s's JSON field names by declared index, for error paths.", fieldNamesVar(n), n)
+	g.p("var %s = [...]string{", fieldNamesVar(n))
+	for _, f := range ti.fields {
+		g.p("\t%q,", f.jsonName)
+	}
 	g.p("}")
 }
+
+func fieldNamesVar(t string) string { return "zjFieldNames" + t }
 
 // emitOrderedDecode emits zjDecodeOrdered<T>(l, v, a) bool: the member
 // loop described in the file comment above.
@@ -295,16 +365,32 @@ func (g *generator) emitOrderedDecode(ti typeInfo) {
 	g.p("// real value/grammar errors are preserved without a redundant retry.")
 	g.p("func %s(l *zerojson.Lexer, v *%s, a *%s) bool {", orderedDecodeName(n), n, arenaName(n))
 	g.p("\t_ = a")
+	if guards := g.orderedReuseGuards(ti, "v."); len(guards) != 0 {
+		g.p("\t// Caller-owned pointers and dynamic receivers must not be replayed.")
+		g.p("\tif %s { return false }", strings.Join(guards, " || "))
+	}
 	g.p("\tdata, pos := l.DataAndPos()")
 	g.p("\tif pos >= len(data) || data[pos] != '{' {")
 	g.p("\t\treturn false")
 	g.p("\t}")
 	g.p("\tpos++")
 	g.p("\tif pos < len(data) && data[pos] == '}' {")
+	g.p("\t\t// An empty object still counts as a nesting level.")
+	g.p("\t\tif !l.DepthOK() {")
+	g.p("\t\t\treturn false")
+	g.p("\t\t}")
 	g.p("\t\tl.SetPos(pos + 1)")
 	g.p("\t\treturn true")
 	g.p("\t}")
 	g.p("\tl.SetPos(pos)")
+	g.p("\t// This decoder consumes the braces itself, so it accounts for the")
+	g.p("\t// nesting level itself too (EnterObject does this for the fallback):")
+	g.p("\t// an inline Skip of an unknown member must measure depth from here.")
+	g.p("\t// A bail leaves the level unbalanced; the dispatcher's OrderedBail")
+	g.p("\t// restores it along with the position.")
+	g.p("\tif !l.Enter() {")
+	g.p("\t\treturn false")
+	g.p("\t}")
 	g.p("\texpected := 0")
 	g.p("\tfor {")
 	g.p("\t\tmatched := -1")
@@ -359,6 +445,7 @@ func (g *generator) emitOrderedDecode(ti typeInfo) {
 	g.p("\t\t\tl.SetPos(p + 1)")
 	g.p("\t\tcase '}':")
 	g.p("\t\t\tl.SetPos(p + 1)")
+	g.p("\t\t\tl.Leave()")
 	g.p("\t\t\treturn true")
 	g.p("\t\tdefault:")
 	g.p("\t\t\treturn false")

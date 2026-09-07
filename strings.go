@@ -344,12 +344,16 @@ func (l *Lexer) ReadString() string {
 
 // ReadInternedString returns the string value from the bounded process-wide
 // intern table. Retained short values (identifiers, currency codes, and other
-// low-cardinality strings) reuse one allocation; values that arrive after a
-// shard reaches its cap are copied without being retained.
+// low-cardinality strings) reuse one allocation; a shard that reaches its
+// cap starts a new generation (see Intern), so values keep being retained
+// after a high-cardinality burst rather than being copied forever.
 func (l *Lexer) ReadInternedString() string {
 	b, plain, nonASCII := l.readStringBytes()
 	if !plain {
-		return unescapeString(b)
+		// An escaped spelling still names the same (low-cardinality) value
+		// the field was tagged for, so it goes through the same bounded
+		// table; the unescape's fresh buffer is what gets interned.
+		return Intern(unescapeStringBytes(b))
 	}
 	if nonASCII {
 		b = normalizeUTF8Bytes(b)
@@ -378,8 +382,24 @@ func (l *Lexer) ReadEnumBytes() []byte {
 // UnmarshalText. The slice may alias the input buffer; UnmarshalText
 // implementations must copy what they keep (they do, per its contract).
 func (l *Lexer) ReadTextBytes() []byte {
-	b, plain, nonASCII := l.readStringBytes()
-	if !plain {
+	l.skipWS()
+	if l.err != nil {
+		return nil
+	}
+	if l.pos >= len(l.data) || l.data[l.pos] != '"' {
+		l.setErr("expected string")
+		return nil
+	}
+	// Reuse the strict single-pass string scanner. Unlike ordinary known
+	// string fields, delegated text must not call user code on bad grammar.
+	end, nonASCII, err := validKeyString(l.data, l.pos)
+	if err != nil {
+		l.err = err
+		return nil
+	}
+	b := l.data[l.pos+1 : end-1]
+	l.pos = end
+	if bytes.IndexByte(b, '\\') >= 0 {
 		return unescapeStringBytes(b)
 	}
 	if nonASCII {

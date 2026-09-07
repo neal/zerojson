@@ -1,24 +1,10 @@
 package main
 
-// genPool emits a reusable-arena Decoder for a top-level type: it holds one
-// arena that is reused across decodes, eliminating the per-decode arena
-// allocation. Pool the Decoder (one per goroutine, or a sync.Pool) for a
-// zero-allocation decode loop.
-//
-// The arena is deliberately NOT wiped between calls (that would defeat the
-// slice/map cells' whole purpose of reusing their backing storage): every
-// field kind resets whatever it's about to (re)populate itself — pointer
-// cells are unconditionally overwritten before use, kStruct pointer cells
-// are explicitly zeroed before the nested decoder recurses into them,
-// slice cells are resliced to length 0 before repopulating (keeping
-// capacity), map cells are make'd once and clear()ed thereafter — so a
-// stale arena is never observable through v: any field the decoder didn't
-// just (re)assign is a field v itself never got told to have.
-//
-// Lifetime: the decoded struct's slice, map, and pointer fields alias the
-// Decoder's arena, so a decoded value is invalidated by the next
-// Decode/DecodeBorrow on the same Decoder. Finish with (or copy out of)
-// one result before decoding the next.
+// genPool emits a single-goroutine decoder that reuses arena storage.
+// Each call zeroes the target but retains arena capacity. Field readers reset
+// cells before exposing them, so omitted fields do not leak old values.
+// The next call invalidates arena-backed results, even if that call fails.
+// The busy guard is released on panic as well as ordinary return.
 func (g *generator) genPool(ti typeInfo) {
 	n := ti.name
 	dec := n + "Decoder"
@@ -27,26 +13,30 @@ func (g *generator) genPool(ti typeInfo) {
 	g.p("// decoded value aliases that arena (and, in borrow mode, the input),")
 	g.p("// so it is invalidated by the next Decode/DecodeBorrow on this Decoder;")
 	g.p("// finish with or copy out of one result before decoding the next.")
+	atomicQ := g.importAlias("sync/atomic", "atomic")
 	g.p("type %s struct {", dec)
-	g.p("\ta %s", arenaName(n))
+	g.p("\ta    %s", arenaName(n))
+	g.p("\tbusy %s.Bool // a Decoder is single-goroutine; concurrent use panics with a clear message instead of tearing the arena", atomicQ)
 	g.p("}")
-	g.p("")
-	g.p("// Decode decodes data into v, reusing the Decoder's arena (no")
-	g.p("// per-decode allocation). v must be zero-valued; the result is")
-	g.p("// invalidated by the next Decode/DecodeBorrow on this Decoder.")
-	g.p("func (d *%s) Decode(data []byte, v *%s) error {", dec, n)
-	g.p("\tl := zerojson.NewLexer(data, false)")
-	g.p("\t%s(&l, v, &d.a)", decodeName(n))
-	g.p("\tl.Finish()")
-	g.p("\treturn l.Err()")
-	g.p("}")
-	g.p("")
-	g.p("// DecodeBorrow is Decode with zero-copy strings: decoded strings")
-	g.p("// alias data, which must stay live and unmodified while v is used.")
-	g.p("func (d *%s) DecodeBorrow(data []byte, v *%s) error {", dec, n)
-	g.p("\tl := zerojson.NewLexer(data, true)")
-	g.p("\t%s(&l, v, &d.a)", decodeName(n))
-	g.p("\tl.Finish()")
-	g.p("\treturn l.Err()")
-	g.p("}")
+	for _, m := range []struct{ name, borrow, doc string }{
+		{"Decode", "false", "// Decode decodes data into v, reusing the Decoder's arena.\n// Field decoding may still allocate. *v is reset to its zero value first: the\n// arena adopts no caller-owned map or pointee, so a target reused\n// across calls can never have its own data cleared by a later decode.\n// The result aliases the arena and is invalidated by the next\n// Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder\n// panic; use one Decoder per goroutine (e.g. via sync.Pool)."},
+		{"DecodeBorrow", "true", "// DecodeBorrow is Decode with zero-copy strings: decoded strings\n// alias data, which must stay live and unmodified while v is used."},
+	} {
+		g.p("")
+		g.p("%s", m.doc)
+		g.p("func (d *%s) %s(data []byte, v *%s) error {", dec, m.name, n)
+		g.p("\tif !d.busy.CompareAndSwap(false, true) {")
+		g.p("\t\tpanic(\"zerojson: concurrent %s on the same %s — a Decoder is single-goroutine; use one per goroutine (for example via sync.Pool)\")", m.name, dec)
+		g.p("\t}")
+		g.p("\t// Deferred so a panic inside the decode (a user UnmarshalJSON, a")
+		g.p("\t// nil v) cannot leave the Decoder permanently \"busy\".")
+		g.p("\tdefer d.busy.Store(false)")
+		g.p("\tvar zero %s", n)
+		g.p("\t*v = zero")
+		g.p("\tl := zerojson.NewLexer(data, %s)", m.borrow)
+		g.p("\t%s(&l, v, &d.a)", decodeName(n))
+		g.p("\tl.Finish()")
+		g.p("\treturn l.Err()")
+		g.p("}")
+	}
 }

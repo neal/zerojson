@@ -24,6 +24,7 @@ package typeshape
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/neal/zerojson/conformance/internal/oracle"
 	"reflect"
 	"testing"
 )
@@ -47,9 +48,9 @@ type matrixCase struct {
 	ejReason    string
 }
 
-// allowedReasons is the closed set of documented divergence reasons. It is
-// the same list the README's divergence table states. A cell may only relax
-// a byte-identity comparison by naming one of these.
+// allowedReasons covers the wire-format differences exercised by this matrix,
+// not every runtime divergence in the README. A cell may only relax a
+// byte-identity comparison by naming one of these reasons.
 var allowedReasons = map[string]bool{
 	divMapOrder:   true,
 	divEmbedOrder: true,
@@ -63,6 +64,16 @@ const (
 	divOmitzero   = "omitzero honored (vs easyjson, which ignores the option)"
 	divInvalidTag = "invalid tag name falls back to the Go field name (vs easyjson, which emits the invalid tag verbatim)"
 )
+
+// jsonv2Drift lists the cells whose stdlib comparison is skipped under the
+// v2-backed encoding/json Go 1.27 ships (detected by probing, see
+// internal/oracle): classic v1 is the implementation the compatibility
+// contract is written against, and these are the documented places where
+// the v1-on-v2 layer itself moved. Every other cell must still match both
+// implementations byte-for-byte.
+var jsonv2Drift = map[string]string{
+	"T_invalid_tagname": "v1-on-v2 truncates an invalid tag name (`a\\b`) at the backslash instead of falling back to the Go field name as classic v1 does; zerojson follows classic v1 (README compatibility contract)",
+}
 
 // semanticEqual reports whether two JSON encodings are semantically equal
 // (order-insensitive for object keys), by unmarshaling both through
@@ -95,7 +106,9 @@ func TestTypeShapeMatrix(t *testing.T) {
 					}
 
 					// zerojson vs encoding/json (primary oracle).
-					if c.stdSemantic {
+					if reason, drifted := jsonv2Drift[c.name]; drifted && oracle.StdlibJSONV2 {
+						t.Logf("stdlib comparison skipped: %s\n  zj:  %s\n  std: %s", reason, zj, std)
+					} else if c.stdSemantic {
 						if !semanticEqual(zj, std) {
 							t.Fatalf("stdlib semantic mismatch (%s)\n  zj:  %s\n  std: %s", c.stdReason, zj, std)
 						}

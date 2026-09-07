@@ -123,7 +123,7 @@ func TestStringOptByteIdenticalToStdlib(t *testing.T) {
 		}
 
 		// Bare numbers are invalid when json:",string" is present, matching
-		// encoding/json rather than the ordinary quoted-or-bare numeric readers.
+		// encoding/json rather than the ordinary bare-only numeric readers.
 		bare := []byte(`{"count":0,"amount":0}`)
 		var stdBare, viaBare StringOptCases
 		stdErr := json.Unmarshal(bare, &stdBare)

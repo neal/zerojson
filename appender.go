@@ -1,15 +1,16 @@
 package zerojson
 
 // Appender is implemented by hand-written types that want to join
-// zerojson's zero-alloc encode path directly, without a -leaf generator
+// zerojson's append-style encode path directly, without a -leaf generator
 // registration. The generator detects this method on a field's type the
 // same way it detects MarshalJSON, but with precedence above it: a type
 // offering both AppendZJSON/ReadZJSON and MarshalJSON/UnmarshalJSON gets
 // the fast append/read path.
 //
 // AppendZJSON must follow the same contract as every other zerojson
-// Append* function: dst is the buffer to append to (never reset or
-// copied), and the result is dst plus the new encoding. On error, the
+// Append* function: dst is the buffer to append to (never reset), preserving its prefix.
+// Buffer growth may allocate and copy. The appended bytes must be one valid
+// JSON value; the generator does not validate Appender output. On error, the
 // returned buffer holds a partial encoding and must be discarded. This is
 // the exact signature the generator emits for every generated type, so a
 // generated type already satisfies Appender; the generator still

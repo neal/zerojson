@@ -51,8 +51,7 @@ func (l *Lexer) ReadUUIDBytes() [16]byte {
 	}
 	b, plain, _ := l.readStringBytes()
 	if !plain {
-		l.setErr("escaped uuid")
-		return [16]byte{}
+		b = unescapeStringBytes(b) // exotic but valid: same string, escaped spelling
 	}
 	u, ok := parseUUIDBytes(b)
 	if !ok {

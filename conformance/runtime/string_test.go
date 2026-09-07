@@ -9,6 +9,7 @@ import (
 	"github.com/mailru/easyjson/jwriter"
 
 	"github.com/neal/zerojson"
+	"github.com/neal/zerojson/conformance/internal/oracle"
 )
 
 // TestAppendStringMatchesJwriter validates zerojson.AppendString's escaping
@@ -77,6 +78,9 @@ func TestAppendStringUTF8MatchesBothOracles(t *testing.T) {
 		if errStd != nil {
 			t.Fatalf("%q: stdlib unexpectedly errored: %v", s, errStd)
 		}
+		// Go 1.27's v2-backed encoding/json emits the raw U+FFFD rune for
+		// an invalid byte; classic v1 (and easyjson) emit the escape.
+		wantStd = oracle.ClassicUTF8(wantStd)
 		if !bytes.Equal(wantEJ, wantStd) {
 			t.Fatalf("%q: oracles disagree with each other (easyjson=%s stdlib=%s) — test assumption broken", s, wantEJ, wantStd)
 		}

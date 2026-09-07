@@ -304,16 +304,45 @@ func TestReadIntWidthRangeChecks(t *testing.T) {
 	check("Uint64", "18446744073709551616", func(l *Lexer) { l.ReadUint64() }, true)
 	// Negative into unsigned always errors (stdlib does too).
 	check("Uint16", "-1", func(l *Lexer) { l.ReadUint16() }, true)
-	// The ordinary readers accept quoted or bare numbers. The strict quoted
-	// readers used for json:",string" additionally reject a bare token.
+	// The ordinary readers accept only a bare number token, like
+	// encoding/json for a plain numeric field; the strict quoted readers
+	// used for json:",string" accept only a string token. Neither accepts
+	// a leading '+', which JSON's number grammar does not allow. Only the
+	// explicitly lenient ReadQuotedOrBareInt64 (the ZeroJSONQuotedInt64
+	// marker convention) takes both token kinds.
 	check("Int32 quoted", `"2147483648"`, func(l *Lexer) { l.ReadInt32() }, true)
-	check("Int32 quoted", `"5"`, func(l *Lexer) { l.ReadInt32() }, false)
+	check("Int32 quoted", `"5"`, func(l *Lexer) { l.ReadInt32() }, true)
+	check("Int32 plus", `+5`, func(l *Lexer) { l.ReadInt32() }, true)
+	check("Uint32 plus", `+001`, func(l *Lexer) { l.ReadUint32() }, true)
+	check("Float64 quoted", `"5"`, func(l *Lexer) { l.ReadFloat64() }, true)
+	check("Float64 quoted NaN", `"NaN"`, func(l *Lexer) { l.ReadFloat64() }, true)
+	check("Float64 quoted Inf", `"Inf"`, func(l *Lexer) { l.ReadFloat64() }, true)
+	check("Float64 plus", `+5`, func(l *Lexer) { l.ReadFloat64() }, true)
+	check("Float64 leading dot", `.5`, func(l *Lexer) { l.ReadFloat64() }, true)
+	check("Float64 trailing dot", `1.`, func(l *Lexer) { l.ReadFloat64() }, true)
+	check("Float64 dot exponent", `1.e5`, func(l *Lexer) { l.ReadFloat64() }, true)
+	check("Float64 leading zero (documented leniency)", `007`, func(l *Lexer) { l.ReadFloat64() }, false)
+	check("Float64 ok", `-1.5e-3`, func(l *Lexer) { l.ReadFloat64() }, false)
 	check("QuotedInt32", `"5"`, func(l *Lexer) { l.ReadQuotedInt32() }, false)
-	check("Int32 quoted plus", `"+00"`, func(l *Lexer) { l.ReadInt32() }, false)
 	check("QuotedInt32 plus", `"+00"`, func(l *Lexer) { l.ReadQuotedInt32() }, true)
 	check("QuotedUint32 plus", `"+001"`, func(l *Lexer) { l.ReadQuotedUint32() }, true)
 	check("QuotedInt32 sign only", `"+"`, func(l *Lexer) { l.ReadQuotedInt32() }, true)
 	check("QuotedInt32 bare", `5`, func(l *Lexer) { l.ReadQuotedInt32() }, true)
+	check("QuotedOrBareInt64 quoted", `"5"`, func(l *Lexer) { l.ReadQuotedOrBareInt64() }, false)
+	check("QuotedOrBareInt64 bare", `5`, func(l *Lexer) { l.ReadQuotedOrBareInt64() }, false)
+	check("QuotedOrBareInt64 bare plus", `+5`, func(l *Lexer) { l.ReadQuotedOrBareInt64() }, true)
+	check("Float32 in range", `3.4e38`, func(l *Lexer) { l.ReadFloat32() }, false)
+	check("Float32 out of range", `1e39`, func(l *Lexer) { l.ReadFloat32() }, true)
+	check("Float32 just over max", `3.4028236e38`, func(l *Lexer) { l.ReadFloat32() }, true)
+	check("Float32 quoted", `"1"`, func(l *Lexer) { l.ReadFloat32() }, true)
+	check("Float32 underflow is fine (rounds to 0/denormal)", `1e-50`, func(l *Lexer) { l.ReadFloat32() }, false)
+	// The marker convention's own UnmarshalJSON is conventionally
+	// strconv.ParseInt, which takes a leading '+', so this reader does too.
+	check("QuotedOrBareInt64 plus", `"+5"`, func(l *Lexer) { l.ReadQuotedOrBareInt64() }, false)
+	check("QuotedOrBareInt64 plus-minus", `"+-5"`, func(l *Lexer) { l.ReadQuotedOrBareInt64() }, true)
+	check("QuotedOrBareInt64 bare plus-minus", `+-5`, func(l *Lexer) { l.ReadQuotedOrBareInt64() }, true)
+	check("QuotedOrBareInt64 quoted plus", `"+5"`, func(l *Lexer) { l.ReadQuotedOrBareInt64() }, false)
+	check("QuotedOrBareInt64 sign only", `"+"`, func(l *Lexer) { l.ReadQuotedOrBareInt64() }, true)
 
 	// Value correctness at the extremes (not just error-vs-nil).
 	if l := NewLexer([]byte("-128"), false); l.ReadInt8() != -128 || l.Err() != nil {
@@ -325,8 +354,11 @@ func TestReadIntWidthRangeChecks(t *testing.T) {
 	if l := NewLexer([]byte("9223372036854775808"), false); l.ReadUint64() != 1<<63 || l.Err() != nil {
 		t.Errorf("ReadUint64(1<<63) wrong: err=%v", l.Err())
 	}
-	if l := NewLexer([]byte(`"+001"`), false); l.ReadUint32() != 1 || l.Err() != nil {
-		t.Errorf("ReadUint32(+001) wrong: err=%v", l.Err())
+	if l := NewLexer([]byte(`"001"`), false); l.ReadQuotedUint32() != 1 || l.Err() != nil {
+		t.Errorf("ReadQuotedUint32(\"001\") wrong: err=%v", l.Err())
+	}
+	if l := NewLexer([]byte(`"-12"`), false); l.ReadQuotedOrBareInt64() != -12 || l.Err() != nil {
+		t.Errorf("ReadQuotedOrBareInt64(\"-12\") wrong: err=%v", l.Err())
 	}
 }
 
@@ -348,5 +380,54 @@ func TestLoopProtocol(t *testing.T) {
 	l2.ReadInterface()
 	if l2.Err() == nil {
 		t.Fatal("expected error for trailing comma")
+	}
+}
+
+// TestJSONNumberAndQuotedNull pins the encoding/json.Number reader/writer
+// (literal preserved verbatim; grammar-strict; quoted numeric string
+// accepted as classic encoding/json does) and the `,string` quoted-null
+// no-op.
+func TestJSONNumberAndQuotedNull(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		want string
+		ok   bool
+	}{
+		{`12`, "12", true}, {`-0.5e3`, "-0.5e3", true}, {`"12"`, "12", true},
+		{`"1.5"`, "1.5", true}, {`01`, "", false}, {`"abc"`, "", false},
+		{`"+1"`, "", false}, {`1.`, "", false}, {`true`, "", false}, {`""`, "", false},
+		{`123456789012345678901234567890`, "123456789012345678901234567890", true},
+	} {
+		l := NewLexer([]byte(c.in), false)
+		got := l.ReadJSONNumber()
+		if (l.Err() == nil) != c.ok || got != c.want {
+			t.Errorf("ReadJSONNumber(%s) = %q err=%v; want %q ok=%v", c.in, got, l.Err(), c.want, c.ok)
+		}
+	}
+	for _, c := range []struct {
+		in, want string
+		ok       bool
+	}{
+		{"", "0", true}, {"12", "12", true}, {"-1e5", "-1e5", true}, {"01", "", false}, {"abc", "", false}, {"1.", "", false},
+	} {
+		out, err := AppendJSONNumber(nil, c.in)
+		if (err == nil) != c.ok || (err == nil && string(out) != c.want) {
+			t.Errorf("AppendJSONNumber(%q) = %q err=%v; want %q ok=%v", c.in, out, err, c.want, c.ok)
+		}
+	}
+	for _, c := range []struct {
+		in   string
+		null bool
+		pos  int
+	}{
+		{`"null"`, true, 6}, {` "null"`, true, 7}, {`"nul"`, false, 0}, {`null`, false, 0}, {`"null" `, true, 6}, {`"nullx"`, false, 0},
+		{`"n\u0075ll"`, true, 11}, {`"\u006eull"`, true, 11}, {`"\u006e\u0075\u006c\u006c"`, true, 26}, {`"n\u0075lx"`, false, 0}, {`"5"`, false, 0},
+	} {
+		l := NewLexer([]byte(c.in), false)
+		if got := l.IsQuotedNull(); got != c.null {
+			t.Errorf("IsQuotedNull(%s) = %v want %v", c.in, got, c.null)
+		} else if got && l.Pos() != c.pos {
+			t.Errorf("IsQuotedNull(%s) left pos %d want %d", c.in, l.Pos(), c.pos)
+		}
 	}
 }

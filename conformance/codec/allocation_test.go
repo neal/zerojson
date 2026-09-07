@@ -4,6 +4,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/neal/zerojson/conformance/internal/oracle"
 	decimal "github.com/neal/zerojson/conformance/internal/testleaf"
 )
 
@@ -196,7 +197,16 @@ func TestEventEncodeAllocationBudget(t *testing.T) {
 		// race is still caught) but doesn't assert a specific count.
 		return
 	}
-	const wantAllocs = 22.0
+	// Event's Extra/Bag/AnyList fields delegate to encoding/json, so part
+	// of this budget is stdlib's, not zerojson's: the v2-backed
+	// encoding/json that Go 1.27 ships allocates more on that path than
+	// classic v1 did. Both figures are pinned; which one applies is
+	// detected by probing the oracle (see internal/oracle), so the budget
+	// stays exact under either implementation.
+	wantAllocs := 22.0
+	if oracle.StdlibJSONV2 {
+		wantAllocs = 29.0
+	}
 	if allocs != wantAllocs {
 		t.Fatalf("Event.AppendZJSON (reused buffer) allocations=%v, want %v (update deliberately if a field's encoding legitimately changed; investigate if not)", allocs, wantAllocs)
 	}
@@ -244,7 +254,12 @@ func TestEventPooledDecodeBorrowAllocationBudget(t *testing.T) {
 	// Callback-bearing schemas now bypass speculative ordered decoding so a
 	// later fallback cannot invoke user UnmarshalJSON/ReadZJSON methods twice.
 	// Avoiding that abandoned attempt also removes two allocations here.
-	const maxAllocs = 38.0
+	// A pooled Decode zeroes *v before decoding (so the arena never adopts
+	// caller-owned memory that a later decode would clear); the two
+	// allocations that adds here are IDList.UnmarshalJSON regrowing its own
+	// slice, which the reused non-zero target used to keep — user-type
+	// storage, not the arena's, which is still reused.
+	const maxAllocs = 40.0
 	if allocs > maxAllocs {
 		t.Fatalf("EventDecoder.DecodeBorrow (reused arena) allocations=%v, budget %v", allocs, maxAllocs)
 	}

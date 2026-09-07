@@ -2,35 +2,104 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
 // leafRead emits a decode statement for a custom leaf into ptrExpr.
 func (g *generator) leafRead(ls *leafSpec, ptrExpr, ind string) {
-	g.p("%s%s.%s(l, %s)", ind, ls.readQual, ls.readFn, ptrExpr)
+	g.p("%s%s%s(l, %s)", ind, qualDot(ls.readQual), ls.readFn, ptrExpr)
+}
+
+// enumHelper is one zjReadEnum<T> function the generated file needs: the
+// per-element decoder for an enum type appearing as a slice element or map
+// value, which switches to the declared constants exactly like the field
+// path does and COPIES an unknown value (interning is opt-in per field via
+// zerojson:"intern", which has no slice-element form — see README).
+type enumHelper struct {
+	name    string
+	typeStr string
+	consts  []enumConst
 }
 
 // leafReadExpr returns a decode expression for a leaf-kind value.
-func (fi *fieldInfo) leafReadExpr() string {
+func (g *generator) leafReadExpr(fi *fieldInfo) string {
 	switch fi.kind {
 	case kString:
 		return "l.ReadString()"
+	case kJSONNumber:
+		return fmt.Sprintf("%s(l.ReadJSONNumber())", fi.typeStr)
 	case kEnum:
-		return fmt.Sprintf("%s(l.ReadInternedString())", fi.typeStr)
+		return g.enumReadCall(fi)
 	case kBool:
 		return fmt.Sprintf("%s(l.ReadBool())", fi.typeStr)
 	case kInt, kQuotedInt, kUint:
 		return fmt.Sprintf("%s(%s)", fi.typeStr, fi.intRead)
-	case kFloat32, kFloat64:
+	case kFloat32:
+		return fmt.Sprintf("%s(l.ReadFloat32())", fi.typeStr)
+	case kFloat64:
 		return fmt.Sprintf("%s(l.ReadFloat64())", fi.typeStr)
 	case kTime:
 		return "l.ReadTime()"
 	case kUUID:
 		return fmt.Sprintf("%s(l.ReadUUIDBytes())", fi.typeStr)
 	case kByteSlice:
-		return fmt.Sprintf("%s(l.ReadBytesBase64())", fi.typeStr)
+		return byteSliceReadExpr(*fi)
 	}
 	return ""
+}
+
+// enumReadCall registers (once) and returns the call to the zjReadEnum
+// helper for fi's enum type.
+func (g *generator) enumReadCall(fi *fieldInfo) string {
+	h, ok := g.enumHelpers[fi.typeStr]
+	if !ok {
+		// The sanitized name is lossy (`a_b.X` and `a.b_X` collide), so it
+		// is de-duplicated against helpers already registered for OTHER
+		// type expressions.
+		ident := strings.NewReplacer(".", "_", "[", "_", "]", "_", "*", "_").Replace(fi.typeStr)
+		name := "zjReadEnum_" + ident
+		for taken := true; taken; {
+			taken = false
+			for _, other := range g.enumHelpers {
+				if other.name == name {
+					name += "_"
+					taken = true
+					break
+				}
+			}
+		}
+		h = &enumHelper{name: name, typeStr: fi.typeStr, consts: fi.enumConsts}
+		g.enumHelpers[fi.typeStr] = h
+	}
+	return h.name + "(l)"
+}
+
+// emitEnumHelpers writes every registered zjReadEnum helper, in a stable
+// order, after the type bodies.
+func (g *generator) emitEnumHelpers() {
+	names := make([]string, 0, len(g.enumHelpers))
+	for k := range g.enumHelpers {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		h := g.enumHelpers[k]
+		g.p("")
+		g.p("// %s decodes one %s value (a slice element or map value): a declared", h.name, h.typeStr)
+		g.p("// constant by switch, any other value copied — never interned, since")
+		g.p("// interning is a per-field opt-in that has no element-level form.")
+		g.p("func %s(l *zerojson.Lexer) %s {", h.name, h.typeStr)
+		g.p("\tswitch b := l.ReadEnumBytes(); string(b) {")
+		for _, c := range h.consts {
+			g.p("\tcase %q:", c.val)
+			g.p("\t\treturn %s", c.name)
+		}
+		g.p("\tdefault:")
+		g.p("\t\treturn %s(string(b))", h.typeStr)
+		g.p("\t}")
+		g.p("}")
+	}
 }
 
 func (g *generator) genArena(ti typeInfo) {
@@ -75,17 +144,7 @@ func sliceCellType(elemType string, elemPtr bool) string {
 }
 
 func needsSeenState(f fieldInfo) bool {
-	if f.kind == kMap {
-		return true
-	}
-	if !f.ptr {
-		return false
-	}
-	switch f.kind {
-	case kStruct, kMarshaler, kTextMarshaler, kAppender:
-		return true
-	}
-	return false
+	return f.kind == kMap
 }
 
 func (g *generator) emitSeenReset(ti typeInfo) {
@@ -111,22 +170,15 @@ func (g *generator) emitNestedSeenReset(typeName, arenaExpr, ind string) {
 	}
 }
 
-// emitPointerCellInit seeds an arena-backed pointer cell from an existing
-// target on its first occurrence in this object. Subsequent duplicate keys
-// reuse the same cell, matching encoding/json's merge/receiver semantics.
-// With a zero-valued pooled target, the persistent cell is cleared once per
-// message so state cannot leak from the previous Decode.
+// Preserve an existing receiver, including aliases held elsewhere in the
+// caller's object graph. Only nil pointers need arena storage. Pooled targets
+// are reset before decoding, so clearing that cell prevents stale state.
 func (g *generator) emitPointerCellInit(f fieldInfo, target, cell, ind string) {
-	g.p("%sif !a.s%s {", ind, f.cellName)
-	g.p("%s\ta.s%s = true", ind, f.cellName)
-	g.p("%s\tif %s != nil {", ind, target)
-	g.p("%s\t\t%s = *%s", ind, cell, target)
-	g.p("%s\t} else {", ind)
-	g.p("%s\t\tvar zjZero %s", ind, f.typeStr)
-	g.p("%s\t\t%s = zjZero", ind, cell)
-	g.p("%s\t}", ind)
+	g.p("%sif %s == nil {", ind, target)
+	g.p("%s\tvar zjZero %s", ind, f.typeStr)
+	g.p("%s\t%s = zjZero", ind, cell)
+	g.p("%s\t%s = &%s", ind, target, cell)
 	g.p("%s}", ind)
-	g.p("%s%s = &%s", ind, target, cell)
 }
 
 // emitNonNilEmptySlice ensures cell is non-nil after a slice/leaf-slice
@@ -147,17 +199,17 @@ func (g *generator) emitNonNilEmptySlice(cell, cellType, ind string) {
 
 func (g *generator) genDecode(ti typeInfo) {
 	g.p("")
-	g.p("// UnmarshalZJSON decodes data into v. JSON null clears pointer,")
-	g.p("// slice, and map fields and leaves value fields untouched, matching")
-	g.p("// encoding/json semantics for reused targets.")
+	g.p("// UnmarshalZJSON decodes data into v, copying strings and Raw values.")
+	g.p("// Existing pointers are preserved; slice elements are rebuilt from zero.")
+	g.p("// Custom codecs define their own value/null behavior. Errors may leave v")
+	g.p("// partially changed. Use zerojson.Valid first if strict grammar is required.")
 	g.p("func (v *%s) UnmarshalZJSON(data []byte) error {", ti.name)
 	g.p("\treturn v.unmarshalZJSON(data, false)")
 	g.p("}")
 	g.p("")
-	g.p("// UnmarshalZJSONBorrow is UnmarshalZJSON with zero-copy string")
-	g.p("// decoding: decoded strings may alias data, so data must stay live and")
-	g.p("// unmodified for the lifetime of v. Never use it with pooled or reused")
-	g.p("// input buffers.")
+	g.p("// UnmarshalZJSONBorrow is UnmarshalZJSON with borrowed strings and Raw")
+	g.p("// values. Keep data unmodified while any result refers to it; input")
+	g.p("// buffers may be reused only after those results are no longer needed.")
 	g.p("func (v *%s) UnmarshalZJSONBorrow(data []byte) error {", ti.name)
 	g.p("\treturn v.unmarshalZJSON(data, true)")
 	g.p("}")
@@ -169,6 +221,7 @@ func (g *generator) genDecode(ti typeInfo) {
 	g.p("\tl.Finish()")
 	g.p("\treturn l.Err()")
 	g.p("}")
+	g.genReadZJSON(ti.name)
 
 	orderedOK := g.ordered && g.canOrderType(ti)
 	g.p("")
@@ -177,19 +230,13 @@ func (g *generator) genDecode(ti typeInfo) {
 	g.p("// compact, declaration-ordered shape zerojson's own encoder emits.")
 	g.p("func %s(l *zerojson.Lexer, v *%s, a *%s) {", decodeName(ti.name), ti.name, arenaName(ti.name))
 	g.p("\tif l.IsNull() {")
-	g.p("\t\t// A JSON null decodes to a no-op success, leaving v untouched —")
-	g.p("\t\t// matching encoding/json's reused-target semantics")
-	g.p("\t\t// (json.Unmarshal(\"null\", &v) succeeds without modifying v). A")
-	g.p("\t\t// nested struct field never reaches here on null (the enclosing")
-	g.p("\t\t// decoder consumes null and clears the field itself before this")
-	g.p("\t\t// is called), so this fires only at a top-level entry point;")
-	g.p("\t\t// Finish still runs afterward, so trailing bytes (e.g. \"nullx\")")
-	g.p("\t\t// are still rejected.")
+	g.p("\t\t// Null leaves a value-typed struct unchanged. The public wrapper")
+	g.p("\t\t// still calls Finish to reject trailing data.")
 	g.p("\t\treturn")
 	g.p("\t}")
 	g.emitSeenReset(ti)
 	if orderedOK {
-		g.p("\tstart := l.Pos()")
+		g.p("\tstart := l.Mark()")
 		g.p("\tif %s(l, v, a) {", orderedDecodeName(ti.name))
 		g.p("\t\treturn")
 		g.p("\t}")
@@ -214,8 +261,8 @@ func (g *generator) genDecode(ti typeInfo) {
 
 	g.p("")
 	g.p("// %s is the general keyed decoder: every member is read via", fallbackDecodeName(ti.name))
-	g.p("// ReadKey and dispatched by a string switch. It is always correct and")
-	g.p("// is what the ordered fast path falls back to.")
+	g.p("// ReadKey and dispatched by a string switch. It handles arbitrary")
+	g.p("// field order and is the fallback for structural ordered-path mismatches.")
 	g.p("func %s(l *zerojson.Lexer, v *%s, a *%s) {", fallbackDecodeName(ti.name), ti.name, arenaName(ti.name))
 	g.p("\t_ = a")
 	g.p("\tif !l.EnterObject() {")
@@ -226,6 +273,10 @@ func (g *generator) genDecode(ti typeInfo) {
 	g.p("\t\tif l.Err() != nil { return }")
 	g.p("\t\tif l.IsNull() {")
 	g.emitNullSwitch(ti)
+	g.p("\t\t\tif l.Err() != nil {")
+	g.p("\t\t\t\tl.AnnotateField(key)")
+	g.p("\t\t\t\treturn")
+	g.p("\t\t\t}")
 	g.p("\t\t\tif !l.NextMember() { break }")
 	g.p("\t\t\tcontinue")
 	g.p("\t\t}")
@@ -237,18 +288,94 @@ func (g *generator) genDecode(ti typeInfo) {
 	g.p("\t\tdefault:")
 	g.p("\t\t\tl.Skip()")
 	g.p("\t\t}")
-	g.p("\t\tif l.Err() != nil { return }")
+	g.p("\t\tif l.Err() != nil {")
+	g.p("\t\t\tl.AnnotateField(key)")
+	g.p("\t\t\treturn")
+	g.p("\t\t}")
 	g.p("\t\tif !l.NextMember() { break }")
 	g.p("\t}")
 	g.p("}")
 }
 
+// genReadZJSON emits ReadZJSON, zerojson.Reader's method, next to the
+// generated AppendZJSON (which already satisfies zerojson.Appender). The
+// pair is what lets a generated type be used as a FIELD of a generated
+// type in ANOTHER package: that package's generator sees an
+// Appender/Reader pair and dispatches through it, the same way it treats
+// a hand-written leaf. (Slices and maps of Appender-only types have no
+// codec yet; a type that also has MarshalJSON/UnmarshalJSON is delegated
+// to those in such positions.) Same-package fields never go
+// through this method — they call the zjDecode<T> dispatcher directly with
+// the parent's arena — so it costs nothing on the in-package fast path.
+func (g *generator) genReadZJSON(name string) {
+	g.p("")
+	g.p("// ReadZJSON implements zerojson.Reader: it decodes the next JSON value")
+	g.p("// from l into v, so %s can be a field of a zerojson-generated type in", name)
+	g.p("// another package. Errors are reported through l, per the Reader contract.")
+	g.p("func (v *%s) ReadZJSON(l *zerojson.Lexer) {", name)
+	g.p("\ta := &%s{}", arenaName(name))
+	g.p("\t%s(l, v, a)", decodeName(name))
+	g.p("}")
+}
+
 // isNullableField reports whether a JSON null clears f (pointers, slices,
-// maps, interfaces, and slice- or map-shaped Marshalers go nil; other
-// value-typed fields are left untouched by both the fallback and ordered
-// decoders).
+// maps, interfaces, and byte slices go nil). Appender and TextMarshaler
+// classification must not hide a named slice/map's underlying kind.
+// Null delivery takes precedence over clearing for value-typed JSON
+// unmarshalers and Raw (see isNullDelivered).
 func isNullableField(f fieldInfo) bool {
-	return f.ptr || f.kind == kSlice || f.kind == kLeafSlice || f.kind == kMap || f.kind == kByteSlice || f.kind == kInterface || (f.kind == kMarshaler && (f.marshalerIsSlice || f.marshalerIsMap))
+	return f.ptr || f.kind == kSlice || f.kind == kLeafSlice || f.kind == kMap || f.kind == kByteSlice || f.kind == kInterface ||
+		((f.kind == kAppender || f.kind == kTextMarshaler) && f.scalarEmpty == "len")
+}
+
+// isNullDelivered reports whether a JSON null on f is handed to the value
+// itself: encoding/json invokes UnmarshalJSON([]byte("null")) on a
+// VALUE-typed json.Unmarshaler (including slice- and map-shaped ones
+// such as json.RawMessage, which then holds the bytes null), and Raw
+// mirrors RawMessage. A pointer field is cleared instead (isNullableField).
+// An Appender/Reader type that ALSO has UnmarshalJSON receives the null
+// through it (stdlib decodes through that method alone, whether or not
+// the type also has MarshalJSON); an Appender-only type is structural to
+// stdlib, so null clears a slice/map and leaves other value types alone. A
+// ZeroJSONQuotedInt64 marker type is decoded by the fast path, never by
+// its own UnmarshalJSON, so null leaves it untouched (documented).
+func isNullDelivered(f fieldInfo) bool {
+	if f.ptr {
+		return false
+	}
+	return f.kind == kMarshaler || isRawLeaf(f) || (f.kind == kAppender && f.appenderHasUnmarshalJSON)
+}
+
+func isRawLeaf(f fieldInfo) bool {
+	return f.kind == kCustomLeaf && f.leaf != nil && f.leaf.appendPkg == runtimePath && f.leaf.appendFn == "AppendRaw"
+}
+
+// emitNullDelivery emits the statement that hands a just-consumed null to
+// the value at target (see isNullDelivered).
+func (g *generator) emitNullDelivery(f fieldInfo, target, ind string) {
+	if isRawLeaf(f) {
+		g.p("%szerojson.ReadRawNull(l, &%s)", ind, target)
+		return
+	}
+	g.p("%sif err := %s.UnmarshalJSON(l.NullBytes()); err != nil {", ind, target)
+	g.p("%s\tl.AddError(err)", ind)
+	g.p("%s}", ind)
+}
+
+// elemNullDelivery emits, for a slice element or map value of leaf kind
+// vi (non-pointer) at target, the null-delivery statement if the kind is
+// null-delivered, and reports whether it did.
+func (g *generator) elemNullDelivery(vi *fieldInfo, target, ind string) bool {
+	if vi == nil {
+		return false
+	}
+	f := *vi
+	f.ptr = false
+	if !isNullDelivered(f) {
+		return false
+	}
+	g.emitNullDelivery(f, target, ind)
+	return true
 }
 
 // emitNullSwitch clears reference-typed fields on JSON null, matching
@@ -256,7 +383,7 @@ func isNullableField(f fieldInfo) bool {
 func (g *generator) emitNullSwitch(ti typeInfo) {
 	var nullable []fieldInfo
 	for _, f := range ti.fields {
-		if isNullableField(f) {
+		if isNullableField(f) || isNullDelivered(f) {
 			nullable = append(nullable, f)
 		}
 	}
@@ -266,6 +393,14 @@ func (g *generator) emitNullSwitch(ti typeInfo) {
 	g.p("\t\t\tswitch string(key) {")
 	for _, f := range nullable {
 		g.p("\t\t\tcase %q:", f.jsonName)
+		if isNullDelivered(f) {
+			g.emitNullDelivery(f, "v."+f.access, "\t\t\t\t")
+			continue
+		}
+		if f.kind == kInterface && !f.ptr {
+			g.emitInterfaceNull("v."+f.access, "\t\t\t\t")
+			continue
+		}
 		g.p("\t\t\t\tv.%s = nil", f.access)
 		if needsSeenState(f) {
 			g.p("\t\t\t\ta.s%s = false", f.cellName)
@@ -285,22 +420,40 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 	ind := "\t\t\t"
 	target := "v." + f.access
 	cell := "a.f" + f.cellName
-	// zjDecodeOrderedField<T> returns bool; the fallback decoder returns
-	// nothing. A mid-loop parse error (kSlice/kLeafSlice/kMap elements)
-	// exits the same way every other bail does here.
-	retStmt := "return"
-	if ordered {
-		retStmt = "return false"
-	}
+	// A mid-loop element error (kSlice/kLeafSlice/kMap) breaks out of
+	// the element loop rather than returning, so control reaches the
+	// enclosing decoder's error check, which annotates the error with
+	// THIS field's name (the container) before unwinding further; the
+	// statements between the loop and that check are harmless on error.
+	retStmt := "break"
 
-	// Pointer fields decode into their arena cell.
+	_ = ordered
+	// Existing pointers are caller-owned; fresh pointers use arena cells.
 	assign := func(readExpr string) {
 		if f.ptr {
-			g.p("%s%s = %s", ind, cell, readExpr)
-			g.p("%s%s = &%s", ind, target, cell)
+			g.p("%sif %s == nil {", ind, target)
+			g.p("%s\t%s = %s", ind, cell, readExpr)
+			g.p("%s\t%s = &%s", ind, target, cell)
+			g.p("%s} else {", ind)
+			g.p("%s\t*%s = %s", ind, target, readExpr)
+			g.p("%s}", ind)
 		} else {
 			g.p("%s%s = %s", ind, target, readExpr)
 		}
+	}
+	// Slice/map fields decode into the arena's persistent collection cell
+	// (a.c<N> / a.m<N>) and then alias target to it. For a POINTER to a
+	// slice/map (*[]T, *map[string]T — a shape encoding/json supports) the
+	// collection goes through the arena's pointer cell (a.f<N>, of the
+	// non-pointer type) so target can point at it.
+	finishCollection := func(collCell string) {
+		assign(collCell)
+	}
+	// derefTarget is the collection value behind target (for seeding a
+	// map cell from an existing non-nil target).
+	derefTarget := target
+	if f.ptr {
+		derefTarget = "(*" + target + ")"
 	}
 
 	switch f.kind {
@@ -311,54 +464,78 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 			assign("l.ReadString()")
 		}
 	case kEnum:
+		if f.ptr {
+			g.emitPointerCellInit(f, target, cell, ind)
+		}
+		enumTarget := target
+		if f.ptr {
+			enumTarget = "*" + target
+		}
 		g.p("%sswitch b := l.ReadEnumBytes(); string(b) {", ind)
 		for _, c := range f.enumConsts {
 			g.p("%scase %q:", ind, c.val)
-			if f.ptr {
-				g.p("%s\t%s = %s", ind, cell, c.name)
-			} else {
-				g.p("%s\t%s = %s", ind, target, c.name)
-			}
+			g.p("%s\t%s = %s", ind, enumTarget, c.name)
 		}
 		g.p("%sdefault:", ind)
 		unknown := "string(b)"
 		if f.intern {
 			unknown = "zerojson.Intern(b)"
 		}
-		if f.ptr {
-			g.p("%s\t%s = %s(%s)", ind, cell, f.typeStr, unknown)
-		} else {
-			g.p("%s\t%s = %s(%s)", ind, target, f.typeStr, unknown)
-		}
+		g.p("%s\t%s = %s(%s)", ind, enumTarget, f.typeStr, unknown)
 		g.p("%s}", ind)
-		if f.ptr {
-			g.p("%s%s = &%s", ind, target, cell)
-		}
 	case kBool:
-		assign("l.ReadBool()")
+		assign(fmt.Sprintf("%s(l.ReadBool())", f.typeStr))
+	case kJSONNumber:
+		assign(fmt.Sprintf("%s(l.ReadJSONNumber())", f.typeStr))
 	case kQuotedInt, kInt, kUint:
 		read := f.intRead
 		if f.stringOpt {
 			read = strings.Replace(read, "l.Read", "l.ReadQuoted", 1)
+			// encoding/json accepts the quoted spelling "null" on a
+			// `,string` field exactly like a bare null: the value is
+			// left untouched, a pointer is cleared.
+			g.p("%sif l.IsQuotedNull() {", ind)
+			if f.ptr {
+				g.p("%s\t%s = nil", ind, target)
+			}
+			g.p("%s} else {", ind)
+			ind += "\t"
+			assign(fmt.Sprintf("%s(%s)", f.typeStr, read))
+			ind = ind[:len(ind)-1]
+			g.p("%s}", ind)
+			break
 		}
 		assign(fmt.Sprintf("%s(%s)", f.typeStr, read))
-	case kFloat32, kFloat64:
+	case kFloat32:
+		assign(fmt.Sprintf("%s(l.ReadFloat32())", f.typeStr))
+	case kFloat64:
 		assign(fmt.Sprintf("%s(l.ReadFloat64())", f.typeStr))
 	case kTime:
 		assign("l.ReadTime()")
 	case kUUID:
 		assign(fmt.Sprintf("%s(l.ReadUUIDBytes())", f.typeStr))
 	case kInterface:
-		assign("l.ReadInterface()")
+		if f.ptr {
+			g.emitPointerCellInit(f, target, cell, ind)
+			target = "(*" + target + ")"
+		}
+		g.emitInterfaceRead(target, ind)
 	case kByteSlice:
 		// base64 string or numeric byte array → []byte (a fresh allocation
 		// from ReadBytesBase64);
 		// null is handled by the caller's IsNull check, which clears the
 		// field via emitNullSwitch (kByteSlice is a nullable field).
-		assign(fmt.Sprintf("%s(l.ReadBytesBase64())", f.typeStr))
+		assign(byteSliceReadExpr(f))
+	case kEmptyStruct:
+		if f.ptr {
+			g.emitPointerCellInit(f, target, cell, ind)
+		}
+		g.p("%sl.SkipObject()", ind)
 	case kCustomLeaf:
 		if f.ptr {
-			g.p("%s%s = &%s", ind, target, cell)
+			// Keep an existing receiver; clear arena storage only when
+			// allocating a new one (including on each pooled decode).
+			g.emitPointerCellInit(f, target, cell, ind)
 			g.leafRead(f.leaf, target, ind)
 		} else {
 			g.leafRead(f.leaf, "&"+target, ind)
@@ -380,7 +557,13 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 				// Direct call to the nested type's pure ordered decoder:
 				// its bail propagates as ours, so the whole top-level
 				// object restarts on ITS fallback (see ordered.go).
-				g.p("%sif !%s(l, %s, %s) { return false }", ind, orderedDecodeName(f.elem), targetExpr, arenaExpr)
+				// On a real error the enclosing field name must be recorded
+				// here, since this returns before the field function's own
+				// trailing check; on a bail l.err is nil and this is a no-op.
+				g.p("%sif !%s(l, %s, %s) {", ind, orderedDecodeName(f.elem), targetExpr, arenaExpr)
+				g.p("%s\tl.AnnotateFieldString(%q)", ind, f.jsonName)
+				g.p("%s\treturn false", ind)
+				g.p("%s}", ind)
 			} else {
 				g.p("%s%s(l, %s, %s)", ind, decodeName(f.elem), targetExpr, arenaExpr)
 			}
@@ -395,15 +578,23 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		if f.ptr {
 			g.emitPointerCellInit(f, target, cell, ind)
 		}
-		g.p("%sif err := %s.UnmarshalJSON(l.RawValue()); err != nil {", ind, target)
-		g.p("%s\tl.AddError(err)", ind)
+		// The callback runs only on a cleanly captured value: if RawValue
+		// hit a grammar error, the lexer already holds the decode error and
+		// handing the (empty or partial) span to user code would invoke
+		// its side effects on attacker-controlled malformed input.
+		g.p("%sif raw := l.RawValue(); l.Err() == nil {", ind)
+		g.p("%s\tif err := %s.UnmarshalJSON(raw); err != nil {", ind, target)
+		g.p("%s\t\tl.AddError(err)", ind)
+		g.p("%s\t}", ind)
 		g.p("%s}", ind)
 	case kTextMarshaler:
 		if f.ptr {
 			g.emitPointerCellInit(f, target, cell, ind)
 		}
-		g.p("%sif err := %s.UnmarshalText(l.ReadTextBytes()); err != nil {", ind, target)
-		g.p("%s\tl.AddError(err)", ind)
+		g.p("%sif txt := l.ReadTextBytes(); l.Err() == nil {", ind)
+		g.p("%s\tif err := %s.UnmarshalText(txt); err != nil {", ind, target)
+		g.p("%s\t\tl.AddError(err)", ind)
+		g.p("%s\t}", ind)
 		g.p("%s}", ind)
 	case kSlice:
 		cell := "a.c" + f.cellName
@@ -451,7 +642,7 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		g.p("%s}", ind)
 		g.p("%s}", ind)
 		g.emitNonNilEmptySlice(cell, sliceCellType(f.elem, f.elemPtr), ind)
-		g.p("%s%s = %s", ind, target, cell)
+		finishCollection(cell)
 	case kLeafSlice:
 		cell := "a.c" + f.cellName
 		if f.elemPtr {
@@ -466,9 +657,9 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 			g.p("%s\t\te = new(%s)", ind, f.valInfo.typeStr)
 			switch f.valInfo.kind {
 			case kMarshaler:
-				g.p("%s\t\tif err := e.UnmarshalJSON(l.RawValue()); err != nil { l.AddError(err) }", ind)
+				g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := e.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
 			case kTextMarshaler:
-				g.p("%s\t\tif err := e.UnmarshalText(l.ReadTextBytes()); err != nil { l.AddError(err) }", ind)
+				g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := e.UnmarshalText(txt); err != nil { l.AddError(err) } }", ind)
 			}
 			g.p("%s\t}", ind)
 			g.p("%s\tif l.Err() != nil { %s }", ind, retStmt)
@@ -477,7 +668,7 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 			g.p("%s}", ind)
 			g.p("%s}", ind)
 			g.emitNonNilEmptySlice(cell, sliceCellType(f.valInfo.typeStr, f.elemPtr), ind)
-			g.p("%s%s = %s", ind, target, cell)
+			finishCollection(cell)
 			return
 		}
 		g.p("%s%s = %s[:0]", ind, cell, cell)
@@ -492,18 +683,18 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		g.p("%s\t\t%s[len(%s)-1] = zjZero", ind, cell, cell)
 		g.p("%s\t}", ind)
 		g.p("%s\tidx := len(%s) - 1", ind, cell)
-		g.p("%s\tif !l.IsNull() {", ind)
+		g.emitElemNullOpen(f.valInfo, fmt.Sprintf("%s[idx]", cell), ind+"\t")
 		switch f.valInfo.kind {
 		case kCustomLeaf:
 			g.leafRead(f.valInfo.leaf, fmt.Sprintf("&%s[idx]", cell), ind+"\t\t")
 		case kMarshaler:
-			g.p("%s\t\tif err := %s[idx].UnmarshalJSON(l.RawValue()); err != nil { l.AddError(err) }", ind, cell)
+			g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := %s[idx].UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind, cell)
 		case kTextMarshaler:
-			g.p("%s\t\tif err := %s[idx].UnmarshalText(l.ReadTextBytes()); err != nil { l.AddError(err) }", ind, cell)
+			g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := %s[idx].UnmarshalText(txt); err != nil { l.AddError(err) } }", ind, cell)
 		case kInterface:
 			g.p("%s\t\t%s[idx] = l.ReadInterface()", ind, cell)
 		default:
-			g.p("%s\t\t%s[idx] = %s", ind, cell, f.valInfo.leafReadExpr())
+			g.p("%s\t\t%s[idx] = %s", ind, cell, g.leafReadExpr(f.valInfo))
 		}
 		g.p("%s\t}", ind)
 		g.p("%s\tif l.Err() != nil { %s }", ind, retStmt)
@@ -511,17 +702,25 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		g.p("%s}", ind)
 		g.p("%s}", ind)
 		g.emitNonNilEmptySlice(cell, sliceCellType(f.valInfo.typeStr, f.elemPtr), ind)
-		g.p("%s%s = %s", ind, target, cell)
+		finishCollection(cell)
 	case kMap:
 		cell := "a.m" + f.cellName
 		// Reuse the arena's persistent map cell across -pool decodes
 		// (clear() empties it without discarding the underlying table);
 		// aliased into target exactly like the slice cells above, with
 		// the same lifetime contract (invalidated by the next Decode).
+		// Seed the cell from an existing NON-NIL map behind target (for a
+		// pointer field: the pointer must be non-nil AND point at a
+		// non-nil map — a pointer to a nil map must not be adopted as the
+		// cell, or the first assignment would panic).
+		seedCond := target + " != nil"
+		if f.ptr {
+			seedCond += " && " + derefTarget + " != nil"
+		}
 		g.p("%sif !a.s%s {", ind, f.cellName)
 		g.p("%s\ta.s%s = true", ind, f.cellName)
-		g.p("%s\tif %s != nil {", ind, target)
-		g.p("%s\t\t%s = %s", ind, cell, target)
+		g.p("%s\tif %s {", ind, seedCond)
+		g.p("%s\t\t%s = %s", ind, cell, derefTarget)
 		g.p("%s\t} else if %s == nil {", ind, cell)
 		g.p("%s\t\t%s = make(%s)", ind, cell, f.typeStr)
 		g.p("%s\t} else {", ind)
@@ -540,7 +739,7 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 			g.p("%s\tmk := %s(string(l.ReadKey()))", ind, f.keyTypeStr)
 		}
 		g.p("%s\tvar mv %s", ind, f.valInfo.typeStr)
-		g.p("%s\tif !l.IsNull() {", ind)
+		g.emitElemNullOpen(f.valInfo, "mv", ind+"\t")
 		switch f.valInfo.kind {
 		case kCustomLeaf:
 			g.leafRead(f.valInfo.leaf, "&mv", ind+"\t\t")
@@ -553,19 +752,19 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 			g.p("%s\t\tvar ea %s", ind, arenaName(f.valInfo.elem))
 			g.p("%s\t\t%s(l, &mv, &ea)", ind, decodeName(f.valInfo.elem))
 		case kMarshaler:
-			g.p("%s\t\tif err := mv.UnmarshalJSON(l.RawValue()); err != nil { l.AddError(err) }", ind)
+			g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := mv.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
 		case kTextMarshaler:
-			g.p("%s\t\tif err := mv.UnmarshalText(l.ReadTextBytes()); err != nil { l.AddError(err) }", ind)
+			g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := mv.UnmarshalText(txt); err != nil { l.AddError(err) } }", ind)
 		case kQuotedInt:
 			if !f.valInfo.marshalOnValue {
-				g.p("%s\t\tif err := mv.UnmarshalJSON(l.RawValue()); err != nil { l.AddError(err) }", ind)
+				g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := mv.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
 			} else {
-				g.p("%s\t\tmv = %s", ind, f.valInfo.leafReadExpr())
+				g.p("%s\t\tmv = %s", ind, g.leafReadExpr(f.valInfo))
 			}
 		case kInterface:
 			g.p("%s\t\tmv = l.ReadInterface()", ind)
 		default:
-			g.p("%s\t\tmv = %s", ind, f.valInfo.leafReadExpr())
+			g.p("%s\t\tmv = %s", ind, g.leafReadExpr(f.valInfo))
 		}
 		g.p("%s\t}", ind)
 		g.p("%s\tif l.Err() != nil { %s }", ind, retStmt)
@@ -573,6 +772,23 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		g.p("%s\tif !l.NextMember() { break }", ind)
 		g.p("%s}", ind)
 		g.p("%s}", ind)
-		g.p("%s%s = %s", ind, target, cell)
+		finishCollection(cell)
 	}
+}
+
+// emitElemNullOpen opens the per-element value read: for a null-delivered
+// leaf kind it emits `if l.IsNull() { <deliver> } else {`, otherwise the
+// plain `if !l.IsNull() {`; the caller closes the block either way.
+func (g *generator) emitElemNullOpen(vi *fieldInfo, target, ind string) {
+	if vi != nil && vi.kind != kEmptyStruct && vi.kind != kStruct {
+		f := *vi
+		f.ptr = false
+		if isNullDelivered(f) {
+			g.p("%sif l.IsNull() {", ind)
+			g.emitNullDelivery(f, target, ind+"\t")
+			g.p("%s} else {", ind)
+			return
+		}
+	}
+	g.p("%sif !l.IsNull() {", ind)
 }

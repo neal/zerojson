@@ -34,6 +34,7 @@ import (
 	"github.com/mailru/easyjson/jwriter"
 
 	"github.com/neal/zerojson"
+	"github.com/neal/zerojson/conformance/internal/oracle"
 )
 
 // --- integer decode: narrow widths, TOTAL domain -------------------------
@@ -104,6 +105,40 @@ func unsignedWidths() []uintWidth {
 	}
 }
 
+// decodeQuotedSigned / decodeQuotedUnsigned run the `,string` (quoted-token)
+// reader of the given width.
+func decodeQuotedSigned(bits int, s string) (int64, bool) {
+	l := zerojson.NewLexer([]byte(s), false)
+	var v int64
+	switch bits {
+	case 8:
+		v = int64(l.ReadQuotedInt8())
+	case 16:
+		v = int64(l.ReadQuotedInt16())
+	case 32:
+		v = int64(l.ReadQuotedInt32())
+	default:
+		v = l.ReadQuotedInt64()
+	}
+	return v, l.Err() == nil
+}
+
+func decodeQuotedUnsigned(bits int, s string) (uint64, bool) {
+	l := zerojson.NewLexer([]byte(s), false)
+	var v uint64
+	switch bits {
+	case 8:
+		v = uint64(l.ReadQuotedUint8())
+	case 16:
+		v = uint64(l.ReadQuotedUint16())
+	case 32:
+		v = uint64(l.ReadQuotedUint32())
+	default:
+		v = l.ReadQuotedUint64()
+	}
+	return v, l.Err() == nil
+}
+
 // checkSignedDecode drives one width against strconv.ParseInt, the
 // independent range+value oracle: a decode must succeed exactly when
 // strconv accepts s at that bit width, and agree on the value when it does.
@@ -114,12 +149,24 @@ func checkSignedDecode(t *testing.T, w intWidth, s string) {
 
 // checkSignedDecodeOracle decodes input (which may be quoted for the
 // ,string variant) but ranges/values against oracle (the bare numeric
-// spelling strconv understands — readNumericBytes strips the quotes, so the
-// bare and quoted forms must decode identically).
+// spelling strconv understands). A quoted input goes through the width's
+// ReadQuotedInt* reader — the one `,string` fields use — and must decode
+// exactly as the bare form does through ReadInt*; the bare reader itself
+// must REJECT the quoted token, as encoding/json does for a plain numeric
+// field.
 func checkSignedDecodeOracle(t *testing.T, w intWidth, input, oracle string) {
 	t.Helper()
 	want, wErr := strconv.ParseInt(oracle, 10, w.bits)
-	got, ok := w.decode(input)
+	var got int64
+	var ok bool
+	if len(input) > 0 && input[0] == '"' {
+		if _, bareOK := w.decode(input); bareOK {
+			t.Errorf("%s bare reader accepted quoted %q", w.name, input)
+		}
+		got, ok = decodeQuotedSigned(w.bits, input)
+	} else {
+		got, ok = w.decode(input)
+	}
 	if (wErr == nil) != ok {
 		t.Errorf("%s decode %q: strconv ok=%v zerojson ok=%v", w.name, input, wErr == nil, ok)
 		return
@@ -137,7 +184,16 @@ func checkUnsignedDecode(t *testing.T, w uintWidth, s string) {
 func checkUnsignedDecodeOracle(t *testing.T, w uintWidth, input, oracle string) {
 	t.Helper()
 	want, wErr := strconv.ParseUint(oracle, 10, w.bits)
-	got, ok := w.decode(input)
+	var got uint64
+	var ok bool
+	if len(input) > 0 && input[0] == '"' {
+		if _, bareOK := w.decode(input); bareOK {
+			t.Errorf("%s bare reader accepted quoted %q", w.name, input)
+		}
+		got, ok = decodeQuotedUnsigned(w.bits, input)
+	} else {
+		got, ok = w.decode(input)
+	}
 	if (wErr == nil) != ok {
 		t.Errorf("%s decode %q: strconv ok=%v zerojson ok=%v", w.name, input, wErr == nil, ok)
 		return
@@ -538,8 +594,13 @@ func TestAppendStringByteTotal(t *testing.T) {
 		// Cross-check against stdlib except for the documented short-escape
 		// divergence, so the second independent oracle still guards the whole
 		// domain where the two encoders are defined to agree.
+		// The v2-backed encoding/json (Go 1.27+) writes an invalid UTF-8
+		// byte as the raw U+FFFD rune where classic v1, easyjson, and
+		// zerojson write the \ufffd escape; normalize so the cross-check
+		// still covers every other byte of the output.
 		if !strings.ContainsAny(s, "\b\f") {
-			if wantStd, _ := json.Marshal(s); !bytes.Equal(wantStd, got) {
+			wantStd, _ := json.Marshal(s)
+			if wantStd = oracle.ClassicUTF8(wantStd); !bytes.Equal(wantStd, got) {
 				t.Fatalf("%q: stdlib cross-check want %s got %s", s, wantStd, got)
 			}
 		}

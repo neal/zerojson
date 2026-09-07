@@ -23,17 +23,12 @@ type rawHolderStd struct {
 // rawPayloads covers every JSON value shape Raw might capture: object,
 // array (including nested), string (with an escape), number, and bool.
 //
-// Deliberately excludes a bare `"set":null` on this non-pointer field:
-// unlike json.RawMessage (which, implementing json.Unmarshaler, has
-// UnmarshalJSON invoked even for a null literal and so ends up holding
-// the 4 bytes "null"), Raw is dispatched as a zerojson custom leaf, and
-// a null on a non-pointer leaf-kind field is left untouched — the same
-// rule every other value-typed leaf (e.g. a non-pointer
-// decimal.Decimal) follows — rather than calling ReadRaw at all. This
-// is a deliberate, documented divergence from json.RawMessage's exact
-// behavior in this one corner; TestRawPointerNullClears covers null
-// through the *Raw field, where it behaves exactly like every other
-// pointer field (cleared to nil).
+// A bare `"set":null` on this non-pointer field is covered by
+// TestRawUnconditionalEmit: like json.RawMessage (whose UnmarshalJSON
+// is invoked even for a null literal and so ends up holding the 4 bytes
+// "null"), a value-typed Raw is delivered the null and holds those
+// bytes. TestRawPointerNullClears covers null through the *Raw field,
+// where it behaves exactly like every other pointer field (cleared).
 var rawPayloads = []string{
 	`{"a":1,"b":[1,2,3]}`,
 	`[1,2,3]`,
@@ -190,18 +185,23 @@ func TestRawUnconditionalEmit(t *testing.T) {
 		t.Fatalf("got %s want %s", enc, want)
 	}
 
-	// Set is a non-pointer Raw field, so — like other value-typed leaf
-	// fields (e.g. a non-pointer decimal.Decimal) — a JSON null leaves
-	// it untouched rather than clearing it; decoding into a fresh
-	// (already-nil) target can't distinguish "cleared" from "never
-	// assigned", so this only confirms it stays nil, not that null
-	// actively clears it.
-	var got RawHolder
+	// Set is a non-pointer Raw field: a JSON null is DELIVERED to it, so
+	// it holds the four bytes null afterwards — exactly what
+	// json.RawMessage (whose UnmarshalJSON is invoked with "null" by
+	// encoding/json) ends up holding — and a pre-populated value is
+	// replaced, not left stale.
+	got := RawHolder{Set: zerojson.Raw(`{"stale":true}`)}
 	if err := got.UnmarshalZJSON(enc); err != nil {
 		t.Fatal(err)
 	}
-	if got.Set != nil {
-		t.Fatalf("Set should remain untouched (nil) on null: %q", got.Set)
+	if string(got.Set) != "null" {
+		t.Fatalf("Set should hold the literal null after a null member: %q", got.Set)
+	}
+	var std struct {
+		Set json.RawMessage `json:"set"`
+	}
+	if err := json.Unmarshal(enc, &std); err != nil || string(std.Set) != "null" {
+		t.Fatalf("stdlib RawMessage oracle assumption broken: %q err=%v", std.Set, err)
 	}
 }
 
