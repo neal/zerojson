@@ -397,6 +397,12 @@ func main() {
 		guardOverwrite(*testsOut, *force)
 	}
 	src := g.generate()
+	g.guardGeneratedNames(src, *out)
+	var tsrc string
+	if *testsOut != "" {
+		tsrc = g.generateTests()
+		g.guardGeneratedNames(tsrc, *testsOut)
+	}
 	formatted, err := format.Source([]byte(src))
 	if err != nil {
 		// Write unformatted output for debugging, then fail.
@@ -409,7 +415,6 @@ func main() {
 	fmt.Printf("wrote %s (%d types)\n", *out, len(g.types))
 
 	if *testsOut != "" {
-		tsrc := g.generateTests()
 		tf, err := format.Source([]byte(tsrc))
 		if err != nil {
 			_ = os.WriteFile(*testsOut, []byte(tsrc), 0o644)
@@ -454,105 +459,6 @@ func loadPackage(dir, outPath string) *packages.Package {
 		log.Fatal("package has errors")
 	}
 	return pkgs[0]
-}
-
-// loadWithBlankedOutput tries two overlays for the previous output, in
-// order: (1) a STUB — the old file with every function body replaced by
-// a panic, which keeps its type declarations (the -pool Decoder type,
-// the arena types) so hand-written code in the package that refers to
-// them still type-checks, while the bodies that a renamed field would
-// break are gone; (2) a blank file, for the case where the stub itself
-// no longer type-checks (a type it names was renamed). Both are
-// "replaceable" views of output this run regenerates, so nothing is lost
-// by not seeing the old bodies or methods.
-func loadWithBlankedOutput(base packages.Config, absOut string) *packages.Package {
-	names, err := packages.Load(&packages.Config{Mode: packages.NeedName, Dir: base.Dir}, ".")
-	if err != nil || len(names) != 1 || names[0].Name == "" {
-		return nil
-	}
-	var overlays [][]byte
-	if stub, ok := stubOutput(absOut); ok {
-		overlays = append(overlays, stub)
-	}
-	overlays = append(overlays, []byte("package "+names[0].Name+"\n"))
-	for i, content := range overlays {
-		cfg := base
-		cfg.Overlay = map[string][]byte{absOut: content}
-		pkgs, err := packages.Load(&cfg, ".")
-		if err == nil && len(pkgs) == 1 && len(pkgs[0].Errors) == 0 {
-			return pkgs[0]
-		}
-		if os.Getenv("ZEROJSONGEN_DEBUG") != "" {
-			log.Printf("load with %s overlay #%d failed: err=%v", absOut, i+1, err)
-			if len(pkgs) == 1 {
-				for _, e := range pkgs[0].Errors {
-					log.Printf("  %v", e)
-				}
-			}
-		}
-	}
-	return nil
-}
-
-// stubOutput returns the previous generated file with every function and
-// method body replaced by `panic("regenerating")`, keeping declarations.
-func stubOutput(path string) ([]byte, bool) {
-	src, err := os.ReadFile(path)
-	if err != nil {
-		return nil, false
-	}
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, path, src, parser.ParseComments)
-	if err != nil {
-		return nil, false
-	}
-	stub := &ast.BlockStmt{List: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{
-		Fun:  ast.NewIdent("panic"),
-		Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"zerojsongen: stale generated code"`}},
-	}}}}
-	for _, d := range f.Decls {
-		if fn, ok := d.(*ast.FuncDecl); ok && fn.Body != nil {
-			fn.Body = stub
-		}
-	}
-	// Imports only the removed bodies used would now be "imported and not
-	// used" (a type-check error), so prune every import whose qualifier
-	// no longer appears in a selector expression.
-	used := map[string]bool{}
-	ast.Inspect(f, func(n ast.Node) bool {
-		if sel, ok := n.(*ast.SelectorExpr); ok {
-			if id, ok := sel.X.(*ast.Ident); ok {
-				used[id.Name] = true
-			}
-		}
-		return true
-	})
-	for _, d := range f.Decls {
-		gd, ok := d.(*ast.GenDecl)
-		if !ok || gd.Tok != token.IMPORT {
-			continue
-		}
-		var keep []ast.Spec
-		for _, sp := range gd.Specs {
-			imp := sp.(*ast.ImportSpec)
-			name := ""
-			if imp.Name != nil {
-				name = imp.Name.Name
-			} else {
-				pth := strings.Trim(imp.Path.Value, `"`)
-				name = pth[strings.LastIndex(pth, "/")+1:]
-			}
-			if name == "_" || name == "." || used[name] {
-				keep = append(keep, sp)
-			}
-		}
-		gd.Specs = keep
-	}
-	var out strings.Builder
-	if err := format.Node(&out, fset, f); err != nil {
-		return nil, false
-	}
-	return []byte(out.String()), true
 }
 
 // guardOverwrite refuses to clobber a file at path that zerojsongen (or

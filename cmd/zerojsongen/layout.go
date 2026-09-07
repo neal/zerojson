@@ -32,7 +32,13 @@ func guardOutputLayout(dir, out, testsOut string) {
 			continue
 		}
 		if strings.HasSuffix(entry.Name(), "_test.go") {
-			if testsOut != "" && !samePath(path, testsOut) {
+			if testsOut == "" {
+				// Left over from a run that passed -tests: it would keep
+				// testing the OLD codec (and stop compiling after a type
+				// rename) while looking like current output.
+				log.Fatalf("%s is generated fuzz tests from a previous -tests run and would go stale — pass -tests %s again to regenerate it with the codec, or delete it", path, entry.Name())
+			}
+			if !samePath(path, testsOut) {
 				log.Fatalf("multiple zerojson test outputs in one package are not supported (%s and %s) — reuse the existing -tests file", path, testsOut)
 			}
 		} else if !samePath(path, out) {

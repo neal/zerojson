@@ -87,12 +87,12 @@ func (l *Lexer) ReadInterface() any {
 			return nil
 		}
 		if !bareFloatOK(b) {
-			l.setErr("number %q: malformed number", b)
+			l.setErr("number %s: malformed number", errToken(b))
 			return nil
 		}
 		f, err := strconv.ParseFloat(bytesToString(b), 64)
 		if err != nil {
-			l.setErr("number %q: %v", b, err)
+			l.setErr("number %s: %v", errToken(b), numErr(err))
 		}
 		return f
 	}

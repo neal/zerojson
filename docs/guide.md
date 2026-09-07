@@ -46,7 +46,9 @@ Use one codec output and one generated fuzz file per package. Add roots to
 the same `-types` list instead of generating separate files that duplicate
 shared helpers. `-out` and `-tests` paths are relative to `-dir` unless
 absolute. The test output must be a distinct `_test.go` file, and `-tests`
-cannot be combined with `-compat`.
+cannot be combined with `-compat`. Once a package has a generated fuzz file,
+keep passing `-tests` on every run (or delete the file): the generator
+refuses to regenerate the codec while leaving that file to go stale.
 
 Hand-written custom methods are preserved during auto-discovery. Only methods
 from recognized zerojsongen/easyjson output are replaceable; an arbitrary
@@ -54,9 +56,17 @@ from recognized zerojsongen/easyjson output are replaceable; an arbitrary
 regardless of existing methods, so remove conflicting hand-written methods.
 
 The loader overlays stale generated method bodies while loading the package,
-preserving declarations needed by caller code where possible. This lets many
-field edits regenerate even if the old bodies no longer compile. Renamed
-generated types or unrelated package errors may still require manual repair.
+preserving declarations needed by caller code where possible, and prunes the
+declarations a renamed type leaves dangling. This lets field edits and type
+renames regenerate even if the old output no longer compiles, as long as
+hand-written code does not itself name a type that no longer exists (a
+`-pool` Decoder for a root you renamed, say). Unrelated package errors still
+require manual repair.
+
+Generated declarations must not collide with hand-written ones: a type named
+like a `-pool` Decoder (`EventDecoder`), or a hand-written
+`MarshalEasyJSON` on a type `-compat-easyjson` would wrap, is refused with
+its location rather than written into a file that cannot compile.
 
 The generator refuses to overwrite a file without a recognized codec header
 before the package clause; `-force` overrides that protection. It cannot detect
@@ -171,6 +181,12 @@ applies to them, not just pointer fields): don't retain `e.Items` or
 `e.Tags` past the next `Decode` either. Value-typed fields with no
 pointers, slices, or maps in their tree are unaffected (copies, as
 always).
+
+Memory: the arena keeps the high-water mark of the largest message the
+Decoder has seen and never shrinks (see
+[resource considerations](compatibility.md#resource-considerations)), so a
+`sync.Pool` of Decoders that each met one outlier pins that many peaks.
+Bound message size, or drop a Decoder after an outlier.
 
 ## Projection / passthrough decoding
 
@@ -360,7 +376,15 @@ To search for new cases, run one fuzz target from the package containing the
 generated tests:
 
 ```sh
-go test -run '^`-tests <path>` emits schema-seeded differential fuzz tests. They compare
+go test -run '^$' -fuzz '^FuzzEventZJSON$' -fuzztime 30s -parallel 1
+```
+
+Normal `go test` replays seeds; it does not start a timed fuzz campaign.
+Go saves reproducible failures under `testdata/fuzz/<target>`; keep those
+regression inputs in version control after fixing the bug. Add `-pool` to
+also generate `FuzzEventZJSONSequence`, which can be run separately.
+
+`-tests <path>` emits schema-seeded differential fuzz tests. They compare
 stdlib and zerojson acceptance, raw Go values where custom codec state permits,
 normalized re-encoding, valid output, and ordered/fallback agreement.
 Documented differences, such as quoted-int64 marker nulls and the v2-backed
@@ -380,52 +404,6 @@ remains independent.
 
 These generated tests are a starting point; add examples for your custom
 codecs and lifetime requirements.
-
-For a type whose graph carries an **invalid tag name** the two
-implementations disagree on (see [toolchain differences](compatibility.md#which-encodingjson-go-127-and-later)), the two write
-different members, so on a v2-backed toolchain the stdlib comparisons —
-and only those — are dropped for that type: the target still runs
-zerojson's own invariants (no panics on arbitrary input, valid output,
-round-trip, and agreement between the ordered fast path and the fallback
-decoder).
- -fuzz '^FuzzEventZJSON`-tests <path>` emits schema-seeded differential fuzz tests. They compare
-stdlib and zerojson acceptance, raw Go values where custom codec state permits,
-normalized re-encoding, valid output, and ordered/fallback agreement.
-Documented differences, such as quoted-int64 marker nulls and the v2-backed
-`,string` leading-plus behavior, have targeted exemptions.
-
-With `-pool`, it also emits a four-operation sequence fuzzer per explicit root.
-Operations share one decoder and mix copy/borrow modes, including invalid input
-and input-buffer scribbling. Run `-tests` without `-compat` so the stdlib oracle
-does not call zerojson's wrappers. These generated tests are a starting point;
-add examples for your custom codecs and lifetime requirements.
-
-For a type whose graph carries an **invalid tag name** the two
-implementations disagree on (see [toolchain differences](compatibility.md#which-encodingjson-go-127-and-later)), the two write
-different members, so on a v2-backed toolchain the stdlib comparisons —
-and only those — are dropped for that type: the target still runs
-zerojson's own invariants (no panics on arbitrary input, valid output,
-round-trip, and agreement between the ordered fast path and the fallback
-decoder).
- -fuzztime 30s -parallel 1
-```
-
-Normal `go test` replays seeds; it does not start a timed fuzz campaign.
-Go saves reproducible failures under `testdata/fuzz/<target>`; keep those
-regression inputs in version control after fixing the bug. Add `-pool` to
-also generate `FuzzEventZJSONSequence`, which can be run separately.
-
-`-tests <path>` emits schema-seeded differential fuzz tests. They compare
-stdlib and zerojson acceptance, raw Go values where custom codec state permits,
-normalized re-encoding, valid output, and ordered/fallback agreement.
-Documented differences, such as quoted-int64 marker nulls and the v2-backed
-`,string` leading-plus behavior, have targeted exemptions.
-
-With `-pool`, it also emits a four-operation sequence fuzzer per explicit root.
-Operations share one decoder and mix copy/borrow modes, including invalid input
-and input-buffer scribbling. Run `-tests` without `-compat` so the stdlib oracle
-does not call zerojson's wrappers. These generated tests are a starting point;
-add examples for your custom codecs and lifetime requirements.
 
 For a type whose graph carries an **invalid tag name** the two
 implementations disagree on (see [toolchain differences](compatibility.md#which-encodingjson-go-127-and-later)), the two write

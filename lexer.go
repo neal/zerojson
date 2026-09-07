@@ -58,7 +58,6 @@ func (l *Lexer) Err() error {
 	// path is rebuilt (only on the error path) each time a new enclosing
 	// field is added, always wrapping the raw error once.
 	var b strings.Builder
-	b.WriteString("field ")
 	for i := len(l.path) - 1; i >= 0; i-- {
 		b.WriteString(l.path[i])
 		if i > 0 {
@@ -73,13 +72,15 @@ func (l *Lexer) Err() error {
 // FieldError wraps a decode error with the JSON path of the field being
 // decoded when it occurred ("legs.price" — container names are not
 // suffixed with [] and element indices are not recorded), for on-call diagnosis
-// without the document. Unwrap yields the underlying error.
+// without the document. Path holds exactly that dotted path, with no
+// prefix, so it can be compared or used as a metric label; Error adds
+// the "field " prefix. Unwrap yields the underlying error.
 type FieldError struct {
 	Path string
 	Err  error
 }
 
-func (e *FieldError) Error() string { return e.Path + ": " + e.Err.Error() }
+func (e *FieldError) Error() string { return "field " + e.Path + ": " + e.Err.Error() }
 func (e *FieldError) Unwrap() error { return e.Err }
 
 // AnnotateField records that the pending error occurred while decoding
@@ -347,13 +348,14 @@ func (l *Lexer) RawValue() []byte {
 // so a subtree skipped 3 levels down has 3 fewer levels to spend, exactly
 // as Valid would count it) rather than merely brace/bracket-counted.
 //
-// This is what makes a successful decode imply the whole payload was
-// grammar-valid JSON (see README's composition story): every byte is
-// either consumed by a known field's own decode statement or
-// grammar-checked here — the two together, plus Finish's trailing-data
-// check, cover the entire document, at every level of nesting a decode
-// walks (a genuinely unknown field's value, and the ordered decoder's
-// inline skip of one, both go through this same method). The one thing
+// So every byte a decode does NOT hand to a declared field's own reader
+// is grammar-checked: unknown members (a genuinely unknown field's value,
+// and the ordered decoder's inline skip of one, both go through this
+// method), plus Finish's trailing-data check. Declared fields' readers
+// are deliberately more lenient (leading zeros in a known int, a raw
+// control byte in a known string — see the compatibility notes), which is
+// why a successful decode still does not certify the payload as strict
+// JSON; Valid does that, in one pass, when it matters. The one thing
 // this deliberately does not touch is the known-field decode primitives
 // (readStringBytes, readNumericBytes) — those stay lenient and fast; only
 // content the caller never otherwise inspects gets the stricter treatment.

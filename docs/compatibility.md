@@ -161,10 +161,11 @@ check does not validate your schema, business rules, or resource limits.
   buffer is pooled/reused (e.g. Kafka fetch buffers) unless lifetimes
   are pinned. Note that *which* strings alias is input-dependent: a
   plain string aliases, but one that needed unescaping was copied into
-  a fresh allocation, and an enum value that matched a declared constant
-  is that constant — so a test that happens to use escaped strings can
-  pass while production input (no escapes) aliases and later corrupts.
-  Treat every string from a borrow decode as aliased.
+  a fresh allocation, an enum value that matched a declared constant
+  is that constant, and an enum value that matched none was copied — so
+  a test that happens to use escaped strings or declared constants can
+  pass while production input (no escapes, an undeclared value) aliases
+  and later corrupts. Treat every string from a borrow decode as aliased.
 
 - **A pooled `Decoder` zeroes `*v` before every decode and is
   single-goroutine.** It never adopts a caller-owned map or pointee as an

@@ -286,8 +286,9 @@ func validKeyString(data []byte, pos int) (int, bool, error) {
 // and the ordered decoder's skip of an unknown key); the ordered fast path
 // never reaches here for a declared key — it matches the exact declared-
 // name literal bytes, so an escaped or control-bearing key can never
-// satisfy that compare and always falls through to this strict reader. See
-// README's validation composition story.
+// satisfy that compare and always falls through to this strict reader.
+// (Values, unlike keys, are read leniently by the declared-field readers;
+// see Skip and the compatibility notes on declared-value leniency.)
 func (l *Lexer) ReadKey() []byte {
 	l.skipWS()
 	var b []byte

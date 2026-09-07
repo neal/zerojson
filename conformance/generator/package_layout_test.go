@@ -104,6 +104,78 @@ type Root struct { V any; N *int }
 		}
 		build(dir)
 	})
+	t.Run("stale_tests_output", func(t *testing.T) {
+		// Dropping -tests after a run that passed it must not leave the
+		// generated fuzz file behind: it would keep testing the old codec
+		// and stop compiling after a rename, while looking like output.
+		dir := filepath.Join(base, "staletests")
+		write(filepath.Join(dir, "types.go"), "package p\ntype Rec struct { X int `json:\"x\"` }\n")
+		if out, err := run(dir, "Rec", "codec.go", "codec_fuzz_test.go"); err != nil {
+			t.Fatalf("generate with tests: %v %s", err, out)
+		}
+		write(filepath.Join(dir, "types.go"), "package p\ntype Record struct { X int `json:\"x\"` }\n")
+		before, _ := os.ReadFile(filepath.Join(dir, "codec.go"))
+		out, err := run(dir, "Record", "codec.go", "")
+		if err == nil || !strings.Contains(out, "previous -tests run") {
+			t.Fatalf("stale generated tests not refused: %v %s", err, out)
+		}
+		after, _ := os.ReadFile(filepath.Join(dir, "codec.go"))
+		if !bytes.Equal(before, after) {
+			t.Fatal("refusal modified the codec output")
+		}
+		if out, err := run(dir, "Record", "codec.go", "codec_fuzz_test.go"); err != nil {
+			t.Fatalf("regenerate with tests: %v %s", err, out)
+		}
+		build(dir)
+	})
+	t.Run("handwritten_name_collisions", func(t *testing.T) {
+		// A generated declaration that a hand-written one already claims
+		// is refused with its location, not written into a file that
+		// cannot compile ("redeclared in this block").
+		for _, tc := range []struct{ name, src, flag, want string }{
+			{"pool_decoder_type", "package p\ntype T struct { X int `json:\"x\"` }\ntype TDecoder struct{}\n", "-pool", "type TDecoder is already declared by hand"},
+			{"easyjson_method", "package p\nimport \"github.com/mailru/easyjson/jwriter\"\ntype T struct { X int `json:\"x\"` }\nfunc (t T) MarshalEasyJSON(w *jwriter.Writer) { w.RawString(\"{}\") }\n", "-compat-easyjson", "method T.MarshalEasyJSON is already declared by hand"},
+			{"arena_type", "package p\ntype T struct { X int `json:\"x\"` }\ntype zjArenaT int\n", "-pool", "type zjArenaT is already declared by hand"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				dir := filepath.Join(base, "collide_"+tc.name)
+				write(filepath.Join(dir, "types.go"), tc.src)
+				cmd := exec.Command(gen, "-dir", dir, "-types", "T", "-out", "codec.go", tc.flag)
+				cmd.Dir = moduleRoot
+				b, err := cmd.CombinedOutput()
+				if err == nil || !strings.Contains(string(b), tc.want) {
+					t.Fatalf("want refusal %q: %v %s", tc.want, err, b)
+				}
+				if _, err := os.Stat(filepath.Join(dir, "codec.go")); !os.IsNotExist(err) {
+					t.Fatal("refusal wrote output")
+				}
+			})
+		}
+		// The previous output's own declarations are replaceable, so
+		// regenerating in place with the same flags keeps working.
+		dir := filepath.Join(base, "collide_regen")
+		write(filepath.Join(dir, "types.go"), "package p\ntype T struct { X int `json:\"x\"` }\n")
+		for i := 0; i < 2; i++ {
+			cmd := exec.Command(gen, "-dir", dir, "-types", "T", "-out", "codec.go", "-pool", "-compat-easyjson")
+			cmd.Dir = moduleRoot
+			if b, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("regeneration %d: %v %s", i, err, b)
+			}
+		}
+		build(dir)
+	})
+	t.Run("foreign_plain_struct_message", func(t *testing.T) {
+		// A struct from another package with no codec is refused with the
+		// actual remedy (generate its codec there), not only the leaf/
+		// Marshaler suggestions.
+		write(filepath.Join(depDir, "plain.go"), "package dep\ntype Money struct { Units int64 `json:\"units\"` }\n")
+		dir := filepath.Join(base, "foreignplain")
+		write(filepath.Join(dir, "types.go"), "package p\nimport \""+depPath+"\"\ntype Root struct { M dep.Money `json:\"m\"` }\n")
+		out, err := run(dir, "Root", "codec.go", "")
+		if err == nil || !strings.Contains(out, "run zerojsongen in "+depPath+" with -types Money") {
+			t.Fatalf("want remedy in refusal: %v %s", err, out)
+		}
+	})
 	t.Run("multiple_outputs", func(t *testing.T) {
 		dir := filepath.Join(base, "multiple")
 		write(filepath.Join(dir, "types.go"), "package p\ntype Shared struct { N int }; type A struct { S Shared }; type B struct { S Shared }\n")

@@ -231,7 +231,7 @@ func (l *Lexer) parseSigned(b []byte, maxPos uint64) int64 {
 	}
 	v, ok := parseDigitsBounded(b, limit)
 	if !ok {
-		l.setErr("integer %q out of range or malformed", b)
+		l.setErr("integer %s out of range or malformed", errToken(b))
 		return 0
 	}
 	if neg {
@@ -264,7 +264,7 @@ func (l *Lexer) parseUnsigned(b []byte, limit uint64) uint64 {
 	}
 	v, ok := parseDigitsBounded(b, limit)
 	if !ok {
-		l.setErr("unsigned integer %q out of range or malformed", b)
+		l.setErr("unsigned integer %s out of range or malformed", errToken(b))
 		return 0
 	}
 	return v
@@ -321,12 +321,12 @@ func (l *Lexer) ReadFloat32() float32 {
 		return 0
 	}
 	if !bareFloatOK(b) {
-		l.setErr("float %q: malformed number", b)
+		l.setErr("float %s: malformed number", errToken(b))
 		return 0
 	}
 	f, err := strconv.ParseFloat(bytesToString(b), 32)
 	if err != nil {
-		l.setErr("float %q: %v", b, err)
+		l.setErr("float %s: %v", errToken(b), numErr(err))
 		return 0
 	}
 	return float32(f)
@@ -342,12 +342,12 @@ func (l *Lexer) ReadFloat64() float64 {
 		return 0
 	}
 	if !bareFloatOK(b) {
-		l.setErr("float %q: malformed number", b)
+		l.setErr("float %s: malformed number", errToken(b))
 		return 0
 	}
 	f, err := strconv.ParseFloat(bytesToString(b), 64)
 	if err != nil {
-		l.setErr("float %q: %v", b, err)
+		l.setErr("float %s: %v", errToken(b), numErr(err))
 	}
 	return f
 }
@@ -373,7 +373,7 @@ func (l *Lexer) ReadJSONNumber() string {
 		return ""
 	}
 	if end, err := validNumber(b, 0); err != nil || end != len(b) {
-		l.setErr("json.Number %q: invalid number literal", b)
+		l.setErr("json.Number %s: invalid number literal", errToken(b))
 		return ""
 	}
 	return string(b)
@@ -387,7 +387,7 @@ func AppendJSONNumber(dst []byte, n string) ([]byte, error) {
 		return append(dst, '0'), nil
 	}
 	if end, err := validNumber([]byte(n), 0); err != nil || end != len(n) {
-		return dst, fmt.Errorf("json: invalid number literal %q", n)
+		return dst, fmt.Errorf("json: invalid number literal %s", errToken([]byte(n)))
 	}
 	return append(dst, n...), nil
 }
@@ -421,4 +421,29 @@ func (l *Lexer) IsQuotedNull() bool {
 	}
 	l.pos = start
 	return false
+}
+
+// errTokenMax bounds how much of an offending token a decode error quotes.
+// The whole token would make the error as large as the input (twice as
+// large, with strconv's own copy): a service logging decode errors would
+// then amplify a hostile 10 MB number into 20 MB of log per request.
+const errTokenMax = 32
+
+// errToken renders a token for an error message: quoted whole when short,
+// otherwise its first errTokenMax bytes, an ellipsis, and the length.
+func errToken(b []byte) string {
+	if len(b) <= errTokenMax {
+		return strconv.Quote(string(b))
+	}
+	return strconv.Quote(string(b[:errTokenMax])) + fmt.Sprintf("... (%d bytes)", len(b))
+}
+
+// numErr strips strconv's copy of the token from a NumError, leaving the
+// reason ("value out of range", "invalid syntax") — the token is already
+// in the message, bounded, via errToken.
+func numErr(err error) error {
+	if ne, ok := err.(*strconv.NumError); ok {
+		return ne.Err
+	}
+	return err
 }

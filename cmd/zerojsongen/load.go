@@ -662,6 +662,12 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 		return
 	}
 
+	if named, ok := types.Unalias(t).(*types.Named); ok && named.Obj().Pkg() != nil && named.Obj().Pkg() != g.pkg.Types {
+		if _, isStruct := named.Underlying().(*types.Struct); isStruct {
+			log.Fatalf("%s: %s is a struct from another package with no codec — run zerojsongen in %s with -types %s (its generated AppendZJSON/ReadZJSON pair is then delegated to here), register it with -leaf, or implement MarshalJSON/UnmarshalJSON on it",
+				ctx, t, named.Obj().Pkg().Path(), named.Obj().Name())
+		}
+	}
 	log.Fatalf("%s: unsupported field type %s — add it to the generator's leaf table or implement MarshalJSON/UnmarshalJSON", ctx, t)
 }
 
