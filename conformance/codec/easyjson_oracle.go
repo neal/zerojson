@@ -3,7 +3,7 @@
 // types — so every field-type-level custom Marshaler/TextMarshaler
 // (Tags, IDList, StrInt64, YMD) is picked up identically), annotated for
 // real easyjson code generation. This gives the value-space fuzzer
-// (valuefuzz_test.go) a genuine, independently generated easyjson
+// (value_fuzz_test.go) a genuine, independently generated easyjson
 // oracle for Event's shape, rather than relying only on encoding/json
 // (which, per this project's contract, is the decode oracle — encode's
 // primary contract is byte-identity with easyjson specifically).

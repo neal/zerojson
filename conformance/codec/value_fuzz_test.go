@@ -13,7 +13,7 @@ import (
 	decimal "github.com/neal/zerojson/conformance/internal/testleaf"
 )
 
-// valuefuzz_test.go is a value-space encode fuzzer. Every other fuzzer in this package (FuzzDecodeAgainstStdlib,
+// value_fuzz_test.go is a value-space encode fuzzer. Every other fuzzer in this package (FuzzDecodeAgainstStdlib,
 // FuzzOrderedVsFallback, the generated FuzzEventZJSON, ...) starts from
 // JSON *bytes* and decodes them into a Event — which can only ever
 // reach encoder states that are also reachable by round-tripping valid

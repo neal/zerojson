@@ -46,7 +46,7 @@ Coverage and its oracles (extended campaigns run only when requested):
 
 | Property | Oracle(s) | Where |
 |---|---|---|
-| Encode byte-identity | easyjson (real generated code) | `codec/event_codec_test.go` (`TestByteIdenticalToStdlib`* against stdlib too, since the two agree for the fixture), `codec/valuefuzz_test.go`'s `FuzzEventValueSpaceEncode` (value-space, not JSON-text-space — reaches NaN/Inf, invalid UTF-8, extreme decimals) |
+| Encode byte-identity | easyjson (real generated code) | `codec/event_codec_test.go` (`TestByteIdenticalToStdlib`* against stdlib too, since the two agree for the fixture), `codec/value_fuzz_test.go`'s `FuzzEventValueSpaceEncode` (value-space, not JSON-text-space — reaches NaN/Inf, invalid UTF-8, extreme decimals) |
 | Decode semantics | `encoding/json` v1 (primary contract) | `codec/event_codec_test.go`'s `FuzzDecodeAgainstStdlib`, `TestRoundTripAgainstStdlib` |
 | Raw decoded Go-value semantics | `encoding/json` v1, compared before re-encoding can normalize differences | `codec/string_behavior_fuzz_test.go` plus each generated per-type fuzzer; opaque custom-codec fields are excluded field-by-field |
 | Generator method/addressability semantics | `encoding/json` over an oracle alias in a freshly generated fixture package | `generator/behavior_test.go`; systematically crosses JSON/Text, value/pointer receivers, and direct/slice/map positions |

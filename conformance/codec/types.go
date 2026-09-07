@@ -255,7 +255,7 @@ type Event struct {
 	// empirical pin against real easyjson-generated output, and the
 	// README's compatibility contract). With the embed declared last,
 	// the two conventions coincide, letting the value-space fuzzer
-	// (valuefuzz_test.go) byte-compare Event against its easyjson
+	// (value_fuzz_test.go) byte-compare Event against its easyjson
 	// oracle without tripping over the ordering policy on every input.
 	Audit
 }

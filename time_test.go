@@ -43,3 +43,45 @@ func TestParseRFC3339ZFastPath(t *testing.T) {
 		}
 	}
 }
+
+// TestReadTimeFastPathFallbacks hits the parseRFC3339Z fast-path
+// rejection branches that fall back to time.Parse: a non-digit where a
+// digit is required, and a '.' with zero fractional digits.
+func TestReadTimeFastPathFallbacks(t *testing.T) {
+	for _, s := range []string{
+		`"2O26-01-01T00:00:00Z"`,  // letter 'O' in the year: d2 sets bad=true
+		`"1970-01-01T00:00:00.Z"`, // '.' then no fraction digits: n == 0
+	} {
+		l := NewLexer([]byte(s), false)
+		_ = l.ReadTime()
+		if l.Err() == nil {
+			t.Fatalf("ReadTime(%s) accepted a malformed timestamp", s)
+		}
+	}
+}
+
+// TestReadTimeYearZero decodes the year-0000 UTC timestamp, whose
+// pre-1970 day-count arithmetic drives floorDiv into its q-- adjustment
+// branch (a negative dividend with a nonzero remainder).
+func TestReadTimeYearZero(t *testing.T) {
+	l := NewLexer([]byte(`"0000-01-01T00:00:00Z"`), false)
+	tm := l.ReadTime()
+	if l.Err() != nil {
+		t.Fatalf("ReadTime year 0000 errored: %v", l.Err())
+	}
+	if tm.Year() != 0 || tm.Month() != 1 || tm.Day() != 1 {
+		t.Fatalf("ReadTime year 0000 = %v", tm)
+	}
+}
+
+func TestEscapedTimestamp(t *testing.T) {
+	want, _ := time.Parse(time.RFC3339, "2024-05-06T07:08:09Z")
+	l := NewLexer([]byte(`"\u0032024-05-06T07:08:09Z"`), false) // \u0032 is "2"
+	if got := l.ReadTime(); l.Err() != nil || !got.Equal(want) {
+		t.Fatalf("escaped timestamp: %v err=%v", got, l.Err())
+	}
+	l = NewLexer([]byte(`"2024-05-06T07:08:09\u005a"`), false)
+	if got := l.ReadTime(); l.Err() != nil || got.Year() != 2024 || got.Second() != 9 {
+		t.Fatalf("escaped Z timestamp: %v err=%v", got, l.Err())
+	}
+}

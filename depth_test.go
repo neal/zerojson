@@ -174,3 +174,25 @@ func TestEmptyContainersCountTowardDepth(t *testing.T) {
 		t.Fatalf("%d nested objects ending in {} must be rejected", maxDepth+1)
 	}
 }
+
+// TestReadInterfaceDepthExceeded hits the max-nesting-depth error
+// branches of ReadInterface for BOTH objects and arrays (each has its own
+// depth check; the merged run showed the object branch uncovered because
+// the linearity suite only nests to 8000, under the 10000 cap).
+func TestReadInterfaceDepthExceeded(t *testing.T) {
+	deep := maxDepth + 1
+	cases := map[string][]byte{
+		"array":  []byte(strings.Repeat("[", deep)),
+		"object": []byte(strings.Repeat(`{"a":`, deep)),
+	}
+	for name, data := range cases {
+		l := NewLexer(data, false)
+		_ = l.ReadInterface()
+		if l.Err() == nil {
+			t.Fatalf("%s: ReadInterface accepted depth %d > maxDepth %d", name, deep, maxDepth)
+		}
+		if !strings.Contains(l.Err().Error(), "depth") {
+			t.Fatalf("%s: expected a depth error, got %v", name, l.Err())
+		}
+	}
+}

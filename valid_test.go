@@ -117,3 +117,18 @@ func BenchmarkValid(b *testing.B) {
 		}
 	}
 }
+
+// TestSyntaxErrorError calls SyntaxError.Error via a real Valid
+// failure.
+func TestSyntaxErrorError(t *testing.T) {
+	err := Valid([]byte("{bad"))
+	if err == nil {
+		t.Fatal("Valid accepted malformed input")
+	}
+	if err.Error() == "" {
+		t.Fatal("SyntaxError.Error() returned empty string")
+	}
+	if _, ok := err.(*SyntaxError); !ok {
+		t.Fatalf("Valid returned %T, want *SyntaxError", err)
+	}
+}

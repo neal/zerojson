@@ -431,3 +431,75 @@ func TestJSONNumberAndQuotedNull(t *testing.T) {
 		}
 	}
 }
+
+// TestAddErrorFirstErrorWins hits the assignment branch of AddError (a delegated
+// UnmarshalJSON error recorded into a fresh Lexer).
+func TestAddErrorFirstErrorWins(t *testing.T) {
+	var l Lexer
+	l.AddError(errString("boom"))
+	if l.Err() == nil || l.Err().Error() != "boom" {
+		t.Fatalf("AddError did not record: %v", l.Err())
+	}
+	// A second error must not overwrite the first.
+	l.AddError(errString("second"))
+	if l.Err().Error() != "boom" {
+		t.Fatalf("AddError overwrote the first error: %v", l.Err())
+	}
+	// A nil error is a no-op even on a clean lexer.
+	var l2 Lexer
+	l2.AddError(nil)
+	if l2.Err() != nil {
+		t.Fatalf("AddError(nil) set an error: %v", l2.Err())
+	}
+}
+
+// TestLexerDelimiterHelpers exercises the two exported helpers that the
+// generated code does not call but that remain public API for
+// hand-written decoders.
+func TestLexerDelimiterHelpers(t *testing.T) {
+	l := NewLexer([]byte("  , x"), false)
+	if !l.IsDelim(',') {
+		t.Fatal("IsDelim(',') = false, want true (whitespace-skipped)")
+	}
+	if l.IsDelim('}') {
+		t.Fatal("IsDelim('}') = true, want false")
+	}
+	l.WantComma() // consumes the comma
+	if l.IsDelim(',') {
+		t.Fatal("WantComma did not consume the comma")
+	}
+	// WantComma is a no-op when the next byte is not a comma.
+	before := l.Pos()
+	l.WantComma()
+	if l.Pos() != before {
+		t.Fatalf("WantComma consumed a non-comma byte: %d -> %d", before, l.Pos())
+	}
+}
+
+// TestSkipPreservesExistingErrorPosition hits Skip's guard that returns immediately when
+// the Lexer already carries an error.
+func TestSkipPreservesExistingErrorPosition(t *testing.T) {
+	l := NewLexer([]byte("123"), false)
+	l.AddError(errString("pre-existing"))
+	posBefore := l.Pos()
+	l.Skip()
+	if l.Pos() != posBefore {
+		t.Fatalf("Skip advanced past an existing error: %d -> %d", posBefore, l.Pos())
+	}
+}
+
+// TestLexerDataAndPosition exercises the Data/Pos accessors.
+func TestLexerDataAndPosition(t *testing.T) {
+	in := []byte(`{"a":1}`)
+	l := NewLexer(in, false)
+	if got := l.Data(); string(got) != string(in) {
+		t.Fatalf("Data() = %q, want %q", got, in)
+	}
+	if l.Pos() != 0 {
+		t.Fatalf("Pos() = %d, want 0", l.Pos())
+	}
+}
+
+type errString string
+
+func (e errString) Error() string { return string(e) }
