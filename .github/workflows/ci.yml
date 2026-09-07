@@ -22,16 +22,25 @@ env:
 
 jobs:
   verify:
-    name: Test, vet, and generated files
+    name: Test, vet, and generated files (Go ${{ matrix.go }})
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # go.work pins the minimum (1.26). The newest stable line is tested
+        # too so that a stdlib change in the encoding/json oracle — as with
+        # Go 1.27's v2-backed encoding/json — shows up before a release,
+        # not after: the conformance suite compares against stdlib by
+        # design, so it is the first thing to notice such drift.
+        go: ["1.26.x", "1.27.x"]
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.work
+          go-version: ${{ matrix.go }}
           cache-dependency-path: |
             go.work.sum
             **/go.sum
