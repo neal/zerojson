@@ -193,8 +193,14 @@ func (g *generator) emitSlicePublication(f fieldInfo, target, cell, ind string) 
 		present += " && " + source + " != nil"
 	}
 	g.p("%sif %s {", ind, present)
+	// The target may hand back the arena's own cell: the ordered path
+	// published it and then rewound to the keyed decoder, or the member
+	// is duplicated. That storage is still ours to recycle on the next
+	// pooled call; only a header over SOME OTHER array (supplied by the
+	// caller or a callback) is borrowed — and once borrowed, handing the
+	// same foreign header back again keeps it borrowed.
+	g.p("%s\ta.sliceBorrowed%s = a.sliceBorrowed%s || !zerojson.SameBacking(%s, %s)", ind, f.cellName, f.cellName, source, cell)
 	g.p("%s\t%s = %s", ind, cell, source)
-	g.p("%s\ta.sliceBorrowed%s = true", ind, f.cellName)
 	g.p("%s} else if a.slicePublished%s || a.sliceBorrowed%s {", ind, f.cellName, f.cellName)
 	g.p("%s\t%s = nil", ind, cell)
 	g.p("%s\ta.sliceBorrowed%s = false", ind, f.cellName)
@@ -729,8 +735,10 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		// header since this field last appeared. Re-adopt it on every member.
 		g.p("%s{", ind)
 		g.p("%s\tif %s {", ind, seedCond)
+		// The arena's own map handed back (ordered rewind, duplicate
+		// member) stays owned; see emitSlicePublication.
+		g.p("%s\t\ta.owned%s = a.owned%s && zerojson.SameMap(%s, %s)", ind, f.cellName, f.cellName, derefTarget, cell)
 		g.p("%s\t\t%s = %s", ind, cell, derefTarget)
-		g.p("%s\t\ta.owned%s = false", ind, f.cellName)
 		g.p("%s\t} else if %s == nil || !a.owned%s || a.mapPublished%s {", ind, cell, f.cellName, f.cellName)
 		g.p("%s\t\t%s = make(%s)", ind, cell, f.typeStr)
 		g.p("%s\t\ta.owned%s = true", ind, f.cellName)

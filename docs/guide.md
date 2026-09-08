@@ -224,7 +224,9 @@ members are supported; unknown values are grammar-checked without being
 materialized.
 
 Out-of-order or duplicate keys, escaped keys, and syntax the matcher cannot
-consume cause a rewind to the keyed decoder. **A value or grammar error is
+consume cause a rewind to the keyed decoder (a rewind does not cost a
+pooled Decoder its reuse: members the fast path already filled are
+re-read into the same arena cells). **A value or grammar error is
 final; it does not trigger a second parse.** The two paths share field readers
 and are compared by differential tests.
 

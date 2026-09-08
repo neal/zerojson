@@ -713,8 +713,8 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 			zjDecode_EventMeta(l, v.MetaPtr, &a.a15)
 		case "items":
 			if v.Items != nil {
+				a.sliceBorrowed16 = a.sliceBorrowed16 || !zerojson.SameBacking(v.Items, a.c16)
 				a.c16 = v.Items
-				a.sliceBorrowed16 = true
 			} else if a.slicePublished16 || a.sliceBorrowed16 {
 				a.c16 = nil
 				a.sliceBorrowed16 = false
@@ -747,8 +747,8 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 			v.Items = a.c16
 		case "ptr_items":
 			if v.PtrItems != nil {
+				a.sliceBorrowed17 = a.sliceBorrowed17 || !zerojson.SameBacking(v.PtrItems, a.c17)
 				a.c17 = v.PtrItems
-				a.sliceBorrowed17 = true
 			} else if a.slicePublished17 || a.sliceBorrowed17 {
 				a.c17 = nil
 				a.sliceBorrowed17 = false
@@ -783,8 +783,8 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 			v.PtrItems = a.c17
 		case "names":
 			if v.Names != nil {
+				a.sliceBorrowed18 = a.sliceBorrowed18 || !zerojson.SameBacking(v.Names, a.c18)
 				a.c18 = v.Names
-				a.sliceBorrowed18 = true
 			} else if a.slicePublished18 || a.sliceBorrowed18 {
 				a.c18 = nil
 				a.sliceBorrowed18 = false
@@ -854,8 +854,8 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 		case "amounts":
 			{
 				if v.Amounts != nil {
+					a.owned27 = a.owned27 && zerojson.SameMap(v.Amounts, a.m27)
 					a.m27 = v.Amounts
-					a.owned27 = false
 				} else if a.m27 == nil || !a.owned27 || a.mapPublished27 {
 					a.m27 = make(map[string]testleaf.Decimal)
 					a.owned27 = true
@@ -894,8 +894,8 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 		case "bag":
 			{
 				if v.Bag != nil {
+					a.owned29 = a.owned29 && zerojson.SameMap(v.Bag, a.m29)
 					a.m29 = v.Bag
-					a.owned29 = false
 				} else if a.m29 == nil || !a.owned29 || a.mapPublished29 {
 					a.m29 = make(map[string]any)
 					a.owned29 = true
@@ -923,8 +923,8 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 			v.Bag = a.m29
 		case "any_list":
 			if v.AnyList != nil {
+				a.sliceBorrowed30 = a.sliceBorrowed30 || !zerojson.SameBacking(v.AnyList, a.c30)
 				a.c30 = v.AnyList
-				a.sliceBorrowed30 = true
 			} else if a.slicePublished30 || a.sliceBorrowed30 {
 				a.c30 = nil
 				a.sliceBorrowed30 = false
@@ -1740,8 +1740,8 @@ func zjDecodeOrderedField_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *
 		*v.Ptr = int(l.ReadInt())
 	case 6:
 		if v.NilSlice != nil {
+			a.sliceBorrowed6 = a.sliceBorrowed6 || !zerojson.SameBacking(v.NilSlice, a.c6)
 			a.c6 = v.NilSlice
-			a.sliceBorrowed6 = true
 		} else if a.slicePublished6 || a.sliceBorrowed6 {
 			a.c6 = nil
 			a.sliceBorrowed6 = false
@@ -1776,8 +1776,8 @@ func zjDecodeOrderedField_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *
 		v.NilSlice = a.c6
 	case 7:
 		if v.EmptySlice != nil {
+			a.sliceBorrowed7 = a.sliceBorrowed7 || !zerojson.SameBacking(v.EmptySlice, a.c7)
 			a.c7 = v.EmptySlice
-			a.sliceBorrowed7 = true
 		} else if a.slicePublished7 || a.sliceBorrowed7 {
 			a.c7 = nil
 			a.sliceBorrowed7 = false
@@ -1978,8 +1978,8 @@ func zjDecodeFallback_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjAr
 			*v.Ptr = int(l.ReadInt())
 		case "nil_slice":
 			if v.NilSlice != nil {
+				a.sliceBorrowed6 = a.sliceBorrowed6 || !zerojson.SameBacking(v.NilSlice, a.c6)
 				a.c6 = v.NilSlice
-				a.sliceBorrowed6 = true
 			} else if a.slicePublished6 || a.sliceBorrowed6 {
 				a.c6 = nil
 				a.sliceBorrowed6 = false
@@ -2014,8 +2014,8 @@ func zjDecodeFallback_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjAr
 			v.NilSlice = a.c6
 		case "empty_slice":
 			if v.EmptySlice != nil {
+				a.sliceBorrowed7 = a.sliceBorrowed7 || !zerojson.SameBacking(v.EmptySlice, a.c7)
 				a.c7 = v.EmptySlice
-				a.sliceBorrowed7 = true
 			} else if a.slicePublished7 || a.sliceBorrowed7 {
 				a.c7 = nil
 				a.sliceBorrowed7 = false
@@ -4232,8 +4232,8 @@ func zjDecodeOrderedField_InteractionOmitZero(l *zerojson.Lexer, v *InteractionO
 		v.Odd = OddInt(l.ReadInt())
 	case 3:
 		if v.Items != nil {
+			a.sliceBorrowed3 = a.sliceBorrowed3 || !zerojson.SameBacking(v.Items, a.c3)
 			a.c3 = v.Items
-			a.sliceBorrowed3 = true
 		} else if a.slicePublished3 || a.sliceBorrowed3 {
 			a.c3 = nil
 			a.sliceBorrowed3 = false
@@ -4398,8 +4398,8 @@ func zjDecodeFallback_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZ
 			v.Odd = OddInt(l.ReadInt())
 		case "items":
 			if v.Items != nil {
+				a.sliceBorrowed3 = a.sliceBorrowed3 || !zerojson.SameBacking(v.Items, a.c3)
 				a.c3 = v.Items
-				a.sliceBorrowed3 = true
 			} else if a.slicePublished3 || a.sliceBorrowed3 {
 				a.c3 = nil
 				a.sliceBorrowed3 = false
@@ -4651,8 +4651,8 @@ func zjDecodeFallback_MapPointerMethods(l *zerojson.Lexer, v *MapPointerMethods,
 		case "values":
 			{
 				if v.Values != nil {
+					a.owned0 = a.owned0 && zerojson.SameMap(v.Values, a.m0)
 					a.m0 = v.Values
-					a.owned0 = false
 				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 					a.m0 = make(map[string]PointerOnlyJSON)
 					a.owned0 = true
@@ -4689,8 +4689,8 @@ func zjDecodeFallback_MapPointerMethods(l *zerojson.Lexer, v *MapPointerMethods,
 		case "numbers":
 			{
 				if v.Numbers != nil {
+					a.owned1 = a.owned1 && zerojson.SameMap(v.Numbers, a.m1)
 					a.m1 = v.Numbers
-					a.owned1 = false
 				} else if a.m1 == nil || !a.owned1 || a.mapPublished1 {
 					a.m1 = make(map[string]PointerOnlyQuoted)
 					a.owned1 = true
@@ -4947,8 +4947,8 @@ func zjDecodeFallback_ReuseSemantics(l *zerojson.Lexer, v *ReuseSemantics, a *zj
 		case "values":
 			{
 				if v.Values != nil {
+					a.owned0 = a.owned0 && zerojson.SameMap(v.Values, a.m0)
 					a.m0 = v.Values
-					a.owned0 = false
 				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 					a.m0 = make(map[string]int)
 					a.owned0 = true
@@ -5700,8 +5700,8 @@ func zjDecodeOrderedField_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjAren
 		*v.Ptr = []byte(l.ReadBytesBase64())
 	case 2:
 		if v.Lists != nil {
+			a.sliceBorrowed2 = a.sliceBorrowed2 || !zerojson.SameBacking(v.Lists, a.c2)
 			a.c2 = v.Lists
-			a.sliceBorrowed2 = true
 		} else if a.slicePublished2 || a.sliceBorrowed2 {
 			a.c2 = nil
 			a.sliceBorrowed2 = false
@@ -5737,8 +5737,8 @@ func zjDecodeOrderedField_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjAren
 	case 3:
 		{
 			if v.Index != nil {
+				a.owned3 = a.owned3 && zerojson.SameMap(v.Index, a.m3)
 				a.m3 = v.Index
-				a.owned3 = false
 			} else if a.m3 == nil || !a.owned3 || a.mapPublished3 {
 				a.m3 = make(map[string][]byte)
 				a.owned3 = true
@@ -5886,8 +5886,8 @@ func zjDecodeFallback_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaByt
 			*v.Ptr = []byte(l.ReadBytesBase64())
 		case "lists":
 			if v.Lists != nil {
+				a.sliceBorrowed2 = a.sliceBorrowed2 || !zerojson.SameBacking(v.Lists, a.c2)
 				a.c2 = v.Lists
-				a.sliceBorrowed2 = true
 			} else if a.slicePublished2 || a.sliceBorrowed2 {
 				a.c2 = nil
 				a.sliceBorrowed2 = false
@@ -5923,8 +5923,8 @@ func zjDecodeFallback_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaByt
 		case "index":
 			{
 				if v.Index != nil {
+					a.owned3 = a.owned3 && zerojson.SameMap(v.Index, a.m3)
 					a.m3 = v.Index
-					a.owned3 = false
 				} else if a.m3 == nil || !a.owned3 || a.mapPublished3 {
 					a.m3 = make(map[string][]byte)
 					a.owned3 = true
@@ -7687,8 +7687,8 @@ func zjDecodeOrderedField_PointerCollections(l *zerojson.Lexer, v *PointerCollec
 	switch k {
 	case 0:
 		if v.Names != nil && *v.Names != nil {
+			a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(*v.Names, a.c0)
 			a.c0 = *v.Names
-			a.sliceBorrowed0 = true
 		} else if a.slicePublished0 || a.sliceBorrowed0 {
 			a.c0 = nil
 			a.sliceBorrowed0 = false
@@ -7734,8 +7734,8 @@ func zjDecodeOrderedField_PointerCollections(l *zerojson.Lexer, v *PointerCollec
 	case 1:
 		{
 			if v.Index != nil && (*v.Index) != nil {
+				a.owned1 = a.owned1 && zerojson.SameMap((*v.Index), a.m1)
 				a.m1 = (*v.Index)
-				a.owned1 = false
 			} else if a.m1 == nil || !a.owned1 || a.mapPublished1 {
 				a.m1 = make(map[string]int)
 				a.owned1 = true
@@ -7773,8 +7773,8 @@ func zjDecodeOrderedField_PointerCollections(l *zerojson.Lexer, v *PointerCollec
 		*v.Index = a.m1
 	case 2:
 		if v.Legs != nil && *v.Legs != nil {
+			a.sliceBorrowed2 = a.sliceBorrowed2 || !zerojson.SameBacking(*v.Legs, a.c2)
 			a.c2 = *v.Legs
-			a.sliceBorrowed2 = true
 		} else if a.slicePublished2 || a.sliceBorrowed2 {
 			a.c2 = nil
 			a.sliceBorrowed2 = false
@@ -7818,8 +7818,8 @@ func zjDecodeOrderedField_PointerCollections(l *zerojson.Lexer, v *PointerCollec
 	case 3:
 		{
 			if v.Tags != nil && (*v.Tags) != nil {
+				a.owned3 = a.owned3 && zerojson.SameMap((*v.Tags), a.m3)
 				a.m3 = (*v.Tags)
-				a.owned3 = false
 			} else if a.m3 == nil || !a.owned3 || a.mapPublished3 {
 				a.m3 = make(map[string]string)
 				a.owned3 = true
@@ -7963,8 +7963,8 @@ func zjDecodeFallback_PointerCollections(l *zerojson.Lexer, v *PointerCollection
 		switch string(key) {
 		case "names":
 			if v.Names != nil && *v.Names != nil {
+				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(*v.Names, a.c0)
 				a.c0 = *v.Names
-				a.sliceBorrowed0 = true
 			} else if a.slicePublished0 || a.sliceBorrowed0 {
 				a.c0 = nil
 				a.sliceBorrowed0 = false
@@ -8010,8 +8010,8 @@ func zjDecodeFallback_PointerCollections(l *zerojson.Lexer, v *PointerCollection
 		case "index":
 			{
 				if v.Index != nil && (*v.Index) != nil {
+					a.owned1 = a.owned1 && zerojson.SameMap((*v.Index), a.m1)
 					a.m1 = (*v.Index)
-					a.owned1 = false
 				} else if a.m1 == nil || !a.owned1 || a.mapPublished1 {
 					a.m1 = make(map[string]int)
 					a.owned1 = true
@@ -8049,8 +8049,8 @@ func zjDecodeFallback_PointerCollections(l *zerojson.Lexer, v *PointerCollection
 			*v.Index = a.m1
 		case "legs":
 			if v.Legs != nil && *v.Legs != nil {
+				a.sliceBorrowed2 = a.sliceBorrowed2 || !zerojson.SameBacking(*v.Legs, a.c2)
 				a.c2 = *v.Legs
-				a.sliceBorrowed2 = true
 			} else if a.slicePublished2 || a.sliceBorrowed2 {
 				a.c2 = nil
 				a.sliceBorrowed2 = false
@@ -8094,8 +8094,8 @@ func zjDecodeFallback_PointerCollections(l *zerojson.Lexer, v *PointerCollection
 		case "tags":
 			{
 				if v.Tags != nil && (*v.Tags) != nil {
+					a.owned3 = a.owned3 && zerojson.SameMap((*v.Tags), a.m3)
 					a.m3 = (*v.Tags)
-					a.owned3 = false
 				} else if a.m3 == nil || !a.owned3 || a.mapPublished3 {
 					a.m3 = make(map[string]string)
 					a.owned3 = true
@@ -8520,8 +8520,8 @@ func zjDecodeOrderedField_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjAr
 		*v.NP = json_.Number(l.ReadJSONNumber())
 	case 3:
 		if v.NS != nil {
+			a.sliceBorrowed3 = a.sliceBorrowed3 || !zerojson.SameBacking(v.NS, a.c3)
 			a.c3 = v.NS
-			a.sliceBorrowed3 = true
 		} else if a.slicePublished3 || a.sliceBorrowed3 {
 			a.c3 = nil
 			a.sliceBorrowed3 = false
@@ -8557,8 +8557,8 @@ func zjDecodeOrderedField_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjAr
 	case 4:
 		{
 			if v.NM != nil {
+				a.owned4 = a.owned4 && zerojson.SameMap(v.NM, a.m4)
 				a.m4 = v.NM
-				a.owned4 = false
 			} else if a.m4 == nil || !a.owned4 || a.mapPublished4 {
 				a.m4 = make(map[string]json_.Number)
 				a.owned4 = true
@@ -8759,8 +8759,8 @@ func zjDecodeFallback_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaN
 			*v.NP = json_.Number(l.ReadJSONNumber())
 		case "ns":
 			if v.NS != nil {
+				a.sliceBorrowed3 = a.sliceBorrowed3 || !zerojson.SameBacking(v.NS, a.c3)
 				a.c3 = v.NS
-				a.sliceBorrowed3 = true
 			} else if a.slicePublished3 || a.sliceBorrowed3 {
 				a.c3 = nil
 				a.sliceBorrowed3 = false
@@ -8796,8 +8796,8 @@ func zjDecodeFallback_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaN
 		case "nm":
 			{
 				if v.NM != nil {
+					a.owned4 = a.owned4 && zerojson.SameMap(v.NM, a.m4)
 					a.m4 = v.NM
-					a.owned4 = false
 				} else if a.m4 == nil || !a.owned4 || a.mapPublished4 {
 					a.m4 = make(map[string]json_.Number)
 					a.owned4 = true
@@ -9111,8 +9111,8 @@ func zjDecodeFallback_NullCases(l *zerojson.Lexer, v *NullCases, a *zjArenaNullC
 			}
 		case "many":
 			if v.Many != nil {
+				a.sliceBorrowed1 = a.sliceBorrowed1 || !zerojson.SameBacking(v.Many, a.c1)
 				a.c1 = v.Many
-				a.sliceBorrowed1 = true
 			} else if a.slicePublished1 || a.sliceBorrowed1 {
 				a.c1 = nil
 				a.sliceBorrowed1 = false
@@ -9156,8 +9156,8 @@ func zjDecodeFallback_NullCases(l *zerojson.Lexer, v *NullCases, a *zjArenaNullC
 		case "index":
 			{
 				if v.Index != nil {
+					a.owned2 = a.owned2 && zerojson.SameMap(v.Index, a.m2)
 					a.m2 = v.Index
-					a.owned2 = false
 				} else if a.m2 == nil || !a.owned2 || a.mapPublished2 {
 					a.m2 = make(map[string]NullAware)
 					a.owned2 = true
