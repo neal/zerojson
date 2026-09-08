@@ -55,7 +55,7 @@ func (l *Lexer) ReadUUIDBytes() [16]byte {
 	}
 	u, ok := parseUUIDBytes(b)
 	if !ok {
-		l.setErr("uuid: invalid UUID %q", b)
+		l.setErr("uuid: invalid UUID %s", errToken(b))
 	}
 	return u
 }

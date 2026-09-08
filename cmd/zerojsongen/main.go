@@ -141,7 +141,7 @@ var generatedIdents = map[string]bool{
 // safeAlias returns the qualifier to import a package under: its own name
 // unless that would collide with an identifier the generated code uses.
 func safeAlias(name string) string {
-	if generatedIdents[name] {
+	if generatedIdents[name] || types.Universe.Lookup(name) != nil {
 		return name + "_"
 	}
 	return name
@@ -244,7 +244,10 @@ type typeInfo struct {
 }
 
 type generator struct {
-	pkg *packages.Package
+	pkg            *packages.Package
+	outPath        string // codec file being replaced; its old declarations do not reserve aliases
+	testNames      map[string]token.Position
+	generatedNames map[string]bool
 	// replaceableMethodFiles contains only codec output produced by zerojsongen
 	// or easyjson. An arbitrary generated file can still deliberately define a
 	// custom wire format, so ast.IsGenerated alone is too broad.
@@ -339,9 +342,13 @@ func main() {
 			pkg.PkgPath, runtimeAlias, pkg.Fset.Position(obj.Pos()))
 	}
 
-	g := &generator{pkg: pkg, replaceableMethodFiles: map[string]bool{}, explicit: map[string]bool{}, genSet: map[string]bool{}, leaves: leaves, imports: map[string]string{},
+	g := &generator{pkg: pkg, outPath: *out, replaceableMethodFiles: map[string]bool{}, explicit: map[string]bool{}, genSet: map[string]bool{}, leaves: leaves, imports: map[string]string{},
 		aliasOwner: map[string]string{}, leafPkgNames: resolveLeafPkgNames(*dir, leaves), enumHelpers: map[string]*enumHelper{},
 		compat: *compat || *compatEasyjson, compatEasyjson: *compatEasyjson, pool: *pool, ordered: !*noOrdered}
+	g.testNames = loadTestNames(*dir, pkg.Name)
+	if pos, ok := g.testNames[runtimeAlias]; ok {
+		log.Fatalf("test declaration %s at %s collides with the runtime import", runtimeAlias, pos)
+	}
 	for _, f := range pkg.Syntax {
 		if isReplaceableCodecOutput(f) {
 			g.replaceableMethodFiles[pkg.Fset.Position(f.FileStart).Filename] = true
@@ -402,6 +409,10 @@ func main() {
 	if *testsOut != "" {
 		tsrc = g.generateTests()
 		g.guardGeneratedNames(tsrc, *testsOut)
+		// Imports also conflict with declarations in another generated
+		// file in the same package, including test-only helpers.
+		src = g.aliasGeneratedImports(src, tsrc)
+		tsrc = g.aliasGeneratedImports(tsrc, src)
 	}
 	formatted, err := format.Source([]byte(src))
 	if err != nil {
@@ -609,11 +620,11 @@ func (g *generator) generate() string {
 	}
 	fmt.Fprintf(&out, ")\n")
 	out.WriteString(body)
-	return out.String()
+	return g.aliasGeneratedImports(out.String())
 }
 
 func arenaName(t string) string  { return "zjArena" + t }
-func decodeName(t string) string { return "zjDecode" + t }
+func decodeName(t string) string { return "zjDecode_" + t }
 
 // qualify returns the emitted-code qualifier ("pkg.") for a package and
 // records the import under a unique alias (see importAlias).
@@ -647,7 +658,7 @@ func (g *generator) importAlias(path, name string) string {
 				alias += "_"
 				continue
 			}
-			if g.pkg != nil && g.pkg.Types != nil && g.pkg.Types.Scope().Lookup(alias) != nil {
+			if g.packageNameTaken(alias) {
 				alias += "_"
 				continue
 			}
@@ -660,6 +671,23 @@ func (g *generator) importAlias(path, name string) string {
 	g.imports[path] = alias
 	g.aliasOwner[alias] = path
 	return alias
+}
+
+func (g *generator) packageNameTaken(name string) bool {
+	if _, test := g.testNames[name]; test {
+		return true
+	}
+	if g.pkg == nil || g.pkg.Types == nil {
+		return false
+	}
+	obj := g.pkg.Types.Scope().Lookup(name)
+	if obj == nil {
+		return false
+	}
+	// The final AST pass accounts for the new output's declarations. Reserving
+	// the old output's names here would change qualifier-derived helper names
+	// between a clean generation and regeneration.
+	return g.outPath == "" || !samePath(g.outPath, g.pkg.Fset.Position(obj.Pos()).Filename)
 }
 
 // resolveOutput returns path relative to dir unless it is absolute.

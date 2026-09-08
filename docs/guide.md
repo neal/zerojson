@@ -52,8 +52,9 @@ refuses to regenerate the codec while leaving that file to go stale.
 
 Hand-written custom methods are preserved during auto-discovery. Only methods
 from recognized zerojsongen/easyjson output are replaceable; an arbitrary
-`Code generated` header is insufficient. Explicit roots request generation
-regardless of existing methods, so remove conflicting hand-written methods.
+`Code generated` header is insufficient. Explicit roots with hand-written
+JSON/Text methods are refused; remove those methods to generate a codec, or
+leave the type out of the explicit roots to retain its custom behavior.
 
 The loader overlays stale generated method bodies while loading the package,
 preserving declarations needed by caller code where possible, and prunes the

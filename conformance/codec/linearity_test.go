@@ -2,6 +2,8 @@ package codec
 
 import (
 	"os"
+	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"testing"
@@ -39,7 +41,7 @@ import (
 // time(4N) ~= 4*time(N), so the generous threshold time(4N) < 8*time(N)
 // passes for anything linear (or even mildly super-linear from cache
 // effects) while a genuine quadratic (~16x) fails. Each reported ratio uses
-// min-of-reps timing after a warmup to shed allocation/GC and first-call
+// min-of-reps timing after a warmup to shed scheduler and first-call
 // noise, and the assertion uses the median of three independent ratios so a
 // single loaded-runner outlier cannot fail a dedicated local run. Wall-clock
 // assertions are opt-in via ZEROJSON_LINEARITY=1 because scheduler and VM noise
@@ -52,11 +54,19 @@ func linearityAssertionsEnabled() bool {
 
 // measureDecode returns the minimum wall time over reps calls of decode on
 // a freshly-built input of the given size, after warmup calls. Min (not
-// mean) is the noise-robust estimator here: it is the run least perturbed
-// by GC pauses and scheduler preemption on a possibly-loaded machine.
+// mean) reduces scheduler noise. Each bounded batch starts after a GC,
+// with automatic GC disabled through warmup and measurement. Keeping warmup
+// after GC also avoids measuring stack regrowth after GC shrinks a stack.
+// This isolates algorithmic
+// work from heap-trigger thresholds; allocation scaling is checked separately
+// in resource_scaling_test.go. These tests must not run in parallel because
+// the GC setting is process-wide.
 func measureDecode(t *testing.T, build func(n int) []byte, decode func([]byte), n, warmup, reps int) time.Duration {
 	t.Helper()
 	data := build(n)
+	runtime.GC()
+	previous := debug.SetGCPercent(-1)
+	defer debug.SetGCPercent(previous)
 	for range warmup {
 		decode(data)
 	}
@@ -64,7 +74,8 @@ func measureDecode(t *testing.T, build func(n int) []byte, decode func([]byte), 
 	for range reps {
 		start := time.Now()
 		decode(data)
-		if d := time.Since(start); d < best {
+		d := time.Since(start)
+		if d < best {
 			best = d
 		}
 	}
@@ -99,10 +110,44 @@ func assertLinear(t *testing.T, name string, build func(n int) []byte, decode fu
 		return
 	}
 
-	sort.Float64s(ratios)
-	median := ratios[len(ratios)/2]
-	if median >= 8.0 {
+	median := medianScalingRatio(ratios)
+	if superlinearScaling(median) {
 		t.Fatalf("%s: repeatable superlinear scaling — median time(4N)/time(N) = %.2fx >= 8x (ratios=%v). Likely quadratic; report with these numbers, do not restructure the decoder.", name, median, ratios)
+	}
+}
+
+func superlinearScaling(median float64) bool { return median >= 8 }
+
+func medianScalingRatio(ratios []float64) float64 {
+	sort.Float64s(ratios)
+	return ratios[len(ratios)/2]
+}
+
+func TestLinearityThreshold(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		ratios []float64
+		fail   bool
+	}{
+		{"linear", []float64{4, 4.2, 3.9}, false},
+		{"one outlier", []float64{4, 20, 4.1}, false},
+		{"quadratic", []float64{16, 15, 17}, true},
+		{"boundary", []float64{8, 8, 8}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := superlinearScaling(medianScalingRatio(tc.ratios)); got != tc.fail {
+				t.Fatalf("threshold failure = %v, want %v", got, tc.fail)
+			}
+		})
+	}
+}
+
+func TestLinearityRestoresGC(t *testing.T) {
+	previous := debug.SetGCPercent(37)
+	defer debug.SetGCPercent(previous)
+	measureDecode(t, func(int) []byte { return nil }, func([]byte) {}, 1, 0, 1)
+	if got := debug.SetGCPercent(37); got != 37 {
+		t.Fatalf("GC setting after measurement = %d, want 37", got)
 	}
 }
 

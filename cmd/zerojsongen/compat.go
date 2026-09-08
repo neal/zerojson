@@ -20,11 +20,11 @@ func (g *generator) genCompat(ti typeInfo) {
 	g.p("func (v *%s) UnmarshalJSON(data []byte) error { return v.UnmarshalZJSON(data) }", n)
 
 	if g.compatEasyjson {
-		g.imports[easyjsonJwriterPkg] = "jwriter"
-		g.imports[easyjsonJlexerPkg] = "jlexer"
+		writer := g.importAlias(easyjsonJwriterPkg, "jwriter")
+		lexer := g.importAlias(easyjsonJlexerPkg, "jlexer")
 		g.p("")
 		g.p("// MarshalEasyJSON implements easyjson.Marshaler via zerojson.")
-		g.p("func (v %s) MarshalEasyJSON(w *jwriter.Writer) {", n)
+		g.p("func (v %s) MarshalEasyJSON(w *%s.Writer) {", n, writer)
 		g.p("\tb, err := v.AppendZJSON(nil)")
 		g.p("\tif err != nil { w.Error = err; return }")
 		g.p("\tw.Raw(b, nil)")
@@ -37,7 +37,7 @@ func (g *generator) genCompat(ti typeInfo) {
 		g.p("// trailing content in the outer document only when this call is the")
 		g.p("// genuine top-level entry point (easyjson.Unmarshal), not when the")
 		g.p("// method runs recursively as an ordinary field decode.")
-		g.p("func (v *%s) UnmarshalEasyJSON(l *jlexer.Lexer) {", n)
+		g.p("func (v *%s) UnmarshalEasyJSON(l *%s.Lexer) {", n, lexer)
 		g.p("\tisTopLevel := l.IsStart()")
 		g.p("\tif data := l.Raw(); l.Ok() {")
 		g.p("\t\tif err := v.UnmarshalZJSON(data); err != nil { l.AddError(err) }")

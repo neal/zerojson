@@ -9,12 +9,12 @@ import (
 // type whose JSON field names are all safe to embed as literal byte
 // constants (see canOrderType), the generator additionally emits
 //
-//	zjDecodeOrdered<T>(l, v, a) bool       — the member loop
-//	zjDecodeOrderedField<T>(l, v, a, k) bool — per-field value dispatch
+//	zjDecodeOrdered_<T>(l, v, a) bool       — the member loop
+//	zjDecodeOrderedField_<T>(l, v, a, k) bool — per-field value dispatch
 //	zjTryOrderedKey<T>(l, k) bool           — per-field literal key match
 //
-// zjDecode<T> (decode.go) tries zjDecodeOrdered<T> first and falls back to
-// zjDecodeFallback<T> — the unchanged keyed decoder — on structural
+// zjDecode_<T> (decode.go) tries zjDecodeOrdered_<T> first and falls back to
+// zjDecodeFallback_<T> — the unchanged keyed decoder — on structural
 // deviations. If the ordered attempt records a real value/grammar error, that
 // error is final: retrying the same failing value would only duplicate work.
 //
@@ -30,11 +30,11 @@ import (
 // and retries with the fallback. A real value/grammar error is retained
 // without retrying the same work.
 
-func orderedDecodeName(t string) string    { return "zjDecodeOrdered" + t }
-func orderedFieldFuncName(t string) string { return "zjDecodeOrderedField" + t }
+func orderedDecodeName(t string) string    { return "zjDecodeOrdered_" + t }
+func orderedFieldFuncName(t string) string { return "zjDecodeOrderedField_" + t }
 func orderedKeyFuncName(t string) string   { return "zjTryOrderedKey" + t }
 func declaredKeyFuncName(t string) string  { return "zjIsDeclaredKey" + t }
-func fallbackDecodeName(t string) string   { return "zjDecodeFallback" + t }
+func fallbackDecodeName(t string) string   { return "zjDecodeFallback_" + t }
 
 // jsonNameNeedsEscape reports whether name would be encoded with any
 // escape by zerojson.AppendString (control chars, '"', '\\', and the
@@ -61,7 +61,7 @@ func (g *generator) canOrderType(ti typeInfo) bool {
 
 // namesOrderable reports whether every JSON name of the type AND of every
 // struct type its ordered decoder would call directly (kStruct fields,
-// value or pointer — the ordered decoder recurses into zjDecodeOrdered<elem>
+// value or pointer — the ordered decoder recurses into zjDecodeOrdered_<elem>
 // for those, so the nested type must have one) is a plain-ASCII literal.
 // Slice elements and map values go through the nested type's dispatcher
 // instead, which always exists, so they do not constrain the parent.
@@ -285,7 +285,7 @@ func (g *generator) emitOrderedDeclaredKey(ti typeInfo) {
 	g.p("}")
 }
 
-// emitOrderedField emits zjDecodeOrderedField<T>(l, v, a, k) bool: decodes
+// emitOrderedField emits zjDecodeOrderedField_<T>(l, v, a, k) bool: decodes
 // the value for declared field index k (the matching key+colon literal
 // has already been consumed), using the exact same lexer read functions
 // and arena assignments as the fallback decoder. False propagates either a
@@ -315,9 +315,6 @@ func (g *generator) emitOrderedField(ti typeInfo) {
 				continue
 			}
 			g.p("\t\t\tv.%s = nil", ti.fields[i].access)
-			if needsSeenState(ti.fields[i]) {
-				g.p("\t\t\ta.s%s = false", ti.fields[i].cellName)
-			}
 		}
 		g.p("\t\t}")
 	}
@@ -350,7 +347,7 @@ func (g *generator) emitOrderedField(ti typeInfo) {
 
 func fieldNamesVar(t string) string { return "zjFieldNames" + t }
 
-// emitOrderedDecode emits zjDecodeOrdered<T>(l, v, a) bool: the member
+// emitOrderedDecode emits zjDecodeOrdered_<T>(l, v, a) bool: the member
 // loop described in the file comment above.
 func (g *generator) emitOrderedDecode(ti typeInfo) {
 	n := ti.name

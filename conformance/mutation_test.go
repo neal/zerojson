@@ -154,9 +154,58 @@ func mutationCatalog() []mutationCase {
 	)
 	return []mutationCase{
 		{
+			name: "root_slice_drops_caller_alias", tier: "full", file: "cmd/zerojsongen/root.go",
+			old: `g.p("%sif *v != nil { %s = *v }", ind, cell)`, new: "", wantCount: 1,
+			detector: generatorDetector(`^TestIndependentChallenge$`), wantOutput: "root slice alias:",
+		},
+		{
+			name: "slice_first_use_ignores_callback_alias", tier: "full", file: "cmd/zerojsongen/decode.go",
+			old: `g.p("%sif %s {", ind, present)`, new: `g.p("%sif %s && a.slicePublished%s {", ind, present, f.cellName)`, wantCount: 1,
+			detector: generatorDetector(`^TestGeneratedSchemaCampaign$`), wantOutput: "publication campaign mismatch:",
+		},
+		{
+			name: "slice_adoption_forgets_caller_ownership", tier: "full", file: "cmd/zerojsongen/decode.go",
+			old: `g.p("%s\ta.sliceBorrowed%s = true", ind, f.cellName)`, new: `g.p("%s\ta.sliceBorrowed%s = false", ind, f.cellName)`, wantCount: 1,
+			detector: generatorDetector(`^TestGeneratorBehaviorMatrix/pooled_adopted_slice_lifetime$`), wantOutput: "pooled decode recycled caller-owned slice",
+		},
+		{
+			name: "publication_pointer", tier: "full", file: "cmd/zerojsongen/decode.go",
+			old: `g.p("%s\tif a.published%s {", ind, f.cellName)`, new: `g.p("%s\tif false {", ind)`, wantCount: 1,
+			detector: generatorDetector(`^TestGeneratorBehaviorMatrix/publication_scalar_ordered$`), wantOutput: "publication pooled=",
+		},
+		{
+			name: "publication_map", tier: "full", file: "cmd/zerojsongen/decode.go",
+			old: ` || a.mapPublished%s {", ind, cell, f.cellName, f.cellName)`, new: ` {", ind, cell, f.cellName)`, wantCount: 1,
+			detector: generatorDetector(`^TestGeneratorBehaviorMatrix/publication_map_ordered$`), wantOutput: "publication pooled=",
+		},
+		{
+			name: "publication_slice", tier: "full", file: "cmd/zerojsongen/decode.go",
+			old: `g.p("%sa.slicePublished%s = true", ind, f.cellName)`, new: `g.p("%sa.slicePublished%s = false", ind, f.cellName)`, wantCount: 1,
+			detector: generatorDetector(`^TestGeneratorBehaviorMatrix/publication_slice_ordered$`), wantOutput: "publication pooled=",
+		},
+		{
+			name: "byte_method_policy", tier: "full", file: "cmd/zerojsongen/load.go",
+			old: `g.classify(&element, s.Elem(), ctx+"[elem]")`, new: `_ = element`, wantCount: 1,
+			detector: generatorDetector(`^TestGeneratorBehaviorMatrix/byte_methods_02_slice$`), wantOutput: "generator error:",
+		},
+		{
+			name: "predeclared_import_policy", tier: "full", file: "cmd/zerojsongen/main.go",
+			old: `generatedIdents[name] || types.Universe.Lookup(name) != nil`, new: `generatedIdents[name]`, wantCount: 1,
+			detector: commandSpec{dir: "cmd/zerojsongen", args: []string{"go", "test", ".", "-run", "^TestImportAliasesAvoidPredeclaredNames$", "-count=1"}}, wantOutput: "predeclared import qualifier:",
+		},
+		{
+			name: "state_campaign_observes_retained_maps", tier: "full", file: "cmd/zerojsongen/decode.go",
+			old: `g.p("%s\t} else if %s == nil || !a.owned%s || a.mapPublished%s {", ind, cell, f.cellName, f.cellName)`,
+			// Both guards now prevent same-document reuse. Remove both to
+			// model the original fault of clearing an observable map.
+			new:        `g.p("%s\t} else if %s == nil {", ind, cell)`,
+			occurrence: 0, wantCount: 1,
+			detector: generatorDetector(`^TestGeneratedSchemaCampaign$`), wantOutput: "state/retained-pointee mismatch",
+		},
+		{
 			name: "state_campaign_observes_retained_pointers", tier: "full", file: "cmd/zerojsongen/decode.go",
-			old:        `g.p("%s\t*%s = %s", ind, target, readExpr)`,
-			new:        `g.p("%s\t%s = %s; %s = &%s", ind, cell, readExpr, target, cell)`,
+			old:        `g.p("%s*%s = %s", ind, target, readExpr)`,
+			new:        `g.p("%s%s = %s; %s = &%s", ind, cell, readExpr, target, cell)`,
 			occurrence: 0, wantCount: 1,
 			detector: generatorDetector(`^TestGeneratedSchemaCampaign$`), wantOutput: "state/retained-pointee mismatch",
 		},
@@ -204,8 +253,8 @@ func mutationCatalog() []mutationCase {
 		},
 		{
 			name: "existing_pointer_is_replaced", tier: "full", file: "cmd/zerojsongen/decode.go",
-			old:        `g.p("%s\t*%s = %s", ind, target, readExpr)`,
-			new:        `g.p("%s\t%s = %s; %s = &%s", ind, cell, readExpr, target, cell)`,
+			old:        `g.p("%s*%s = %s", ind, target, readExpr)`,
+			new:        `g.p("%s%s = %s; %s = &%s", ind, cell, readExpr, target, cell)`,
 			occurrence: 0, wantCount: 1,
 			detector: generatorDetector(`^TestTypeShapeBehavior$`), wantOutput: "TestSharedPointers",
 		},

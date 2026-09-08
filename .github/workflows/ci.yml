@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # go.work pins the minimum (1.26). The newest stable line is tested
+        # go.work pins the minimum (1.26). The second supported line is tested
         # too so that a stdlib change in the encoding/json oracle — as with
         # Go 1.27's v2-backed encoding/json — shows up before a release,
         # not after: the conformance suite compares against stdlib by

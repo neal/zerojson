@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"testing"
 )
@@ -13,7 +14,8 @@ const campaignOperations = 16
 // External references deliberately outlive field replacement/null. Comparing
 // values alone cannot detect a decoder that silently re-points to its arena.
 type campaignGraph struct {
-	v CampaignState
+	m map[string]int
+	v *CampaignState
 	n *int
 	c *CampaignCounter
 	s *string
@@ -22,10 +24,14 @@ type campaignGraph struct {
 func newCampaignGraph(shared bool) campaignGraph {
 	n, c, s := 7, CampaignCounter(11), "initial"
 	g := campaignGraph{n: &n, c: &c, s: &s}
-	g.v = CampaignState{A: &n, B: &n, C: &c, D: &c, Any: &c, S: &s, Nested: CampaignNested{P: &n}}
+	g.m = map[string]int{"keep": 7}
+	g.v = &CampaignState{A: &n, B: &n, C: &c, D: &c, Any: &c, S: &s, Nested: CampaignNested{P: &n}}
+	g.v.Map, g.v.OtherMap = g.m, g.m
+	g.v.MapPointer = &g.v.Map
 	if !shared {
 		n2, n3, c2, c3 := n, n, c, c
 		g.v.B, g.v.Nested.P, g.v.D, g.v.Any = &n2, &n3, &c2, &c3
+		g.v.OtherMap = maps.Clone(g.m)
 	}
 	return g
 }
@@ -46,6 +52,28 @@ func cloneCampaignPointer[T any](p *T, seen map[*T]*T) *T {
 func cloneCampaignGraph(g campaignGraph) campaignGraph {
 	ns, cs, ss := map[*int]*int{}, map[*CampaignCounter]*CampaignCounter{}, map[*string]*string{}
 	r := g
+	v := *g.v
+	r.v = &v
+	ms := map[uintptr]map[string]int{}
+	cloneMap := func(m map[string]int) map[string]int {
+		if m == nil {
+			return nil
+		}
+		key := reflect.ValueOf(m).Pointer()
+		if copy, ok := ms[key]; ok {
+			return copy
+		}
+		copy := maps.Clone(m)
+		ms[key] = copy
+		return copy
+	}
+	r.m, r.v.Map, r.v.OtherMap = cloneMap(g.m), cloneMap(g.v.Map), cloneMap(g.v.OtherMap)
+	if g.v.MapPointer == &g.v.Map {
+		r.v.MapPointer = &r.v.Map
+	} else if g.v.MapPointer != nil {
+		m := cloneMap(*g.v.MapPointer)
+		r.v.MapPointer = &m
+	}
 	r.n, r.c, r.s = cloneCampaignPointer(g.n, ns), cloneCampaignPointer(g.c, cs), cloneCampaignPointer(g.s, ss)
 	r.v.A, r.v.B, r.v.Nested.P = cloneCampaignPointer(g.v.A, ns), cloneCampaignPointer(g.v.B, ns), cloneCampaignPointer(g.v.Nested.P, ns)
 	r.v.C, r.v.D = cloneCampaignPointer(g.v.C, cs), cloneCampaignPointer(g.v.D, cs)
@@ -57,12 +85,12 @@ func cloneCampaignGraph(g campaignGraph) campaignGraph {
 }
 
 func campaignPointers(g campaignGraph) []any {
-	return []any{g.v.A, g.v.B, g.v.C, g.v.D, g.v.Any, g.v.S, g.v.Nested.P, g.n, g.c, g.s}
+	return []any{g.v.A, g.v.B, g.v.C, g.v.D, g.v.Any, g.v.S, g.v.Nested.P, g.n, g.c, g.s, g.v.Map, g.v.OtherMap, g.m, g.v.MapPointer, &g.v.Map}
 }
 
 func campaignSamePointer(a, b any) bool {
 	x, y := reflect.ValueOf(a), reflect.ValueOf(b)
-	return x.IsValid() && y.IsValid() && x.Kind() == reflect.Pointer && y.Kind() == reflect.Pointer &&
+	return x.IsValid() && y.IsValid() && (x.Kind() == reflect.Pointer || x.Kind() == reflect.Map) && x.Kind() == y.Kind() &&
 		!x.IsNil() && !y.IsNil() && x.Type() == y.Type() && x.Pointer() == y.Pointer()
 }
 
@@ -79,7 +107,7 @@ func campaignSameTopology(a, b []any) bool {
 
 func checkCampaignGraph(t *testing.T, std, zj campaignGraph) {
 	t.Helper()
-	if !reflect.DeepEqual(std.v, zj.v) || *std.n != *zj.n || *std.c != *zj.c || *std.s != *zj.s {
+	if !reflect.DeepEqual(std.v, zj.v) || !maps.Equal(std.m, zj.m) || *std.n != *zj.n || *std.c != *zj.c || *std.s != *zj.s {
 		t.Fatalf("state/retained-pointee mismatch: std=%+v zerojson=%+v external=(%d,%d,%q)/(%d,%d,%q)", std.v, zj.v, *std.n, *std.c, *std.s, *zj.n, *zj.c, *zj.s)
 	}
 	if !campaignSameTopology(campaignPointers(std), campaignPointers(zj)) {
@@ -95,7 +123,7 @@ func campaignDocument(op, value byte) []byte {
 	case 1:
 		return []byte(fmt.Sprintf(`{"a":%d,"b":%d,"nested":{"p":%d}}`, n, n+1, n+2))
 	case 2:
-		return []byte(fmt.Sprintf(`{"b":%d,"unknown":{},"a":%d,"a":%d}`, n, n+1, n+2))
+		return []byte(fmt.Sprintf(`{"b":%d,"unknown":{},"a":%d,"a":%d,"map_pointer":{"a":1},"map":null,"map_pointer":{"b":2},"map":{"c":3}}`, n, n+1, n+2))
 	case 3:
 		return []byte(`{"a":null,"c":null,"any":null,"s":null}`)
 	case 4:
@@ -166,7 +194,7 @@ func runCampaignState(t *testing.T, program []byte) {
 			if se != nil || ze != nil || campaignCalls != wantCalls || !reflect.DeepEqual(want, pooled) {
 				t.Fatalf("pool reuse mismatch: std=%+v (%v) zerojson=%+v (%v) calls=%d/%d", want, se, pooled, ze, wantCalls, campaignCalls)
 			}
-			if !campaignSameTopology(campaignPointers(campaignGraph{v: want}), campaignPointers(campaignGraph{v: pooled})) {
+			if !campaignSameTopology(campaignPointers(campaignGraph{v: &want}), campaignPointers(campaignGraph{v: &pooled})) {
 				t.Fatal("pool alias topology mismatch")
 			}
 			if !bytes.Equal(doc, before) {
@@ -186,13 +214,13 @@ func runCampaignState(t *testing.T, program []byte) {
 			doc := campaignDocument(op, value)
 			before := bytes.Clone(doc)
 			campaignCalls = 0
-			se := json.Unmarshal(doc, &std.v)
+			se := json.Unmarshal(doc, std.v)
 			wantCalls := campaignCalls
 			campaignCalls = 0
 			var ze error
 			if op%campaignOperations == 10 {
 				// stdlib after a borrow decode must detach Raw's storage.
-				ze = json.Unmarshal(doc, &zj.v)
+				ze = json.Unmarshal(doc, zj.v)
 			} else if op&16 != 0 {
 				ze = zj.v.UnmarshalZJSONBorrow(doc)
 				borrowed, originals = append(borrowed, doc), append(originals, before)

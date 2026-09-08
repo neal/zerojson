@@ -32,7 +32,8 @@ type Lexer struct {
 // sits in the document, not from zero — to prevent stack exhaustion from
 // adversarial deeply-nested input. Matches encoding/json's limit exactly
 // (a document 10000 levels deep is accepted, 10001 is not), at every
-// nesting position, so decode success continues to imply Valid.
+// nesting position, including empty containers. This depth check does not
+// make the ordinary value readers grammar-strict; use Valid for that.
 const maxDepth = 10000
 
 func NewLexer(data []byte, borrow bool) Lexer {

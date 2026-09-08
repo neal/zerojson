@@ -2,6 +2,11 @@ package generator
 
 import (
 	"bytes"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,9 +55,111 @@ func TestPackageLayoutBoundaries(t *testing.T) {
 			t.Fatalf("generated package: %v\n%s", err, b)
 		}
 	}
+	t.Run("predeclared_dependency_names", func(t *testing.T) {
+		dir := filepath.Join(base, "predeclared")
+		imports, fields := "import (\n", "type T struct { S []int; M map[string]int; V any\n"
+		for i, name := range types.Universe.Names() {
+			dep := fmt.Sprintf("builtin%d", i)
+			write(filepath.Join(base, dep, "types.go"), "package "+name+"\ntype Value int\n")
+			imports += fmt.Sprintf("d%d %q\n", i, "github.com/neal/zerojson/conformance/"+filepath.Base(base)+"/"+dep)
+			fields += fmt.Sprintf("N%d d%d.Value\n", i, i)
+		}
+		write(filepath.Join(dir, "types.go"), "package p\n"+imports+")\n"+fields+"}\n")
+		var previous []byte
+		for attempt := 0; attempt < 2; attempt++ {
+			if out, err := run(dir, "T", "zerojson_gen.go", "codec_fuzz_test.go"); err != nil {
+				t.Fatalf("generate: %v %s", err, out)
+			}
+			build(dir)
+			var combined []byte
+			for _, name := range []string{"zerojson_gen.go", "codec_fuzz_test.go"} {
+				data, err := os.ReadFile(filepath.Join(dir, name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				file, err := parser.ParseFile(token.NewFileSet(), name, data, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				ast.Inspect(file, func(n ast.Node) bool {
+					if im, ok := n.(*ast.ImportSpec); ok && im.Name != nil && types.Universe.Lookup(im.Name.Name) != nil {
+						t.Errorf("predeclared import qualifier: %s", im.Name.Name)
+					}
+					return true
+				})
+				combined = append(combined, data...)
+			}
+			if attempt > 0 && !bytes.Equal(previous, combined) {
+				t.Fatal("regeneration changed output")
+			}
+			previous = combined
+		}
+	})
 	depDir := filepath.Join(base, "dep")
 	write(filepath.Join(depDir, "types.go"), "package dep\ntype hidden struct { N int `json:\"n\"` }; type Embedded struct { hidden }; type private int; type Public struct { N private `json:\"n\"` }; type Alias = private; type ViaAlias struct { N Alias `json:\"n\"` }\n")
 	depPath := "github.com/neal/zerojson/conformance/" + filepath.Base(base) + "/dep"
+	helperPath := "github.com/neal/zerojson/conformance/" + filepath.Base(base) + "/helper"
+	write(filepath.Join(base, "helper", "types.go"), "package zjDecode_T\ntype Value int\ntype Mode string\nconst One Mode = \"one\"\n")
+	oraclePath := "github.com/neal/zerojson/conformance/" + filepath.Base(base) + "/oraclehelper"
+	write(filepath.Join(base, "oraclehelper", "types.go"), "package zjOracleData\ntype Value int\ntype Mode string\nconst One Mode = \"one\"\n")
+	for _, tc := range []struct{ name, source, tests, roots, flags, refusal string }{
+		{"helper_import", "import dep \"" + helperPath + "\"; type T struct { N dep.Value; Modes []dep.Mode }", "", "T", "", ""},
+		{"test_helper_import", "import dep \"" + oraclePath + "\"; type T struct { N dep.Value; Modes []dep.Mode }", "", "T", "", ""},
+		{"decoder_names", "type T struct { N int }; type OrderedT struct { M int }; type FallbackT struct { N int }; type OrderedFieldT struct { N int }", "", "T,OrderedT,FallbackT,OrderedFieldT", "", ""},
+		{"field_method", "type T struct { AppendZJSON string }", "", "T", "", "method T.AppendZJSON"},
+		{"test_fuzzer", "type T struct { N int }", "import \"testing\"; func FuzzTZJSON(f *testing.F) {}", "T", "", "test declaration"},
+		{"test_alias", "type T struct { N int; V any }", "var json, json_, reflect, binary, big int", "T", "", ""},
+		{"compat_embedding", "type Inner struct { N int }; type Outer struct { Inner }", "", "Outer,Inner", "-compat", ""},
+		{"easyjson_alias", "var jwriter, jwriter_, jlexer, jlexer_ int; type T struct { N int }", "", "T", "-compat-easyjson", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := filepath.Join(base, tc.name)
+			write(filepath.Join(dir, "types.go"), "package p\n"+tc.source+"\n")
+			if tc.tests != "" {
+				write(filepath.Join(dir, "manual_test.go"), "package p\n"+tc.tests+"\n")
+			}
+			var previous []byte
+			for attempt := 0; attempt < 2; attempt++ {
+				args := []string{"-dir", dir, "-types", tc.roots}
+				if tc.flags != "" {
+					args = append(args, tc.flags)
+				} else {
+					args = append(args, "-tests", "codec_fuzz_test.go")
+				}
+				cmd := exec.Command(gen, args...)
+				cmd.Dir = moduleRoot
+				out, err := cmd.CombinedOutput()
+				if tc.refusal != "" {
+					if err == nil || !strings.Contains(string(out), tc.refusal) {
+						t.Fatalf("want refusal %q: %v %s", tc.refusal, err, out)
+					}
+					if _, err := os.Stat(filepath.Join(dir, "zerojson_gen.go")); !os.IsNotExist(err) {
+						t.Fatal("refusal wrote output")
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("generation %d: %v %s", attempt, err, out)
+				}
+				build(dir)
+				b, err := os.ReadFile(filepath.Join(dir, "zerojson_gen.go"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if tc.flags == "" {
+					fuzz, err := os.ReadFile(filepath.Join(dir, "codec_fuzz_test.go"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					b = append(b, fuzz...)
+				}
+				if attempt > 0 && !bytes.Equal(previous, b) {
+					t.Fatal("regeneration changed output")
+				}
+				previous = b
+			}
+		})
+	}
 	t.Run("unexported_fuzz_names", func(t *testing.T) {
 		dir := filepath.Join(base, "fuzznames")
 		write(filepath.Join(dir, "types.go"), "package p\ntype hidden struct { N int }; type Hidden struct { N int }; type _hidden struct { N int }; type é struct { N int }; type É struct { N int }; type 猫 struct { N int }; type list []int; type index map[string]int\n")
@@ -133,6 +240,9 @@ type Root struct { V any; N *int }
 		// is refused with its location, not written into a file that
 		// cannot compile ("redeclared in this block").
 		for _, tc := range []struct{ name, src, flag, want string }{
+			{"builtin_append", "package p\nvar append = 1\ntype T struct { X int }\n", "-pool", "predeclared name append is already declared by hand"},
+			{"builtin_len", "package p\nvar len = 1\ntype T struct { X []int }\n", "-pool", "predeclared name len is already declared by hand"},
+			{"builtin_type", "package p\ntype byte string\ntype T struct { X int }\n", "-pool", "predeclared name byte is already declared by hand"},
 			{"pool_decoder_type", "package p\ntype T struct { X int `json:\"x\"` }\ntype TDecoder struct{}\n", "-pool", "type TDecoder is already declared by hand"},
 			{"easyjson_method", "package p\nimport \"github.com/mailru/easyjson/jwriter\"\ntype T struct { X int `json:\"x\"` }\nfunc (t T) MarshalEasyJSON(w *jwriter.Writer) { w.RawString(\"{}\") }\n", "-compat-easyjson", "method T.MarshalEasyJSON is already declared by hand"},
 			{"arena_type", "package p\ntype T struct { X int `json:\"x\"` }\ntype zjArenaT int\n", "-pool", "type zjArenaT is already declared by hand"},

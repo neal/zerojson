@@ -94,16 +94,27 @@ func (g *generator) checkTypeVisibility(t types.Type) {
 	}
 }
 
-// Fuzz templates use fixed standard-library qualifiers. Rename only actual
-// import selectors (never string literals) if a package-scope user identifier
-// would collide. Pick aliases absent from both the target and generated file.
-func (g *generator) aliasTestImports(src string) string {
+// Rename actual import selectors (never string literals) against the complete
+// generated declaration inventory as well as user declarations. Pick aliases
+// absent from both files, including locals that could shadow an import.
+func (g *generator) aliasGeneratedImports(src string, companions ...string) string {
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "generated_test.go", src, parser.ParseComments)
+	f, err := parser.ParseFile(fset, "generated.go", src, parser.ParseComments)
 	if err != nil {
-		log.Fatalf("parse generated tests: %v", err)
+		log.Fatalf("parse generated source: %v", err)
 	}
 	used := map[string]bool{}
+	declared := declarationNames(f)
+	for _, source := range companions {
+		other, err := parser.ParseFile(token.NewFileSet(), "companion.go", source, 0)
+		if err != nil {
+			log.Fatalf("parse generated companion: %v", err)
+		}
+		for name, pos := range declarationNames(other) {
+			declared[name] = pos
+			used[name] = true
+		}
+	}
 	ast.Inspect(f, func(n ast.Node) bool {
 		if id, ok := n.(*ast.Ident); ok {
 			used[id.Name] = true
@@ -117,14 +128,15 @@ func (g *generator) aliasTestImports(src string) string {
 		if imp.Name != nil {
 			name = imp.Name.Name
 		}
-		if name == "_" || name == "." || g.pkg.Types.Scope().Lookup(name) == nil {
+		_, generated := declared[name]
+		if name == "_" || name == "." || (!g.packageNameTaken(name) && !generated) {
 			continue
 		}
 		if path == runtimePath {
 			log.Fatal("target package declares the reserved runtime import name zerojson")
 		}
 		alias := name + "_"
-		for used[alias] || g.pkg.Types.Scope().Lookup(alias) != nil {
+		for used[alias] || g.packageNameTaken(alias) {
 			alias += "_"
 		}
 		used[alias] = true
@@ -136,7 +148,10 @@ func (g *generator) aliasTestImports(src string) string {
 	}
 	ast.Inspect(f, func(n ast.Node) bool {
 		if sel, ok := n.(*ast.SelectorExpr); ok {
-			if id, ok := sel.X.(*ast.Ident); ok && id.Obj == nil {
+			// The parser may bind a colliding import selector to the
+			// generated top-level declaration. Rename that binding too,
+			// but never a real local variable's selector.
+			if id, ok := sel.X.(*ast.Ident); ok && (id.Obj == nil || id.Obj == f.Scope.Lookup(id.Name)) {
 				if alias, ok := renames[id.Name]; ok {
 					id.Name = alias
 				}

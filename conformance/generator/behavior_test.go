@@ -333,8 +333,8 @@ type Root struct { Field FaultAppender ` + "`json:\"field\"`" + ` }
 		var std oracle
 		stdDecodeErr := json.Unmarshal(input, &std)
 		var zj Root
-		zjDecodeErr := zj.UnmarshalZJSON(input)
-		if stdDecodeErr == nil || zjDecodeErr == nil { t.Fatalf("decode errors: stdlib=%v zerojson=%v", stdDecodeErr, zjDecodeErr) }
+		zjDecode_Err := zj.UnmarshalZJSON(input)
+		if stdDecodeErr == nil || zjDecode_Err == nil { t.Fatalf("decode errors: stdlib=%v zerojson=%v", stdDecodeErr, zjDecode_Err) }
 		if jsonDecodeCalls != 1 || appDecodeCalls != 1 { t.Fatalf("decode calls: json=%d appender=%d", jsonDecodeCalls, appDecodeCalls) }
 		if std.Field != 97 || zj.Field != Root(std).Field { t.Fatalf("decode mutation: stdlib=%+v zerojson=%+v", std, zj) }
 `,
@@ -535,6 +535,9 @@ type Root struct { Field Text ` + "`json:\"field\"`" + ` }
 		},
 	}
 	cases = append(cases, methodAddressabilityCases()...)
+	cases = append(cases, ownershipCases()...)
+	cases = append(cases, publicationCases()...)
+	cases = append(cases, byteMethodSetCases()...)
 	cases = append(cases, customCodecFaultCases()...)
 
 	for _, tc := range cases {

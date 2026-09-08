@@ -13,30 +13,67 @@ import (
 	"time"
 )
 
-// zjArenaEvent backs every pointer field of a decoded Event with a single
+// zjArenaEvent holds first-use pointer cells for a decoded Event in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaEvent struct {
-	f1  time.Time
-	f3  testleaf.Decimal
-	f4  testleaf.Decimal
-	f6  string
-	f9  Phase
-	f11 StrInt64
-	a14 zjArenaEventMeta
-	v15 EventMeta
-	a15 zjArenaEventMeta
-	c16 []EventLeg
-	c17 []*EventLeg
-	c18 []string
-	f26 YMD
-	s27 bool
-	m27 map[string]testleaf.Decimal
-	s29 bool
-	m29 map[string]any
-	c30 []any
+	published1       bool
+	f1               time.Time
+	published3       bool
+	f3               testleaf.Decimal
+	published4       bool
+	f4               testleaf.Decimal
+	published6       bool
+	f6               string
+	published9       bool
+	f9               Phase
+	published11      bool
+	f11              StrInt64
+	a14              zjArenaEventMeta
+	published15      bool
+	v15              EventMeta
+	a15              zjArenaEventMeta
+	slicePublished16 bool
+	sliceBorrowed16  bool // adopted storage must not be recycled on the next pooled call
+	c16              []EventLeg
+	slicePublished17 bool
+	sliceBorrowed17  bool // adopted storage must not be recycled on the next pooled call
+	c17              []*EventLeg
+	slicePublished18 bool
+	sliceBorrowed18  bool // adopted storage must not be recycled on the next pooled call
+	c18              []string
+	published26      bool
+	f26              YMD
+	m27              map[string]testleaf.Decimal
+	owned27          bool // only arena-owned maps may be cleared for reuse
+	mapPublished27   bool
+	m29              map[string]any
+	owned29          bool // only arena-owned maps may be cleared for reuse
+	mapPublished29   bool
+	slicePublished30 bool
+	sliceBorrowed30  bool // adopted storage must not be recycled on the next pooled call
+	c30              []any
+}
+
+func (a *zjArenaEvent) beginDecode() {
+	a.published1 = false
+	a.published3 = false
+	a.published4 = false
+	a.published6 = false
+	a.published9 = false
+	a.published11 = false
+	a.a14.beginDecode()
+	a.published15 = false
+	a.a15.beginDecode()
+	a.slicePublished16 = false
+	a.slicePublished17 = false
+	a.slicePublished18 = false
+	a.published26 = false
+	a.mapPublished27 = false
+	a.mapPublished29 = false
+	a.slicePublished30 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -459,7 +496,7 @@ func (v *Event) UnmarshalZJSONBorrow(data []byte) error {
 func (v *Event) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaEvent{}
-	zjDecodeEvent(&l, v, a)
+	zjDecode_Event(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -469,27 +506,25 @@ func (v *Event) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *Event) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaEvent{}
-	zjDecodeEvent(l, v, a)
+	zjDecode_Event(l, v, a)
 }
 
-// zjDecodeEvent tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_Event tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeEvent(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
+func zjDecode_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s27 = false
-	a.s29 = false
-	zjDecodeFallbackEvent(l, v, a)
+	zjDecodeFallback_Event(l, v, a)
 }
 
-// zjDecodeFallbackEvent is the general keyed decoder: every member is read via
+// zjDecodeFallback_Event is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackEvent(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
+func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -533,14 +568,12 @@ func zjDecodeFallbackEvent(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 				v.SecondDate = nil
 			case "amounts":
 				v.Amounts = nil
-				a.s27 = false
 			case "extra":
 				if v.Extra != nil {
 					l.AddError(json_.Unmarshal(l.NullBytes(), &v.Extra))
 				}
 			case "bag":
 				v.Bag = nil
-				a.s29 = false
 			case "any_list":
 				v.AnyList = nil
 			}
@@ -558,36 +591,56 @@ func zjDecodeFallbackEvent(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 			v.CreatedAt = l.ReadTime()
 		case "closed_at":
 			if v.ClosedAt == nil {
-				a.f1 = l.ReadTime()
-				v.ClosedAt = &a.f1
-			} else {
-				*v.ClosedAt = l.ReadTime()
+				if a.published1 {
+					v.ClosedAt = new(time.Time)
+				} else {
+					var zjZero time.Time
+					a.f1 = zjZero
+					v.ClosedAt = &a.f1
+					a.published1 = true
+				}
 			}
+			*v.ClosedAt = l.ReadTime()
 		case "amount":
 			testleaf.Read(l, &v.Amount)
 		case "size":
 			if v.Size == nil {
-				var zjZero testleaf.Decimal
-				a.f3 = zjZero
-				v.Size = &a.f3
+				if a.published3 {
+					v.Size = new(testleaf.Decimal)
+				} else {
+					var zjZero testleaf.Decimal
+					a.f3 = zjZero
+					v.Size = &a.f3
+					a.published3 = true
+				}
 			}
 			testleaf.Read(l, v.Size)
 		case "total":
 			if v.Total == nil {
-				var zjZero testleaf.Decimal
-				a.f4 = zjZero
-				v.Total = &a.f4
+				if a.published4 {
+					v.Total = new(testleaf.Decimal)
+				} else {
+					var zjZero testleaf.Decimal
+					a.f4 = zjZero
+					v.Total = &a.f4
+					a.published4 = true
+				}
 			}
 			testleaf.Read(l, v.Total)
 		case "origin":
 			v.Origin = l.ReadInternedString()
 		case "location":
 			if v.Location == nil {
-				a.f6 = l.ReadString()
-				v.Location = &a.f6
-			} else {
-				*v.Location = l.ReadString()
+				if a.published6 {
+					v.Location = new(string)
+				} else {
+					var zjZero string
+					a.f6 = zjZero
+					v.Location = &a.f6
+					a.published6 = true
+				}
 			}
+			*v.Location = l.ReadString()
 		case "comment":
 			v.Comment = l.ReadString()
 		case "mode":
@@ -601,9 +654,14 @@ func zjDecodeFallbackEvent(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 			}
 		case "phase":
 			if v.Phase == nil {
-				var zjZero Phase
-				a.f9 = zjZero
-				v.Phase = &a.f9
+				if a.published9 {
+					v.Phase = new(Phase)
+				} else {
+					var zjZero Phase
+					a.f9 = zjZero
+					v.Phase = &a.f9
+					a.published9 = true
+				}
 			}
 			switch b := l.ReadEnumBytes(); string(b) {
 			case "done":
@@ -617,11 +675,16 @@ func zjDecodeFallbackEvent(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 			v.Seq = StrInt64(l.ReadQuotedOrBareInt64())
 		case "recv_ns":
 			if v.RecvNs == nil {
-				a.f11 = StrInt64(l.ReadQuotedOrBareInt64())
-				v.RecvNs = &a.f11
-			} else {
-				*v.RecvNs = StrInt64(l.ReadQuotedOrBareInt64())
+				if a.published11 {
+					v.RecvNs = new(StrInt64)
+				} else {
+					var zjZero StrInt64
+					a.f11 = zjZero
+					v.RecvNs = &a.f11
+					a.published11 = true
+				}
 			}
+			*v.RecvNs = StrInt64(l.ReadQuotedOrBareInt64())
 		case "tags":
 			if raw := l.RawValue(); l.Err() == nil {
 				if err := v.Tags.UnmarshalJSON(raw); err != nil {
@@ -635,15 +698,28 @@ func zjDecodeFallbackEvent(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 				}
 			}
 		case "meta":
-			zjDecodeEventMeta(l, &v.Meta, &a.a14)
+			zjDecode_EventMeta(l, &v.Meta, &a.a14)
 		case "meta_ptr":
 			if v.MetaPtr == nil {
-				var zjZero EventMeta
-				a.v15 = zjZero
-				v.MetaPtr = &a.v15
+				if a.published15 {
+					v.MetaPtr = new(EventMeta)
+				} else {
+					var zjZero EventMeta
+					a.v15 = zjZero
+					v.MetaPtr = &a.v15
+					a.published15 = true
+				}
 			}
-			zjDecodeEventMeta(l, v.MetaPtr, &a.a15)
+			zjDecode_EventMeta(l, v.MetaPtr, &a.a15)
 		case "items":
+			if v.Items != nil {
+				a.c16 = v.Items
+				a.sliceBorrowed16 = true
+			} else if a.slicePublished16 || a.sliceBorrowed16 {
+				a.c16 = nil
+				a.sliceBorrowed16 = false
+			}
+			a.slicePublished16 = true
 			a.c16 = a.c16[:0]
 			if l.EnterArray() {
 				for {
@@ -655,7 +731,7 @@ func zjDecodeFallbackEvent(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 					}
 					if !l.IsNull() {
 						var ea zjArenaEventLeg
-						zjDecodeEventLeg(l, &a.c16[len(a.c16)-1], &ea)
+						zjDecode_EventLeg(l, &a.c16[len(a.c16)-1], &ea)
 					}
 					if l.Err() != nil {
 						break
@@ -670,6 +746,14 @@ func zjDecodeFallbackEvent(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 			}
 			v.Items = a.c16
 		case "ptr_items":
+			if v.PtrItems != nil {
+				a.c17 = v.PtrItems
+				a.sliceBorrowed17 = true
+			} else if a.slicePublished17 || a.sliceBorrowed17 {
+				a.c17 = nil
+				a.sliceBorrowed17 = false
+			}
+			a.slicePublished17 = true
 			a.c17 = a.c17[:0]
 			if l.EnterArray() {
 				for {
@@ -682,7 +766,7 @@ func zjDecodeFallbackEvent(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 					if !l.IsNull() {
 						e := new(EventLeg)
 						var ea zjArenaEventLeg
-						zjDecodeEventLeg(l, e, &ea)
+						zjDecode_EventLeg(l, e, &ea)
 						a.c17[len(a.c17)-1] = e
 					}
 					if l.Err() != nil {
@@ -698,6 +782,14 @@ func zjDecodeFallbackEvent(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 			}
 			v.PtrItems = a.c17
 		case "names":
+			if v.Names != nil {
+				a.c18 = v.Names
+				a.sliceBorrowed18 = true
+			} else if a.slicePublished18 || a.sliceBorrowed18 {
+				a.c18 = nil
+				a.sliceBorrowed18 = false
+			}
+			a.slicePublished18 = true
 			a.c18 = a.c18[:0]
 			if l.EnterArray() {
 				for {
@@ -745,9 +837,14 @@ func zjDecodeFallbackEvent(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 			}
 		case "second_date":
 			if v.SecondDate == nil {
-				var zjZero YMD
-				a.f26 = zjZero
-				v.SecondDate = &a.f26
+				if a.published26 {
+					v.SecondDate = new(YMD)
+				} else {
+					var zjZero YMD
+					a.f26 = zjZero
+					v.SecondDate = &a.f26
+					a.published26 = true
+				}
 			}
 			if txt := l.ReadTextBytes(); l.Err() == nil {
 				if err := v.SecondDate.UnmarshalText(txt); err != nil {
@@ -755,16 +852,18 @@ func zjDecodeFallbackEvent(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 				}
 			}
 		case "amounts":
-			if !a.s27 {
-				a.s27 = true
+			{
 				if v.Amounts != nil {
 					a.m27 = v.Amounts
-				} else if a.m27 == nil {
+					a.owned27 = false
+				} else if a.m27 == nil || !a.owned27 || a.mapPublished27 {
 					a.m27 = make(map[string]testleaf.Decimal)
+					a.owned27 = true
 				} else {
 					clear(a.m27)
 				}
 			}
+			a.mapPublished27 = true
 			if l.EnterObject() {
 				for {
 					mk := string(zerojson.Intern(l.ReadKey()))
@@ -793,16 +892,18 @@ func zjDecodeFallbackEvent(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 				v.Extra = l.ReadInterface()
 			}
 		case "bag":
-			if !a.s29 {
-				a.s29 = true
+			{
 				if v.Bag != nil {
 					a.m29 = v.Bag
-				} else if a.m29 == nil {
+					a.owned29 = false
+				} else if a.m29 == nil || !a.owned29 || a.mapPublished29 {
 					a.m29 = make(map[string]any)
+					a.owned29 = true
 				} else {
 					clear(a.m29)
 				}
 			}
+			a.mapPublished29 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -821,6 +922,14 @@ func zjDecodeFallbackEvent(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 			}
 			v.Bag = a.m29
 		case "any_list":
+			if v.AnyList != nil {
+				a.c30 = v.AnyList
+				a.sliceBorrowed30 = true
+			} else if a.slicePublished30 || a.sliceBorrowed30 {
+				a.c30 = nil
+				a.sliceBorrowed30 = false
+			}
+			a.slicePublished30 = true
 			a.c30 = a.c30[:0]
 			if l.EnterArray() {
 				for {
@@ -879,9 +988,9 @@ type EventDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -894,8 +1003,9 @@ func (d *EventDecoder) Decode(data []byte, v *Event) error {
 	defer d.busy.Store(false)
 	var zero Event
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, false)
-	zjDecodeEvent(&l, v, &d.a)
+	zjDecode_Event(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -911,19 +1021,25 @@ func (d *EventDecoder) DecodeBorrow(data []byte, v *Event) error {
 	defer d.busy.Store(false)
 	var zero Event
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, true)
-	zjDecodeEvent(&l, v, &d.a)
+	zjDecode_Event(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
 
-// zjArenaRawHolder backs every pointer field of a decoded RawHolder with a single
+// zjArenaRawHolder holds first-use pointer cells for a decoded RawHolder in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaRawHolder struct {
-	f2 zerojson.Raw
+	published2 bool
+	f2         zerojson.Raw
+}
+
+func (a *zjArenaRawHolder) beginDecode() {
+	a.published2 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -982,7 +1098,7 @@ func (v *RawHolder) UnmarshalZJSONBorrow(data []byte) error {
 func (v *RawHolder) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaRawHolder{}
-	zjDecodeRawHolder(&l, v, a)
+	zjDecode_RawHolder(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -992,20 +1108,20 @@ func (v *RawHolder) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *RawHolder) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaRawHolder{}
-	zjDecodeRawHolder(l, v, a)
+	zjDecode_RawHolder(l, v, a)
 }
 
-// zjDecodeRawHolder tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_RawHolder tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeRawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHolder) {
+func zjDecode_RawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHolder) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedRawHolder(l, v, a) {
+	if zjDecodeOrdered_RawHolder(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -1016,17 +1132,17 @@ func zjDecodeRawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHolder) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackRawHolder(l, v, a)
+	zjDecodeFallback_RawHolder(l, v, a)
 }
 
-// zjDecodeOrderedRawHolder speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_RawHolder speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackRawHolder;
+// non-compact syntax. The caller retries those through zjDecodeFallback_RawHolder;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedRawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHolder) bool {
+func zjDecodeOrdered_RawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHolder) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.Where != nil {
@@ -1094,7 +1210,7 @@ func zjDecodeOrderedRawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHold
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldRawHolder(l, v, a, matched) {
+			if !zjDecodeOrderedField_RawHolder(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -1116,7 +1232,7 @@ func zjDecodeOrderedRawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHold
 	}
 }
 
-func zjDecodeOrderedFieldRawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHolder, k int) bool {
+func zjDecodeOrderedField_RawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHolder, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 1:
@@ -1137,9 +1253,14 @@ func zjDecodeOrderedFieldRawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRa
 		zerojson.ReadRaw(l, &v.Set)
 	case 2:
 		if v.Where == nil {
-			var zjZero zerojson.Raw
-			a.f2 = zjZero
-			v.Where = &a.f2
+			if a.published2 {
+				v.Where = new(zerojson.Raw)
+			} else {
+				var zjZero zerojson.Raw
+				a.f2 = zjZero
+				v.Where = &a.f2
+				a.published2 = true
+			}
 		}
 		zerojson.ReadRaw(l, v.Where)
 	}
@@ -1204,10 +1325,10 @@ func zjIsDeclaredKeyRawHolder(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackRawHolder is the general keyed decoder: every member is read via
+// zjDecodeFallback_RawHolder is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackRawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHolder) {
+func zjDecodeFallback_RawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHolder) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -1240,9 +1361,14 @@ func zjDecodeFallbackRawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHol
 			zerojson.ReadRaw(l, &v.Set)
 		case "where":
 			if v.Where == nil {
-				var zjZero zerojson.Raw
-				a.f2 = zjZero
-				v.Where = &a.f2
+				if a.published2 {
+					v.Where = new(zerojson.Raw)
+				} else {
+					var zjZero zerojson.Raw
+					a.f2 = zjZero
+					v.Where = &a.f2
+					a.published2 = true
+				}
 			}
 			zerojson.ReadRaw(l, v.Where)
 		default:
@@ -1268,9 +1394,9 @@ type RawHolderDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -1283,8 +1409,9 @@ func (d *RawHolderDecoder) Decode(data []byte, v *RawHolder) error {
 	defer d.busy.Store(false)
 	var zero RawHolder
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, false)
-	zjDecodeRawHolder(&l, v, &d.a)
+	zjDecode_RawHolder(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -1300,21 +1427,33 @@ func (d *RawHolderDecoder) DecodeBorrow(data []byte, v *RawHolder) error {
 	defer d.busy.Store(false)
 	var zero RawHolder
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, true)
-	zjDecodeRawHolder(&l, v, &d.a)
+	zjDecode_RawHolder(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
 
-// zjArenaOmitZeroCases backs every pointer field of a decoded OmitZeroCases with a single
+// zjArenaOmitZeroCases holds first-use pointer cells for a decoded OmitZeroCases in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaOmitZeroCases struct {
-	f5 int
-	c6 []string
-	c7 []string
+	published5      bool
+	f5              int
+	slicePublished6 bool
+	sliceBorrowed6  bool // adopted storage must not be recycled on the next pooled call
+	c6              []string
+	slicePublished7 bool
+	sliceBorrowed7  bool // adopted storage must not be recycled on the next pooled call
+	c7              []string
+}
+
+func (a *zjArenaOmitZeroCases) beginDecode() {
+	a.published5 = false
+	a.slicePublished6 = false
+	a.slicePublished7 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -1426,7 +1565,7 @@ func (v *OmitZeroCases) UnmarshalZJSONBorrow(data []byte) error {
 func (v *OmitZeroCases) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaOmitZeroCases{}
-	zjDecodeOmitZeroCases(&l, v, a)
+	zjDecode_OmitZeroCases(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -1436,20 +1575,20 @@ func (v *OmitZeroCases) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *OmitZeroCases) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaOmitZeroCases{}
-	zjDecodeOmitZeroCases(l, v, a)
+	zjDecode_OmitZeroCases(l, v, a)
 }
 
-// zjDecodeOmitZeroCases tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_OmitZeroCases tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeOmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjArenaOmitZeroCases) {
+func zjDecode_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjArenaOmitZeroCases) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedOmitZeroCases(l, v, a) {
+	if zjDecodeOrdered_OmitZeroCases(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -1460,17 +1599,17 @@ func zjDecodeOmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjArenaOmitZe
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackOmitZeroCases(l, v, a)
+	zjDecodeFallback_OmitZeroCases(l, v, a)
 }
 
-// zjDecodeOrderedOmitZeroCases speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_OmitZeroCases speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackOmitZeroCases;
+// non-compact syntax. The caller retries those through zjDecodeFallback_OmitZeroCases;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedOmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjArenaOmitZeroCases) bool {
+func zjDecodeOrdered_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjArenaOmitZeroCases) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.Ptr != nil {
@@ -1538,7 +1677,7 @@ func zjDecodeOrderedOmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjAren
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldOmitZeroCases(l, v, a, matched) {
+			if !zjDecodeOrderedField_OmitZeroCases(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -1560,7 +1699,7 @@ func zjDecodeOrderedOmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjAren
 	}
 }
 
-func zjDecodeOrderedFieldOmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjArenaOmitZeroCases, k int) bool {
+func zjDecodeOrderedField_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjArenaOmitZeroCases, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 5:
@@ -1589,12 +1728,25 @@ func zjDecodeOrderedFieldOmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *z
 		v.Name = l.ReadString()
 	case 5:
 		if v.Ptr == nil {
-			a.f5 = int(l.ReadInt())
-			v.Ptr = &a.f5
-		} else {
-			*v.Ptr = int(l.ReadInt())
+			if a.published5 {
+				v.Ptr = new(int)
+			} else {
+				var zjZero int
+				a.f5 = zjZero
+				v.Ptr = &a.f5
+				a.published5 = true
+			}
 		}
+		*v.Ptr = int(l.ReadInt())
 	case 6:
+		if v.NilSlice != nil {
+			a.c6 = v.NilSlice
+			a.sliceBorrowed6 = true
+		} else if a.slicePublished6 || a.sliceBorrowed6 {
+			a.c6 = nil
+			a.sliceBorrowed6 = false
+		}
+		a.slicePublished6 = true
 		a.c6 = a.c6[:0]
 		if l.EnterArray() {
 			for {
@@ -1623,6 +1775,14 @@ func zjDecodeOrderedFieldOmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *z
 		}
 		v.NilSlice = a.c6
 	case 7:
+		if v.EmptySlice != nil {
+			a.c7 = v.EmptySlice
+			a.sliceBorrowed7 = true
+		} else if a.slicePublished7 || a.sliceBorrowed7 {
+			a.c7 = nil
+			a.sliceBorrowed7 = false
+		}
+		a.slicePublished7 = true
 		a.c7 = a.c7[:0]
 		if l.EnterArray() {
 			for {
@@ -1762,10 +1922,10 @@ func zjIsDeclaredKeyOmitZeroCases(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackOmitZeroCases is the general keyed decoder: every member is read via
+// zjDecodeFallback_OmitZeroCases is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackOmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjArenaOmitZeroCases) {
+func zjDecodeFallback_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjArenaOmitZeroCases) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -1806,12 +1966,25 @@ func zjDecodeFallbackOmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjAre
 			v.Name = l.ReadString()
 		case "ptr":
 			if v.Ptr == nil {
-				a.f5 = int(l.ReadInt())
-				v.Ptr = &a.f5
-			} else {
-				*v.Ptr = int(l.ReadInt())
+				if a.published5 {
+					v.Ptr = new(int)
+				} else {
+					var zjZero int
+					a.f5 = zjZero
+					v.Ptr = &a.f5
+					a.published5 = true
+				}
 			}
+			*v.Ptr = int(l.ReadInt())
 		case "nil_slice":
+			if v.NilSlice != nil {
+				a.c6 = v.NilSlice
+				a.sliceBorrowed6 = true
+			} else if a.slicePublished6 || a.sliceBorrowed6 {
+				a.c6 = nil
+				a.sliceBorrowed6 = false
+			}
+			a.slicePublished6 = true
 			a.c6 = a.c6[:0]
 			if l.EnterArray() {
 				for {
@@ -1840,6 +2013,14 @@ func zjDecodeFallbackOmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjAre
 			}
 			v.NilSlice = a.c6
 		case "empty_slice":
+			if v.EmptySlice != nil {
+				a.c7 = v.EmptySlice
+				a.sliceBorrowed7 = true
+			} else if a.slicePublished7 || a.sliceBorrowed7 {
+				a.c7 = nil
+				a.sliceBorrowed7 = false
+			}
+			a.slicePublished7 = true
 			a.c7 = a.c7[:0]
 			if l.EnterArray() {
 				for {
@@ -1890,9 +2071,9 @@ type OmitZeroCasesDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -1905,8 +2086,9 @@ func (d *OmitZeroCasesDecoder) Decode(data []byte, v *OmitZeroCases) error {
 	defer d.busy.Store(false)
 	var zero OmitZeroCases
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, false)
-	zjDecodeOmitZeroCases(&l, v, &d.a)
+	zjDecode_OmitZeroCases(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -1922,18 +2104,22 @@ func (d *OmitZeroCasesDecoder) DecodeBorrow(data []byte, v *OmitZeroCases) error
 	defer d.busy.Store(false)
 	var zero OmitZeroCases
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, true)
-	zjDecodeOmitZeroCases(&l, v, &d.a)
+	zjDecode_OmitZeroCases(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
 
-// zjArenaStringOptCases backs every pointer field of a decoded StringOptCases with a single
+// zjArenaStringOptCases holds first-use pointer cells for a decoded StringOptCases in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaStringOptCases struct {
+}
+
+func (a *zjArenaStringOptCases) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -1977,7 +2163,7 @@ func (v *StringOptCases) UnmarshalZJSONBorrow(data []byte) error {
 func (v *StringOptCases) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaStringOptCases{}
-	zjDecodeStringOptCases(&l, v, a)
+	zjDecode_StringOptCases(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -1987,20 +2173,20 @@ func (v *StringOptCases) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *StringOptCases) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaStringOptCases{}
-	zjDecodeStringOptCases(l, v, a)
+	zjDecode_StringOptCases(l, v, a)
 }
 
-// zjDecodeStringOptCases tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_StringOptCases tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeStringOptCases(l *zerojson.Lexer, v *StringOptCases, a *zjArenaStringOptCases) {
+func zjDecode_StringOptCases(l *zerojson.Lexer, v *StringOptCases, a *zjArenaStringOptCases) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedStringOptCases(l, v, a) {
+	if zjDecodeOrdered_StringOptCases(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -2011,17 +2197,17 @@ func zjDecodeStringOptCases(l *zerojson.Lexer, v *StringOptCases, a *zjArenaStri
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackStringOptCases(l, v, a)
+	zjDecodeFallback_StringOptCases(l, v, a)
 }
 
-// zjDecodeOrderedStringOptCases speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_StringOptCases speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackStringOptCases;
+// non-compact syntax. The caller retries those through zjDecodeFallback_StringOptCases;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedStringOptCases(l *zerojson.Lexer, v *StringOptCases, a *zjArenaStringOptCases) bool {
+func zjDecodeOrdered_StringOptCases(l *zerojson.Lexer, v *StringOptCases, a *zjArenaStringOptCases) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -2085,7 +2271,7 @@ func zjDecodeOrderedStringOptCases(l *zerojson.Lexer, v *StringOptCases, a *zjAr
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldStringOptCases(l, v, a, matched) {
+			if !zjDecodeOrderedField_StringOptCases(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -2107,7 +2293,7 @@ func zjDecodeOrderedStringOptCases(l *zerojson.Lexer, v *StringOptCases, a *zjAr
 	}
 }
 
-func zjDecodeOrderedFieldStringOptCases(l *zerojson.Lexer, v *StringOptCases, a *zjArenaStringOptCases, k int) bool {
+func zjDecodeOrderedField_StringOptCases(l *zerojson.Lexer, v *StringOptCases, a *zjArenaStringOptCases, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesStringOptCases[k])
@@ -2178,10 +2364,10 @@ func zjIsDeclaredKeyStringOptCases(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackStringOptCases is the general keyed decoder: every member is read via
+// zjDecodeFallback_StringOptCases is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackStringOptCases(l *zerojson.Lexer, v *StringOptCases, a *zjArenaStringOptCases) {
+func zjDecodeFallback_StringOptCases(l *zerojson.Lexer, v *StringOptCases, a *zjArenaStringOptCases) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -2235,9 +2421,9 @@ type StringOptCasesDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -2250,8 +2436,9 @@ func (d *StringOptCasesDecoder) Decode(data []byte, v *StringOptCases) error {
 	defer d.busy.Store(false)
 	var zero StringOptCases
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, false)
-	zjDecodeStringOptCases(&l, v, &d.a)
+	zjDecode_StringOptCases(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -2267,19 +2454,25 @@ func (d *StringOptCasesDecoder) DecodeBorrow(data []byte, v *StringOptCases) err
 	defer d.busy.Store(false)
 	var zero StringOptCases
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, true)
-	zjDecodeStringOptCases(&l, v, &d.a)
+	zjDecode_StringOptCases(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
 
-// zjArenaAppenderCases backs every pointer field of a decoded AppenderCases with a single
+// zjArenaAppenderCases holds first-use pointer cells for a decoded AppenderCases in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaAppenderCases struct {
-	f1 Cents
+	published1 bool
+	f1         Cents
+}
+
+func (a *zjArenaAppenderCases) beginDecode() {
+	a.published1 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -2331,7 +2524,7 @@ func (v *AppenderCases) UnmarshalZJSONBorrow(data []byte) error {
 func (v *AppenderCases) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaAppenderCases{}
-	zjDecodeAppenderCases(&l, v, a)
+	zjDecode_AppenderCases(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -2341,25 +2534,25 @@ func (v *AppenderCases) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *AppenderCases) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaAppenderCases{}
-	zjDecodeAppenderCases(l, v, a)
+	zjDecode_AppenderCases(l, v, a)
 }
 
-// zjDecodeAppenderCases tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_AppenderCases tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeAppenderCases(l *zerojson.Lexer, v *AppenderCases, a *zjArenaAppenderCases) {
+func zjDecode_AppenderCases(l *zerojson.Lexer, v *AppenderCases, a *zjArenaAppenderCases) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	zjDecodeFallbackAppenderCases(l, v, a)
+	zjDecodeFallback_AppenderCases(l, v, a)
 }
 
-// zjDecodeFallbackAppenderCases is the general keyed decoder: every member is read via
+// zjDecodeFallback_AppenderCases is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackAppenderCases(l *zerojson.Lexer, v *AppenderCases, a *zjArenaAppenderCases) {
+func zjDecodeFallback_AppenderCases(l *zerojson.Lexer, v *AppenderCases, a *zjArenaAppenderCases) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -2392,9 +2585,14 @@ func zjDecodeFallbackAppenderCases(l *zerojson.Lexer, v *AppenderCases, a *zjAre
 			(&v.Amount).ReadZJSON(l)
 		case "cost":
 			if v.Cost == nil {
-				var zjZero Cents
-				a.f1 = zjZero
-				v.Cost = &a.f1
+				if a.published1 {
+					v.Cost = new(Cents)
+				} else {
+					var zjZero Cents
+					a.f1 = zjZero
+					v.Cost = &a.f1
+					a.published1 = true
+				}
 			}
 			v.Cost.ReadZJSON(l)
 		default:
@@ -2420,9 +2618,9 @@ type AppenderCasesDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -2435,8 +2633,9 @@ func (d *AppenderCasesDecoder) Decode(data []byte, v *AppenderCases) error {
 	defer d.busy.Store(false)
 	var zero AppenderCases
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, false)
-	zjDecodeAppenderCases(&l, v, &d.a)
+	zjDecode_AppenderCases(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -2452,18 +2651,22 @@ func (d *AppenderCasesDecoder) DecodeBorrow(data []byte, v *AppenderCases) error
 	defer d.busy.Store(false)
 	var zero AppenderCases
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, true)
-	zjDecodeAppenderCases(&l, v, &d.a)
+	zjDecode_AppenderCases(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
 
-// zjArenaMapFieldsLike backs every pointer field of a decoded MapFieldsLike with a single
+// zjArenaMapFieldsLike holds first-use pointer cells for a decoded MapFieldsLike in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaMapFieldsLike struct {
+}
+
+func (a *zjArenaMapFieldsLike) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -2528,7 +2731,7 @@ func (v *MapFieldsLike) UnmarshalZJSONBorrow(data []byte) error {
 func (v *MapFieldsLike) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaMapFieldsLike{}
-	zjDecodeMapFieldsLike(&l, v, a)
+	zjDecode_MapFieldsLike(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -2538,25 +2741,25 @@ func (v *MapFieldsLike) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *MapFieldsLike) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaMapFieldsLike{}
-	zjDecodeMapFieldsLike(l, v, a)
+	zjDecode_MapFieldsLike(l, v, a)
 }
 
-// zjDecodeMapFieldsLike tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_MapFieldsLike tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeMapFieldsLike(l *zerojson.Lexer, v *MapFieldsLike, a *zjArenaMapFieldsLike) {
+func zjDecode_MapFieldsLike(l *zerojson.Lexer, v *MapFieldsLike, a *zjArenaMapFieldsLike) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	zjDecodeFallbackMapFieldsLike(l, v, a)
+	zjDecodeFallback_MapFieldsLike(l, v, a)
 }
 
-// zjDecodeFallbackMapFieldsLike is the general keyed decoder: every member is read via
+// zjDecodeFallback_MapFieldsLike is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackMapFieldsLike(l *zerojson.Lexer, v *MapFieldsLike, a *zjArenaMapFieldsLike) {
+func zjDecodeFallback_MapFieldsLike(l *zerojson.Lexer, v *MapFieldsLike, a *zjArenaMapFieldsLike) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -2624,9 +2827,9 @@ type MapFieldsLikeDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -2639,8 +2842,9 @@ func (d *MapFieldsLikeDecoder) Decode(data []byte, v *MapFieldsLike) error {
 	defer d.busy.Store(false)
 	var zero MapFieldsLike
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, false)
-	zjDecodeMapFieldsLike(&l, v, &d.a)
+	zjDecode_MapFieldsLike(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -2656,18 +2860,22 @@ func (d *MapFieldsLikeDecoder) DecodeBorrow(data []byte, v *MapFieldsLike) error
 	defer d.busy.Store(false)
 	var zero MapFieldsLike
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, true)
-	zjDecodeMapFieldsLike(&l, v, &d.a)
+	zjDecode_MapFieldsLike(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
 
-// zjArenaEventLeg backs every pointer field of a decoded EventLeg with a single
+// zjArenaEventLeg holds first-use pointer cells for a decoded EventLeg in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaEventLeg struct {
+}
+
+func (a *zjArenaEventLeg) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -2718,7 +2926,7 @@ func (v *EventLeg) UnmarshalZJSONBorrow(data []byte) error {
 func (v *EventLeg) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaEventLeg{}
-	zjDecodeEventLeg(&l, v, a)
+	zjDecode_EventLeg(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -2728,20 +2936,20 @@ func (v *EventLeg) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *EventLeg) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaEventLeg{}
-	zjDecodeEventLeg(l, v, a)
+	zjDecode_EventLeg(l, v, a)
 }
 
-// zjDecodeEventLeg tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_EventLeg tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeEventLeg(l *zerojson.Lexer, v *EventLeg, a *zjArenaEventLeg) {
+func zjDecode_EventLeg(l *zerojson.Lexer, v *EventLeg, a *zjArenaEventLeg) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedEventLeg(l, v, a) {
+	if zjDecodeOrdered_EventLeg(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -2752,17 +2960,17 @@ func zjDecodeEventLeg(l *zerojson.Lexer, v *EventLeg, a *zjArenaEventLeg) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackEventLeg(l, v, a)
+	zjDecodeFallback_EventLeg(l, v, a)
 }
 
-// zjDecodeOrderedEventLeg speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_EventLeg speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackEventLeg;
+// non-compact syntax. The caller retries those through zjDecodeFallback_EventLeg;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedEventLeg(l *zerojson.Lexer, v *EventLeg, a *zjArenaEventLeg) bool {
+func zjDecodeOrdered_EventLeg(l *zerojson.Lexer, v *EventLeg, a *zjArenaEventLeg) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -2826,7 +3034,7 @@ func zjDecodeOrderedEventLeg(l *zerojson.Lexer, v *EventLeg, a *zjArenaEventLeg)
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldEventLeg(l, v, a, matched) {
+			if !zjDecodeOrderedField_EventLeg(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -2848,7 +3056,7 @@ func zjDecodeOrderedEventLeg(l *zerojson.Lexer, v *EventLeg, a *zjArenaEventLeg)
 	}
 }
 
-func zjDecodeOrderedFieldEventLeg(l *zerojson.Lexer, v *EventLeg, a *zjArenaEventLeg, k int) bool {
+func zjDecodeOrderedField_EventLeg(l *zerojson.Lexer, v *EventLeg, a *zjArenaEventLeg, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesEventLeg[k])
@@ -2932,10 +3140,10 @@ func zjIsDeclaredKeyEventLeg(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackEventLeg is the general keyed decoder: every member is read via
+// zjDecodeFallback_EventLeg is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackEventLeg(l *zerojson.Lexer, v *EventLeg, a *zjArenaEventLeg) {
+func zjDecodeFallback_EventLeg(l *zerojson.Lexer, v *EventLeg, a *zjArenaEventLeg) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -2992,9 +3200,9 @@ type EventLegDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -3007,8 +3215,9 @@ func (d *EventLegDecoder) Decode(data []byte, v *EventLeg) error {
 	defer d.busy.Store(false)
 	var zero EventLeg
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, false)
-	zjDecodeEventLeg(&l, v, &d.a)
+	zjDecode_EventLeg(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -3024,18 +3233,22 @@ func (d *EventLegDecoder) DecodeBorrow(data []byte, v *EventLeg) error {
 	defer d.busy.Store(false)
 	var zero EventLeg
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, true)
-	zjDecodeEventLeg(&l, v, &d.a)
+	zjDecode_EventLeg(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
 
-// zjArenaEmbedMid backs every pointer field of a decoded EmbedMid with a single
+// zjArenaEmbedMid holds first-use pointer cells for a decoded EmbedMid in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaEmbedMid struct {
+}
+
+func (a *zjArenaEmbedMid) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -3093,7 +3306,7 @@ func (v *EmbedMid) UnmarshalZJSONBorrow(data []byte) error {
 func (v *EmbedMid) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaEmbedMid{}
-	zjDecodeEmbedMid(&l, v, a)
+	zjDecode_EmbedMid(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -3103,20 +3316,20 @@ func (v *EmbedMid) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *EmbedMid) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaEmbedMid{}
-	zjDecodeEmbedMid(l, v, a)
+	zjDecode_EmbedMid(l, v, a)
 }
 
-// zjDecodeEmbedMid tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_EmbedMid tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeEmbedMid(l *zerojson.Lexer, v *EmbedMid, a *zjArenaEmbedMid) {
+func zjDecode_EmbedMid(l *zerojson.Lexer, v *EmbedMid, a *zjArenaEmbedMid) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedEmbedMid(l, v, a) {
+	if zjDecodeOrdered_EmbedMid(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -3127,17 +3340,17 @@ func zjDecodeEmbedMid(l *zerojson.Lexer, v *EmbedMid, a *zjArenaEmbedMid) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackEmbedMid(l, v, a)
+	zjDecodeFallback_EmbedMid(l, v, a)
 }
 
-// zjDecodeOrderedEmbedMid speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_EmbedMid speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackEmbedMid;
+// non-compact syntax. The caller retries those through zjDecodeFallback_EmbedMid;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedEmbedMid(l *zerojson.Lexer, v *EmbedMid, a *zjArenaEmbedMid) bool {
+func zjDecodeOrdered_EmbedMid(l *zerojson.Lexer, v *EmbedMid, a *zjArenaEmbedMid) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -3201,7 +3414,7 @@ func zjDecodeOrderedEmbedMid(l *zerojson.Lexer, v *EmbedMid, a *zjArenaEmbedMid)
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldEmbedMid(l, v, a, matched) {
+			if !zjDecodeOrderedField_EmbedMid(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -3223,7 +3436,7 @@ func zjDecodeOrderedEmbedMid(l *zerojson.Lexer, v *EmbedMid, a *zjArenaEmbedMid)
 	}
 }
 
-func zjDecodeOrderedFieldEmbedMid(l *zerojson.Lexer, v *EmbedMid, a *zjArenaEmbedMid, k int) bool {
+func zjDecodeOrderedField_EmbedMid(l *zerojson.Lexer, v *EmbedMid, a *zjArenaEmbedMid, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesEmbedMid[k])
@@ -3312,10 +3525,10 @@ func zjIsDeclaredKeyEmbedMid(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackEmbedMid is the general keyed decoder: every member is read via
+// zjDecodeFallback_EmbedMid is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackEmbedMid(l *zerojson.Lexer, v *EmbedMid, a *zjArenaEmbedMid) {
+func zjDecodeFallback_EmbedMid(l *zerojson.Lexer, v *EmbedMid, a *zjArenaEmbedMid) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -3367,9 +3580,9 @@ type EmbedMidDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -3382,8 +3595,9 @@ func (d *EmbedMidDecoder) Decode(data []byte, v *EmbedMid) error {
 	defer d.busy.Store(false)
 	var zero EmbedMid
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, false)
-	zjDecodeEmbedMid(&l, v, &d.a)
+	zjDecode_EmbedMid(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -3399,18 +3613,22 @@ func (d *EmbedMidDecoder) DecodeBorrow(data []byte, v *EmbedMid) error {
 	defer d.busy.Store(false)
 	var zero EmbedMid
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, true)
-	zjDecodeEmbedMid(&l, v, &d.a)
+	zjDecode_EmbedMid(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
 
-// zjArenaEventProjection backs every pointer field of a decoded EventProjection with a single
+// zjArenaEventProjection holds first-use pointer cells for a decoded EventProjection in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaEventProjection struct {
+}
+
+func (a *zjArenaEventProjection) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -3454,7 +3672,7 @@ func (v *EventProjection) UnmarshalZJSONBorrow(data []byte) error {
 func (v *EventProjection) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaEventProjection{}
-	zjDecodeEventProjection(&l, v, a)
+	zjDecode_EventProjection(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -3464,20 +3682,20 @@ func (v *EventProjection) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *EventProjection) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaEventProjection{}
-	zjDecodeEventProjection(l, v, a)
+	zjDecode_EventProjection(l, v, a)
 }
 
-// zjDecodeEventProjection tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_EventProjection tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeEventProjection(l *zerojson.Lexer, v *EventProjection, a *zjArenaEventProjection) {
+func zjDecode_EventProjection(l *zerojson.Lexer, v *EventProjection, a *zjArenaEventProjection) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedEventProjection(l, v, a) {
+	if zjDecodeOrdered_EventProjection(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -3488,17 +3706,17 @@ func zjDecodeEventProjection(l *zerojson.Lexer, v *EventProjection, a *zjArenaEv
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackEventProjection(l, v, a)
+	zjDecodeFallback_EventProjection(l, v, a)
 }
 
-// zjDecodeOrderedEventProjection speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_EventProjection speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackEventProjection;
+// non-compact syntax. The caller retries those through zjDecodeFallback_EventProjection;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedEventProjection(l *zerojson.Lexer, v *EventProjection, a *zjArenaEventProjection) bool {
+func zjDecodeOrdered_EventProjection(l *zerojson.Lexer, v *EventProjection, a *zjArenaEventProjection) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -3562,7 +3780,7 @@ func zjDecodeOrderedEventProjection(l *zerojson.Lexer, v *EventProjection, a *zj
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldEventProjection(l, v, a, matched) {
+			if !zjDecodeOrderedField_EventProjection(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -3584,7 +3802,7 @@ func zjDecodeOrderedEventProjection(l *zerojson.Lexer, v *EventProjection, a *zj
 	}
 }
 
-func zjDecodeOrderedFieldEventProjection(l *zerojson.Lexer, v *EventProjection, a *zjArenaEventProjection, k int) bool {
+func zjDecodeOrderedField_EventProjection(l *zerojson.Lexer, v *EventProjection, a *zjArenaEventProjection, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesEventProjection[k])
@@ -3649,10 +3867,10 @@ func zjIsDeclaredKeyEventProjection(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackEventProjection is the general keyed decoder: every member is read via
+// zjDecodeFallback_EventProjection is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackEventProjection(l *zerojson.Lexer, v *EventProjection, a *zjArenaEventProjection) {
+func zjDecodeFallback_EventProjection(l *zerojson.Lexer, v *EventProjection, a *zjArenaEventProjection) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -3700,9 +3918,9 @@ type EventProjectionDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -3715,8 +3933,9 @@ func (d *EventProjectionDecoder) Decode(data []byte, v *EventProjection) error {
 	defer d.busy.Store(false)
 	var zero EventProjection
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, false)
-	zjDecodeEventProjection(&l, v, &d.a)
+	zjDecode_EventProjection(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -3732,21 +3951,32 @@ func (d *EventProjectionDecoder) DecodeBorrow(data []byte, v *EventProjection) e
 	defer d.busy.Store(false)
 	var zero EventProjection
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, true)
-	zjDecodeEventProjection(&l, v, &d.a)
+	zjDecode_EventProjection(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
 
-// zjArenaInteractionOmitZero backs every pointer field of a decoded InteractionOmitZero with a single
+// zjArenaInteractionOmitZero holds first-use pointer cells for a decoded InteractionOmitZero in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaInteractionOmitZero struct {
-	f0 time.Time
-	f1 time.Time
-	c3 []int
+	published0      bool
+	f0              time.Time
+	published1      bool
+	f1              time.Time
+	slicePublished3 bool
+	sliceBorrowed3  bool // adopted storage must not be recycled on the next pooled call
+	c3              []int
+}
+
+func (a *zjArenaInteractionOmitZero) beginDecode() {
+	a.published0 = false
+	a.published1 = false
+	a.slicePublished3 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -3823,7 +4053,7 @@ func (v *InteractionOmitZero) UnmarshalZJSONBorrow(data []byte) error {
 func (v *InteractionOmitZero) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaInteractionOmitZero{}
-	zjDecodeInteractionOmitZero(&l, v, a)
+	zjDecode_InteractionOmitZero(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -3833,20 +4063,20 @@ func (v *InteractionOmitZero) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *InteractionOmitZero) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaInteractionOmitZero{}
-	zjDecodeInteractionOmitZero(l, v, a)
+	zjDecode_InteractionOmitZero(l, v, a)
 }
 
-// zjDecodeInteractionOmitZero tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_InteractionOmitZero tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeInteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZero, a *zjArenaInteractionOmitZero) {
+func zjDecode_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZero, a *zjArenaInteractionOmitZero) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedInteractionOmitZero(l, v, a) {
+	if zjDecodeOrdered_InteractionOmitZero(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -3857,17 +4087,17 @@ func zjDecodeInteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZero, a *z
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackInteractionOmitZero(l, v, a)
+	zjDecodeFallback_InteractionOmitZero(l, v, a)
 }
 
-// zjDecodeOrderedInteractionOmitZero speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_InteractionOmitZero speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackInteractionOmitZero;
+// non-compact syntax. The caller retries those through zjDecodeFallback_InteractionOmitZero;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedInteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZero, a *zjArenaInteractionOmitZero) bool {
+func zjDecodeOrdered_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZero, a *zjArenaInteractionOmitZero) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.When != nil || v.Both != nil {
@@ -3935,7 +4165,7 @@ func zjDecodeOrderedInteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZer
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldInteractionOmitZero(l, v, a, matched) {
+			if !zjDecodeOrderedField_InteractionOmitZero(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -3957,7 +4187,7 @@ func zjDecodeOrderedInteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZer
 	}
 }
 
-func zjDecodeOrderedFieldInteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZero, a *zjArenaInteractionOmitZero, k int) bool {
+func zjDecodeOrderedField_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZero, a *zjArenaInteractionOmitZero, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -3976,21 +4206,39 @@ func zjDecodeOrderedFieldInteractionOmitZero(l *zerojson.Lexer, v *InteractionOm
 	switch k {
 	case 0:
 		if v.When == nil {
-			a.f0 = l.ReadTime()
-			v.When = &a.f0
-		} else {
-			*v.When = l.ReadTime()
+			if a.published0 {
+				v.When = new(time.Time)
+			} else {
+				var zjZero time.Time
+				a.f0 = zjZero
+				v.When = &a.f0
+				a.published0 = true
+			}
 		}
+		*v.When = l.ReadTime()
 	case 1:
 		if v.Both == nil {
-			a.f1 = l.ReadTime()
-			v.Both = &a.f1
-		} else {
-			*v.Both = l.ReadTime()
+			if a.published1 {
+				v.Both = new(time.Time)
+			} else {
+				var zjZero time.Time
+				a.f1 = zjZero
+				v.Both = &a.f1
+				a.published1 = true
+			}
 		}
+		*v.Both = l.ReadTime()
 	case 2:
 		v.Odd = OddInt(l.ReadInt())
 	case 3:
+		if v.Items != nil {
+			a.c3 = v.Items
+			a.sliceBorrowed3 = true
+		} else if a.slicePublished3 || a.sliceBorrowed3 {
+			a.c3 = nil
+			a.sliceBorrowed3 = false
+		}
+		a.slicePublished3 = true
 		a.c3 = a.c3[:0]
 		if l.EnterArray() {
 			for {
@@ -4090,10 +4338,10 @@ func zjIsDeclaredKeyInteractionOmitZero(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackInteractionOmitZero is the general keyed decoder: every member is read via
+// zjDecodeFallback_InteractionOmitZero is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackInteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZero, a *zjArenaInteractionOmitZero) {
+func zjDecodeFallback_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZero, a *zjArenaInteractionOmitZero) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -4124,21 +4372,39 @@ func zjDecodeFallbackInteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZe
 		switch string(key) {
 		case "when":
 			if v.When == nil {
-				a.f0 = l.ReadTime()
-				v.When = &a.f0
-			} else {
-				*v.When = l.ReadTime()
+				if a.published0 {
+					v.When = new(time.Time)
+				} else {
+					var zjZero time.Time
+					a.f0 = zjZero
+					v.When = &a.f0
+					a.published0 = true
+				}
 			}
+			*v.When = l.ReadTime()
 		case "both":
 			if v.Both == nil {
-				a.f1 = l.ReadTime()
-				v.Both = &a.f1
-			} else {
-				*v.Both = l.ReadTime()
+				if a.published1 {
+					v.Both = new(time.Time)
+				} else {
+					var zjZero time.Time
+					a.f1 = zjZero
+					v.Both = &a.f1
+					a.published1 = true
+				}
 			}
+			*v.Both = l.ReadTime()
 		case "odd":
 			v.Odd = OddInt(l.ReadInt())
 		case "items":
+			if v.Items != nil {
+				a.c3 = v.Items
+				a.sliceBorrowed3 = true
+			} else if a.slicePublished3 || a.sliceBorrowed3 {
+				a.c3 = nil
+				a.sliceBorrowed3 = false
+			}
+			a.slicePublished3 = true
 			a.c3 = a.c3[:0]
 			if l.EnterArray() {
 				for {
@@ -4189,9 +4455,9 @@ type InteractionOmitZeroDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -4204,8 +4470,9 @@ func (d *InteractionOmitZeroDecoder) Decode(data []byte, v *InteractionOmitZero)
 	defer d.busy.Store(false)
 	var zero InteractionOmitZero
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, false)
-	zjDecodeInteractionOmitZero(&l, v, &d.a)
+	zjDecode_InteractionOmitZero(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -4221,22 +4488,30 @@ func (d *InteractionOmitZeroDecoder) DecodeBorrow(data []byte, v *InteractionOmi
 	defer d.busy.Store(false)
 	var zero InteractionOmitZero
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, true)
-	zjDecodeInteractionOmitZero(&l, v, &d.a)
+	zjDecode_InteractionOmitZero(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
 
-// zjArenaMapPointerMethods backs every pointer field of a decoded MapPointerMethods with a single
+// zjArenaMapPointerMethods holds first-use pointer cells for a decoded MapPointerMethods in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaMapPointerMethods struct {
-	s0 bool
-	m0 map[string]PointerOnlyJSON
-	s1 bool
-	m1 map[string]PointerOnlyQuoted
+	m0            map[string]PointerOnlyJSON
+	owned0        bool // only arena-owned maps may be cleared for reuse
+	mapPublished0 bool
+	m1            map[string]PointerOnlyQuoted
+	owned1        bool // only arena-owned maps may be cleared for reuse
+	mapPublished1 bool
+}
+
+func (a *zjArenaMapPointerMethods) beginDecode() {
+	a.mapPublished0 = false
+	a.mapPublished1 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -4318,7 +4593,7 @@ func (v *MapPointerMethods) UnmarshalZJSONBorrow(data []byte) error {
 func (v *MapPointerMethods) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaMapPointerMethods{}
-	zjDecodeMapPointerMethods(&l, v, a)
+	zjDecode_MapPointerMethods(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -4328,27 +4603,25 @@ func (v *MapPointerMethods) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *MapPointerMethods) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaMapPointerMethods{}
-	zjDecodeMapPointerMethods(l, v, a)
+	zjDecode_MapPointerMethods(l, v, a)
 }
 
-// zjDecodeMapPointerMethods tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_MapPointerMethods tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeMapPointerMethods(l *zerojson.Lexer, v *MapPointerMethods, a *zjArenaMapPointerMethods) {
+func zjDecode_MapPointerMethods(l *zerojson.Lexer, v *MapPointerMethods, a *zjArenaMapPointerMethods) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s0 = false
-	a.s1 = false
-	zjDecodeFallbackMapPointerMethods(l, v, a)
+	zjDecodeFallback_MapPointerMethods(l, v, a)
 }
 
-// zjDecodeFallbackMapPointerMethods is the general keyed decoder: every member is read via
+// zjDecodeFallback_MapPointerMethods is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackMapPointerMethods(l *zerojson.Lexer, v *MapPointerMethods, a *zjArenaMapPointerMethods) {
+func zjDecodeFallback_MapPointerMethods(l *zerojson.Lexer, v *MapPointerMethods, a *zjArenaMapPointerMethods) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -4362,10 +4635,8 @@ func zjDecodeFallbackMapPointerMethods(l *zerojson.Lexer, v *MapPointerMethods, 
 			switch string(key) {
 			case "values":
 				v.Values = nil
-				a.s0 = false
 			case "numbers":
 				v.Numbers = nil
-				a.s1 = false
 			}
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -4378,16 +4649,18 @@ func zjDecodeFallbackMapPointerMethods(l *zerojson.Lexer, v *MapPointerMethods, 
 		}
 		switch string(key) {
 		case "values":
-			if !a.s0 {
-				a.s0 = true
+			{
 				if v.Values != nil {
 					a.m0 = v.Values
-				} else if a.m0 == nil {
+					a.owned0 = false
+				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 					a.m0 = make(map[string]PointerOnlyJSON)
+					a.owned0 = true
 				} else {
 					clear(a.m0)
 				}
 			}
+			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -4414,16 +4687,18 @@ func zjDecodeFallbackMapPointerMethods(l *zerojson.Lexer, v *MapPointerMethods, 
 			}
 			v.Values = a.m0
 		case "numbers":
-			if !a.s1 {
-				a.s1 = true
+			{
 				if v.Numbers != nil {
 					a.m1 = v.Numbers
-				} else if a.m1 == nil {
+					a.owned1 = false
+				} else if a.m1 == nil || !a.owned1 || a.mapPublished1 {
 					a.m1 = make(map[string]PointerOnlyQuoted)
+					a.owned1 = true
 				} else {
 					clear(a.m1)
 				}
 			}
+			a.mapPublished1 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -4472,9 +4747,9 @@ type MapPointerMethodsDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -4487,8 +4762,9 @@ func (d *MapPointerMethodsDecoder) Decode(data []byte, v *MapPointerMethods) err
 	defer d.busy.Store(false)
 	var zero MapPointerMethods
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, false)
-	zjDecodeMapPointerMethods(&l, v, &d.a)
+	zjDecode_MapPointerMethods(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -4504,22 +4780,31 @@ func (d *MapPointerMethodsDecoder) DecodeBorrow(data []byte, v *MapPointerMethod
 	defer d.busy.Store(false)
 	var zero MapPointerMethods
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, true)
-	zjDecodeMapPointerMethods(&l, v, &d.a)
+	zjDecode_MapPointerMethods(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
 
-// zjArenaReuseSemantics backs every pointer field of a decoded ReuseSemantics with a single
+// zjArenaReuseSemantics holds first-use pointer cells for a decoded ReuseSemantics in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaReuseSemantics struct {
-	s0 bool
-	m0 map[string]int
-	v1 ReuseInner
-	a1 zjArenaReuseInner
+	m0            map[string]int
+	owned0        bool // only arena-owned maps may be cleared for reuse
+	mapPublished0 bool
+	published1    bool
+	v1            ReuseInner
+	a1            zjArenaReuseInner
+}
+
+func (a *zjArenaReuseSemantics) beginDecode() {
+	a.mapPublished0 = false
+	a.published1 = false
+	a.a1.beginDecode()
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -4600,7 +4885,7 @@ func (v *ReuseSemantics) UnmarshalZJSONBorrow(data []byte) error {
 func (v *ReuseSemantics) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaReuseSemantics{}
-	zjDecodeReuseSemantics(&l, v, a)
+	zjDecode_ReuseSemantics(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -4610,26 +4895,25 @@ func (v *ReuseSemantics) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *ReuseSemantics) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaReuseSemantics{}
-	zjDecodeReuseSemantics(l, v, a)
+	zjDecode_ReuseSemantics(l, v, a)
 }
 
-// zjDecodeReuseSemantics tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_ReuseSemantics tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeReuseSemantics(l *zerojson.Lexer, v *ReuseSemantics, a *zjArenaReuseSemantics) {
+func zjDecode_ReuseSemantics(l *zerojson.Lexer, v *ReuseSemantics, a *zjArenaReuseSemantics) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s0 = false
-	zjDecodeFallbackReuseSemantics(l, v, a)
+	zjDecodeFallback_ReuseSemantics(l, v, a)
 }
 
-// zjDecodeFallbackReuseSemantics is the general keyed decoder: every member is read via
+// zjDecodeFallback_ReuseSemantics is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackReuseSemantics(l *zerojson.Lexer, v *ReuseSemantics, a *zjArenaReuseSemantics) {
+func zjDecodeFallback_ReuseSemantics(l *zerojson.Lexer, v *ReuseSemantics, a *zjArenaReuseSemantics) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -4643,7 +4927,6 @@ func zjDecodeFallbackReuseSemantics(l *zerojson.Lexer, v *ReuseSemantics, a *zjA
 			switch string(key) {
 			case "values":
 				v.Values = nil
-				a.s0 = false
 			case "inner":
 				v.Inner = nil
 			case "accum":
@@ -4662,16 +4945,18 @@ func zjDecodeFallbackReuseSemantics(l *zerojson.Lexer, v *ReuseSemantics, a *zjA
 		}
 		switch string(key) {
 		case "values":
-			if !a.s0 {
-				a.s0 = true
+			{
 				if v.Values != nil {
 					a.m0 = v.Values
-				} else if a.m0 == nil {
+					a.owned0 = false
+				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 					a.m0 = make(map[string]int)
+					a.owned0 = true
 				} else {
 					clear(a.m0)
 				}
 			}
+			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -4691,11 +4976,16 @@ func zjDecodeFallbackReuseSemantics(l *zerojson.Lexer, v *ReuseSemantics, a *zjA
 			v.Values = a.m0
 		case "inner":
 			if v.Inner == nil {
-				var zjZero ReuseInner
-				a.v1 = zjZero
-				v.Inner = &a.v1
+				if a.published1 {
+					v.Inner = new(ReuseInner)
+				} else {
+					var zjZero ReuseInner
+					a.v1 = zjZero
+					v.Inner = &a.v1
+					a.published1 = true
+				}
 			}
-			zjDecodeReuseInner(l, v.Inner, &a.a1)
+			zjDecode_ReuseInner(l, v.Inner, &a.a1)
 		case "accum":
 			if raw := l.RawValue(); l.Err() == nil {
 				if err := v.Accum.UnmarshalJSON(raw); err != nil {
@@ -4725,9 +5015,9 @@ type ReuseSemanticsDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -4740,8 +5030,9 @@ func (d *ReuseSemanticsDecoder) Decode(data []byte, v *ReuseSemantics) error {
 	defer d.busy.Store(false)
 	var zero ReuseSemantics
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, false)
-	zjDecodeReuseSemantics(&l, v, &d.a)
+	zjDecode_ReuseSemantics(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -4757,18 +5048,22 @@ func (d *ReuseSemanticsDecoder) DecodeBorrow(data []byte, v *ReuseSemantics) err
 	defer d.busy.Store(false)
 	var zero ReuseSemantics
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, true)
-	zjDecodeReuseSemantics(&l, v, &d.a)
+	zjDecode_ReuseSemantics(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
 
-// zjArenaOrderedSideEffects backs every pointer field of a decoded OrderedSideEffects with a single
+// zjArenaOrderedSideEffects holds first-use pointer cells for a decoded OrderedSideEffects in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaOrderedSideEffects struct {
+}
+
+func (a *zjArenaOrderedSideEffects) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -4819,7 +5114,7 @@ func (v *OrderedSideEffects) UnmarshalZJSONBorrow(data []byte) error {
 func (v *OrderedSideEffects) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaOrderedSideEffects{}
-	zjDecodeOrderedSideEffects(&l, v, a)
+	zjDecode_OrderedSideEffects(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -4829,25 +5124,25 @@ func (v *OrderedSideEffects) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *OrderedSideEffects) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaOrderedSideEffects{}
-	zjDecodeOrderedSideEffects(l, v, a)
+	zjDecode_OrderedSideEffects(l, v, a)
 }
 
-// zjDecodeOrderedSideEffects tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_OrderedSideEffects tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeOrderedSideEffects(l *zerojson.Lexer, v *OrderedSideEffects, a *zjArenaOrderedSideEffects) {
+func zjDecode_OrderedSideEffects(l *zerojson.Lexer, v *OrderedSideEffects, a *zjArenaOrderedSideEffects) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	zjDecodeFallbackOrderedSideEffects(l, v, a)
+	zjDecodeFallback_OrderedSideEffects(l, v, a)
 }
 
-// zjDecodeFallbackOrderedSideEffects is the general keyed decoder: every member is read via
+// zjDecodeFallback_OrderedSideEffects is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackOrderedSideEffects(l *zerojson.Lexer, v *OrderedSideEffects, a *zjArenaOrderedSideEffects) {
+func zjDecodeFallback_OrderedSideEffects(l *zerojson.Lexer, v *OrderedSideEffects, a *zjArenaOrderedSideEffects) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -4905,9 +5200,9 @@ type OrderedSideEffectsDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -4920,8 +5215,9 @@ func (d *OrderedSideEffectsDecoder) Decode(data []byte, v *OrderedSideEffects) e
 	defer d.busy.Store(false)
 	var zero OrderedSideEffects
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, false)
-	zjDecodeOrderedSideEffects(&l, v, &d.a)
+	zjDecode_OrderedSideEffects(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -4937,19 +5233,25 @@ func (d *OrderedSideEffectsDecoder) DecodeBorrow(data []byte, v *OrderedSideEffe
 	defer d.busy.Store(false)
 	var zero OrderedSideEffects
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, true)
-	zjDecodeOrderedSideEffects(&l, v, &d.a)
+	zjDecode_OrderedSideEffects(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
 
-// zjArenaPoolAppenderHolder backs every pointer field of a decoded PoolAppenderHolder with a single
+// zjArenaPoolAppenderHolder holds first-use pointer cells for a decoded PoolAppenderHolder in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaPoolAppenderHolder struct {
-	f0 PoolAccumulator
+	published0 bool
+	f0         PoolAccumulator
+}
+
+func (a *zjArenaPoolAppenderHolder) beginDecode() {
+	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -4994,7 +5296,7 @@ func (v *PoolAppenderHolder) UnmarshalZJSONBorrow(data []byte) error {
 func (v *PoolAppenderHolder) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaPoolAppenderHolder{}
-	zjDecodePoolAppenderHolder(&l, v, a)
+	zjDecode_PoolAppenderHolder(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -5004,25 +5306,25 @@ func (v *PoolAppenderHolder) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *PoolAppenderHolder) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaPoolAppenderHolder{}
-	zjDecodePoolAppenderHolder(l, v, a)
+	zjDecode_PoolAppenderHolder(l, v, a)
 }
 
-// zjDecodePoolAppenderHolder tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_PoolAppenderHolder tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodePoolAppenderHolder(l *zerojson.Lexer, v *PoolAppenderHolder, a *zjArenaPoolAppenderHolder) {
+func zjDecode_PoolAppenderHolder(l *zerojson.Lexer, v *PoolAppenderHolder, a *zjArenaPoolAppenderHolder) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	zjDecodeFallbackPoolAppenderHolder(l, v, a)
+	zjDecodeFallback_PoolAppenderHolder(l, v, a)
 }
 
-// zjDecodeFallbackPoolAppenderHolder is the general keyed decoder: every member is read via
+// zjDecodeFallback_PoolAppenderHolder is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackPoolAppenderHolder(l *zerojson.Lexer, v *PoolAppenderHolder, a *zjArenaPoolAppenderHolder) {
+func zjDecodeFallback_PoolAppenderHolder(l *zerojson.Lexer, v *PoolAppenderHolder, a *zjArenaPoolAppenderHolder) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -5049,9 +5351,14 @@ func zjDecodeFallbackPoolAppenderHolder(l *zerojson.Lexer, v *PoolAppenderHolder
 		switch string(key) {
 		case "value":
 			if v.Value == nil {
-				var zjZero PoolAccumulator
-				a.f0 = zjZero
-				v.Value = &a.f0
+				if a.published0 {
+					v.Value = new(PoolAccumulator)
+				} else {
+					var zjZero PoolAccumulator
+					a.f0 = zjZero
+					v.Value = &a.f0
+					a.published0 = true
+				}
 			}
 			v.Value.ReadZJSON(l)
 		default:
@@ -5077,9 +5384,9 @@ type PoolAppenderHolderDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -5092,8 +5399,9 @@ func (d *PoolAppenderHolderDecoder) Decode(data []byte, v *PoolAppenderHolder) e
 	defer d.busy.Store(false)
 	var zero PoolAppenderHolder
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, false)
-	zjDecodePoolAppenderHolder(&l, v, &d.a)
+	zjDecode_PoolAppenderHolder(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -5109,22 +5417,33 @@ func (d *PoolAppenderHolderDecoder) DecodeBorrow(data []byte, v *PoolAppenderHol
 	defer d.busy.Store(false)
 	var zero PoolAppenderHolder
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, true)
-	zjDecodePoolAppenderHolder(&l, v, &d.a)
+	zjDecode_PoolAppenderHolder(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
 
-// zjArenaBytesCases backs every pointer field of a decoded BytesCases with a single
+// zjArenaBytesCases holds first-use pointer cells for a decoded BytesCases in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaBytesCases struct {
-	f1 []byte
-	c2 [][]byte
-	s3 bool
-	m3 map[string][]byte
+	published1      bool
+	f1              []byte
+	slicePublished2 bool
+	sliceBorrowed2  bool // adopted storage must not be recycled on the next pooled call
+	c2              [][]byte
+	m3              map[string][]byte
+	owned3          bool // only arena-owned maps may be cleared for reuse
+	mapPublished3   bool
+}
+
+func (a *zjArenaBytesCases) beginDecode() {
+	a.published1 = false
+	a.slicePublished2 = false
+	a.mapPublished3 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -5212,7 +5531,7 @@ func (v *BytesCases) UnmarshalZJSONBorrow(data []byte) error {
 func (v *BytesCases) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaBytesCases{}
-	zjDecodeBytesCases(&l, v, a)
+	zjDecode_BytesCases(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -5222,21 +5541,20 @@ func (v *BytesCases) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *BytesCases) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaBytesCases{}
-	zjDecodeBytesCases(l, v, a)
+	zjDecode_BytesCases(l, v, a)
 }
 
-// zjDecodeBytesCases tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_BytesCases tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeBytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaBytesCases) {
+func zjDecode_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaBytesCases) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s3 = false
 	start := l.Mark()
-	if zjDecodeOrderedBytesCases(l, v, a) {
+	if zjDecodeOrdered_BytesCases(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -5247,17 +5565,17 @@ func zjDecodeBytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaBytesCases) 
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackBytesCases(l, v, a)
+	zjDecodeFallback_BytesCases(l, v, a)
 }
 
-// zjDecodeOrderedBytesCases speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_BytesCases speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackBytesCases;
+// non-compact syntax. The caller retries those through zjDecodeFallback_BytesCases;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedBytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaBytesCases) bool {
+func zjDecodeOrdered_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaBytesCases) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.Ptr != nil {
@@ -5325,7 +5643,7 @@ func zjDecodeOrderedBytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaBytes
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldBytesCases(l, v, a, matched) {
+			if !zjDecodeOrderedField_BytesCases(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -5347,7 +5665,7 @@ func zjDecodeOrderedBytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaBytes
 	}
 }
 
-func zjDecodeOrderedFieldBytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaBytesCases, k int) bool {
+func zjDecodeOrderedField_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaBytesCases, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -5358,7 +5676,6 @@ func zjDecodeOrderedFieldBytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArena
 			v.Lists = nil
 		case 3:
 			v.Index = nil
-			a.s3 = false
 		}
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesBytesCases[k])
@@ -5371,12 +5688,25 @@ func zjDecodeOrderedFieldBytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArena
 		v.Data = []byte(l.ReadBytesBase64())
 	case 1:
 		if v.Ptr == nil {
-			a.f1 = []byte(l.ReadBytesBase64())
-			v.Ptr = &a.f1
-		} else {
-			*v.Ptr = []byte(l.ReadBytesBase64())
+			if a.published1 {
+				v.Ptr = new([]byte)
+			} else {
+				var zjZero []byte
+				a.f1 = zjZero
+				v.Ptr = &a.f1
+				a.published1 = true
+			}
 		}
+		*v.Ptr = []byte(l.ReadBytesBase64())
 	case 2:
+		if v.Lists != nil {
+			a.c2 = v.Lists
+			a.sliceBorrowed2 = true
+		} else if a.slicePublished2 || a.sliceBorrowed2 {
+			a.c2 = nil
+			a.sliceBorrowed2 = false
+		}
+		a.slicePublished2 = true
 		a.c2 = a.c2[:0]
 		if l.EnterArray() {
 			for {
@@ -5405,16 +5735,18 @@ func zjDecodeOrderedFieldBytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArena
 		}
 		v.Lists = a.c2
 	case 3:
-		if !a.s3 {
-			a.s3 = true
+		{
 			if v.Index != nil {
 				a.m3 = v.Index
-			} else if a.m3 == nil {
+				a.owned3 = false
+			} else if a.m3 == nil || !a.owned3 || a.mapPublished3 {
 				a.m3 = make(map[string][]byte)
+				a.owned3 = true
 			} else {
 				clear(a.m3)
 			}
 		}
+		a.mapPublished3 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -5504,10 +5836,10 @@ func zjIsDeclaredKeyBytesCases(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackBytesCases is the general keyed decoder: every member is read via
+// zjDecodeFallback_BytesCases is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackBytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaBytesCases) {
+func zjDecodeFallback_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaBytesCases) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -5527,7 +5859,6 @@ func zjDecodeFallbackBytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaByte
 				v.Lists = nil
 			case "index":
 				v.Index = nil
-				a.s3 = false
 			}
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -5543,12 +5874,25 @@ func zjDecodeFallbackBytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaByte
 			v.Data = []byte(l.ReadBytesBase64())
 		case "ptr":
 			if v.Ptr == nil {
-				a.f1 = []byte(l.ReadBytesBase64())
-				v.Ptr = &a.f1
-			} else {
-				*v.Ptr = []byte(l.ReadBytesBase64())
+				if a.published1 {
+					v.Ptr = new([]byte)
+				} else {
+					var zjZero []byte
+					a.f1 = zjZero
+					v.Ptr = &a.f1
+					a.published1 = true
+				}
 			}
+			*v.Ptr = []byte(l.ReadBytesBase64())
 		case "lists":
+			if v.Lists != nil {
+				a.c2 = v.Lists
+				a.sliceBorrowed2 = true
+			} else if a.slicePublished2 || a.sliceBorrowed2 {
+				a.c2 = nil
+				a.sliceBorrowed2 = false
+			}
+			a.slicePublished2 = true
 			a.c2 = a.c2[:0]
 			if l.EnterArray() {
 				for {
@@ -5577,16 +5921,18 @@ func zjDecodeFallbackBytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaByte
 			}
 			v.Lists = a.c2
 		case "index":
-			if !a.s3 {
-				a.s3 = true
+			{
 				if v.Index != nil {
 					a.m3 = v.Index
-				} else if a.m3 == nil {
+					a.owned3 = false
+				} else if a.m3 == nil || !a.owned3 || a.mapPublished3 {
 					a.m3 = make(map[string][]byte)
+					a.owned3 = true
 				} else {
 					clear(a.m3)
 				}
 			}
+			a.mapPublished3 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -5627,9 +5973,9 @@ type BytesCasesDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -5642,8 +5988,9 @@ func (d *BytesCasesDecoder) Decode(data []byte, v *BytesCases) error {
 	defer d.busy.Store(false)
 	var zero BytesCases
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, false)
-	zjDecodeBytesCases(&l, v, &d.a)
+	zjDecode_BytesCases(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -5659,8 +6006,9 @@ func (d *BytesCasesDecoder) DecodeBorrow(data []byte, v *BytesCases) error {
 	defer d.busy.Store(false)
 	var zero BytesCases
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, true)
-	zjDecodeBytesCases(&l, v, &d.a)
+	zjDecode_BytesCases(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -5711,7 +6059,7 @@ func (v *EventList) UnmarshalZJSONBorrow(data []byte) error {
 func (v *EventList) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaEventList{}
-	zjDecodeEventList(&l, v, a)
+	zjDecode_EventList(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -5721,17 +6069,20 @@ func (v *EventList) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *EventList) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaEventList{}
-	zjDecodeEventList(l, v, a)
+	zjDecode_EventList(l, v, a)
 }
 
-// zjDecodeEventList decodes a JSON array/object root directly into v. Element (slice)
+// zjDecode_EventList decodes a JSON array/object root directly into v. Element (slice)
 // and value (map) codecs are the same ones a slice/map field uses, so
 // element structs keep their ordered fast path; the root loop itself is
 // the plain array/object protocol.
-func zjDecodeEventList(l *zerojson.Lexer, v *EventList, a *zjArenaEventList) {
+func zjDecode_EventList(l *zerojson.Lexer, v *EventList, a *zjArenaEventList) {
 	if l.IsNull() {
 		*v = nil
 		return
+	}
+	if *v != nil {
+		a.cRoot = *v
 	}
 	a.cRoot = a.cRoot[:0]
 	if l.EnterArray() {
@@ -5744,7 +6095,7 @@ func zjDecodeEventList(l *zerojson.Lexer, v *EventList, a *zjArenaEventList) {
 			}
 			if !l.IsNull() {
 				var ea zjArenaEvent
-				zjDecodeEvent(l, &a.cRoot[len(a.cRoot)-1], &ea)
+				zjDecode_Event(l, &a.cRoot[len(a.cRoot)-1], &ea)
 			}
 			if l.Err() != nil {
 				return
@@ -5770,9 +6121,9 @@ type EventListDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -5786,7 +6137,7 @@ func (d *EventListDecoder) Decode(data []byte, v *EventList) error {
 	var zero EventList
 	*v = zero
 	l := zerojson.NewLexer(data, false)
-	zjDecodeEventList(&l, v, &d.a)
+	zjDecode_EventList(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -5803,7 +6154,7 @@ func (d *EventListDecoder) DecodeBorrow(data []byte, v *EventList) error {
 	var zero EventList
 	*v = zero
 	l := zerojson.NewLexer(data, true)
-	zjDecodeEventList(&l, v, &d.a)
+	zjDecode_EventList(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -5858,7 +6209,7 @@ func (v *LegPtrList) UnmarshalZJSONBorrow(data []byte) error {
 func (v *LegPtrList) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaLegPtrList{}
-	zjDecodeLegPtrList(&l, v, a)
+	zjDecode_LegPtrList(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -5868,17 +6219,20 @@ func (v *LegPtrList) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *LegPtrList) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaLegPtrList{}
-	zjDecodeLegPtrList(l, v, a)
+	zjDecode_LegPtrList(l, v, a)
 }
 
-// zjDecodeLegPtrList decodes a JSON array/object root directly into v. Element (slice)
+// zjDecode_LegPtrList decodes a JSON array/object root directly into v. Element (slice)
 // and value (map) codecs are the same ones a slice/map field uses, so
 // element structs keep their ordered fast path; the root loop itself is
 // the plain array/object protocol.
-func zjDecodeLegPtrList(l *zerojson.Lexer, v *LegPtrList, a *zjArenaLegPtrList) {
+func zjDecode_LegPtrList(l *zerojson.Lexer, v *LegPtrList, a *zjArenaLegPtrList) {
 	if l.IsNull() {
 		*v = nil
 		return
+	}
+	if *v != nil {
+		a.cRoot = *v
 	}
 	a.cRoot = a.cRoot[:0]
 	if l.EnterArray() {
@@ -5892,7 +6246,7 @@ func zjDecodeLegPtrList(l *zerojson.Lexer, v *LegPtrList, a *zjArenaLegPtrList) 
 			if !l.IsNull() {
 				e := new(EventLeg)
 				var ea zjArenaEventLeg
-				zjDecodeEventLeg(l, e, &ea)
+				zjDecode_EventLeg(l, e, &ea)
 				a.cRoot[len(a.cRoot)-1] = e
 			}
 			if l.Err() != nil {
@@ -5919,9 +6273,9 @@ type LegPtrListDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -5935,7 +6289,7 @@ func (d *LegPtrListDecoder) Decode(data []byte, v *LegPtrList) error {
 	var zero LegPtrList
 	*v = zero
 	l := zerojson.NewLexer(data, false)
-	zjDecodeLegPtrList(&l, v, &d.a)
+	zjDecode_LegPtrList(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -5952,7 +6306,7 @@ func (d *LegPtrListDecoder) DecodeBorrow(data []byte, v *LegPtrList) error {
 	var zero LegPtrList
 	*v = zero
 	l := zerojson.NewLexer(data, true)
-	zjDecodeLegPtrList(&l, v, &d.a)
+	zjDecode_LegPtrList(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -6008,7 +6362,7 @@ func (v *LegIndex) UnmarshalZJSONBorrow(data []byte) error {
 func (v *LegIndex) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaLegIndex{}
-	zjDecodeLegIndex(&l, v, a)
+	zjDecode_LegIndex(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -6018,14 +6372,14 @@ func (v *LegIndex) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *LegIndex) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaLegIndex{}
-	zjDecodeLegIndex(l, v, a)
+	zjDecode_LegIndex(l, v, a)
 }
 
-// zjDecodeLegIndex decodes a JSON array/object root directly into v. Element (slice)
+// zjDecode_LegIndex decodes a JSON array/object root directly into v. Element (slice)
 // and value (map) codecs are the same ones a slice/map field uses, so
 // element structs keep their ordered fast path; the root loop itself is
 // the plain array/object protocol.
-func zjDecodeLegIndex(l *zerojson.Lexer, v *LegIndex, a *zjArenaLegIndex) {
+func zjDecode_LegIndex(l *zerojson.Lexer, v *LegIndex, a *zjArenaLegIndex) {
 	if l.IsNull() {
 		*v = nil
 		return
@@ -6047,7 +6401,7 @@ func zjDecodeLegIndex(l *zerojson.Lexer, v *LegIndex, a *zjArenaLegIndex) {
 			var mv EventLeg
 			if !l.IsNull() {
 				var ea zjArenaEventLeg
-				zjDecodeEventLeg(l, &mv, &ea)
+				zjDecode_EventLeg(l, &mv, &ea)
 			}
 			if l.Err() != nil {
 				return
@@ -6071,9 +6425,9 @@ type LegIndexDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -6087,7 +6441,7 @@ func (d *LegIndexDecoder) Decode(data []byte, v *LegIndex) error {
 	var zero LegIndex
 	*v = zero
 	l := zerojson.NewLexer(data, false)
-	zjDecodeLegIndex(&l, v, &d.a)
+	zjDecode_LegIndex(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -6104,7 +6458,7 @@ func (d *LegIndexDecoder) DecodeBorrow(data []byte, v *LegIndex) error {
 	var zero LegIndex
 	*v = zero
 	l := zerojson.NewLexer(data, true)
-	zjDecodeLegIndex(&l, v, &d.a)
+	zjDecode_LegIndex(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -6160,7 +6514,7 @@ func (v *PointerMethodIndex) UnmarshalZJSONBorrow(data []byte) error {
 func (v *PointerMethodIndex) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaPointerMethodIndex{}
-	zjDecodePointerMethodIndex(&l, v, a)
+	zjDecode_PointerMethodIndex(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -6170,14 +6524,14 @@ func (v *PointerMethodIndex) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *PointerMethodIndex) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaPointerMethodIndex{}
-	zjDecodePointerMethodIndex(l, v, a)
+	zjDecode_PointerMethodIndex(l, v, a)
 }
 
-// zjDecodePointerMethodIndex decodes a JSON array/object root directly into v. Element (slice)
+// zjDecode_PointerMethodIndex decodes a JSON array/object root directly into v. Element (slice)
 // and value (map) codecs are the same ones a slice/map field uses, so
 // element structs keep their ordered fast path; the root loop itself is
 // the plain array/object protocol.
-func zjDecodePointerMethodIndex(l *zerojson.Lexer, v *PointerMethodIndex, a *zjArenaPointerMethodIndex) {
+func zjDecode_PointerMethodIndex(l *zerojson.Lexer, v *PointerMethodIndex, a *zjArenaPointerMethodIndex) {
 	if l.IsNull() {
 		*v = nil
 		return
@@ -6230,9 +6584,9 @@ type PointerMethodIndexDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -6246,7 +6600,7 @@ func (d *PointerMethodIndexDecoder) Decode(data []byte, v *PointerMethodIndex) e
 	var zero PointerMethodIndex
 	*v = zero
 	l := zerojson.NewLexer(data, false)
-	zjDecodePointerMethodIndex(&l, v, &d.a)
+	zjDecode_PointerMethodIndex(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -6263,7 +6617,7 @@ func (d *PointerMethodIndexDecoder) DecodeBorrow(data []byte, v *PointerMethodIn
 	var zero PointerMethodIndex
 	*v = zero
 	l := zerojson.NewLexer(data, true)
-	zjDecodePointerMethodIndex(&l, v, &d.a)
+	zjDecode_PointerMethodIndex(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -6319,7 +6673,7 @@ func (v *PointerQuotedIndex) UnmarshalZJSONBorrow(data []byte) error {
 func (v *PointerQuotedIndex) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaPointerQuotedIndex{}
-	zjDecodePointerQuotedIndex(&l, v, a)
+	zjDecode_PointerQuotedIndex(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -6329,14 +6683,14 @@ func (v *PointerQuotedIndex) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *PointerQuotedIndex) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaPointerQuotedIndex{}
-	zjDecodePointerQuotedIndex(l, v, a)
+	zjDecode_PointerQuotedIndex(l, v, a)
 }
 
-// zjDecodePointerQuotedIndex decodes a JSON array/object root directly into v. Element (slice)
+// zjDecode_PointerQuotedIndex decodes a JSON array/object root directly into v. Element (slice)
 // and value (map) codecs are the same ones a slice/map field uses, so
 // element structs keep their ordered fast path; the root loop itself is
 // the plain array/object protocol.
-func zjDecodePointerQuotedIndex(l *zerojson.Lexer, v *PointerQuotedIndex, a *zjArenaPointerQuotedIndex) {
+func zjDecode_PointerQuotedIndex(l *zerojson.Lexer, v *PointerQuotedIndex, a *zjArenaPointerQuotedIndex) {
 	if l.IsNull() {
 		*v = nil
 		return
@@ -6389,9 +6743,9 @@ type PointerQuotedIndexDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -6405,7 +6759,7 @@ func (d *PointerQuotedIndexDecoder) Decode(data []byte, v *PointerQuotedIndex) e
 	var zero PointerQuotedIndex
 	*v = zero
 	l := zerojson.NewLexer(data, false)
-	zjDecodePointerQuotedIndex(&l, v, &d.a)
+	zjDecode_PointerQuotedIndex(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -6422,7 +6776,7 @@ func (d *PointerQuotedIndexDecoder) DecodeBorrow(data []byte, v *PointerQuotedIn
 	var zero PointerQuotedIndex
 	*v = zero
 	l := zerojson.NewLexer(data, true)
-	zjDecodePointerQuotedIndex(&l, v, &d.a)
+	zjDecode_PointerQuotedIndex(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -6473,7 +6827,7 @@ func (v *RawList) UnmarshalZJSONBorrow(data []byte) error {
 func (v *RawList) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaRawList{}
-	zjDecodeRawList(&l, v, a)
+	zjDecode_RawList(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -6483,17 +6837,20 @@ func (v *RawList) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *RawList) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaRawList{}
-	zjDecodeRawList(l, v, a)
+	zjDecode_RawList(l, v, a)
 }
 
-// zjDecodeRawList decodes a JSON array/object root directly into v. Element (slice)
+// zjDecode_RawList decodes a JSON array/object root directly into v. Element (slice)
 // and value (map) codecs are the same ones a slice/map field uses, so
 // element structs keep their ordered fast path; the root loop itself is
 // the plain array/object protocol.
-func zjDecodeRawList(l *zerojson.Lexer, v *RawList, a *zjArenaRawList) {
+func zjDecode_RawList(l *zerojson.Lexer, v *RawList, a *zjArenaRawList) {
 	if l.IsNull() {
 		*v = nil
 		return
+	}
+	if *v != nil {
+		a.cRoot = *v
 	}
 	a.cRoot = a.cRoot[:0]
 	if l.EnterArray() {
@@ -6536,9 +6893,9 @@ type RawListDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -6552,7 +6909,7 @@ func (d *RawListDecoder) Decode(data []byte, v *RawList) error {
 	var zero RawList
 	*v = zero
 	l := zerojson.NewLexer(data, false)
-	zjDecodeRawList(&l, v, &d.a)
+	zjDecode_RawList(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -6569,7 +6926,7 @@ func (d *RawListDecoder) DecodeBorrow(data []byte, v *RawList) error {
 	var zero RawList
 	*v = zero
 	l := zerojson.NewLexer(data, true)
-	zjDecodeRawList(&l, v, &d.a)
+	zjDecode_RawList(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -6625,7 +6982,7 @@ func (v *RawIndex) UnmarshalZJSONBorrow(data []byte) error {
 func (v *RawIndex) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaRawIndex{}
-	zjDecodeRawIndex(&l, v, a)
+	zjDecode_RawIndex(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -6635,14 +6992,14 @@ func (v *RawIndex) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *RawIndex) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaRawIndex{}
-	zjDecodeRawIndex(l, v, a)
+	zjDecode_RawIndex(l, v, a)
 }
 
-// zjDecodeRawIndex decodes a JSON array/object root directly into v. Element (slice)
+// zjDecode_RawIndex decodes a JSON array/object root directly into v. Element (slice)
 // and value (map) codecs are the same ones a slice/map field uses, so
 // element structs keep their ordered fast path; the root loop itself is
 // the plain array/object protocol.
-func zjDecodeRawIndex(l *zerojson.Lexer, v *RawIndex, a *zjArenaRawIndex) {
+func zjDecode_RawIndex(l *zerojson.Lexer, v *RawIndex, a *zjArenaRawIndex) {
 	if l.IsNull() {
 		*v = nil
 		return
@@ -6689,9 +7046,9 @@ type RawIndexDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -6705,7 +7062,7 @@ func (d *RawIndexDecoder) Decode(data []byte, v *RawIndex) error {
 	var zero RawIndex
 	*v = zero
 	l := zerojson.NewLexer(data, false)
-	zjDecodeRawIndex(&l, v, &d.a)
+	zjDecode_RawIndex(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -6722,7 +7079,7 @@ func (d *RawIndexDecoder) DecodeBorrow(data []byte, v *RawIndex) error {
 	var zero RawIndex
 	*v = zero
 	l := zerojson.NewLexer(data, true)
-	zjDecodeRawIndex(&l, v, &d.a)
+	zjDecode_RawIndex(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -6773,7 +7130,7 @@ func (v *RawHolderList) UnmarshalZJSONBorrow(data []byte) error {
 func (v *RawHolderList) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaRawHolderList{}
-	zjDecodeRawHolderList(&l, v, a)
+	zjDecode_RawHolderList(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -6783,17 +7140,20 @@ func (v *RawHolderList) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *RawHolderList) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaRawHolderList{}
-	zjDecodeRawHolderList(l, v, a)
+	zjDecode_RawHolderList(l, v, a)
 }
 
-// zjDecodeRawHolderList decodes a JSON array/object root directly into v. Element (slice)
+// zjDecode_RawHolderList decodes a JSON array/object root directly into v. Element (slice)
 // and value (map) codecs are the same ones a slice/map field uses, so
 // element structs keep their ordered fast path; the root loop itself is
 // the plain array/object protocol.
-func zjDecodeRawHolderList(l *zerojson.Lexer, v *RawHolderList, a *zjArenaRawHolderList) {
+func zjDecode_RawHolderList(l *zerojson.Lexer, v *RawHolderList, a *zjArenaRawHolderList) {
 	if l.IsNull() {
 		*v = nil
 		return
+	}
+	if *v != nil {
+		a.cRoot = *v
 	}
 	a.cRoot = a.cRoot[:0]
 	if l.EnterArray() {
@@ -6806,7 +7166,7 @@ func zjDecodeRawHolderList(l *zerojson.Lexer, v *RawHolderList, a *zjArenaRawHol
 			}
 			if !l.IsNull() {
 				var ea zjArenaRawHolder
-				zjDecodeRawHolder(l, &a.cRoot[len(a.cRoot)-1], &ea)
+				zjDecode_RawHolder(l, &a.cRoot[len(a.cRoot)-1], &ea)
 			}
 			if l.Err() != nil {
 				return
@@ -6832,9 +7192,9 @@ type RawHolderListDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -6848,7 +7208,7 @@ func (d *RawHolderListDecoder) Decode(data []byte, v *RawHolderList) error {
 	var zero RawHolderList
 	*v = zero
 	l := zerojson.NewLexer(data, false)
-	zjDecodeRawHolderList(&l, v, &d.a)
+	zjDecode_RawHolderList(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -6865,7 +7225,7 @@ func (d *RawHolderListDecoder) DecodeBorrow(data []byte, v *RawHolderList) error
 	var zero RawHolderList
 	*v = zero
 	l := zerojson.NewLexer(data, true)
-	zjDecodeRawHolderList(&l, v, &d.a)
+	zjDecode_RawHolderList(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -6912,7 +7272,7 @@ func (v *DecimalList) UnmarshalZJSONBorrow(data []byte) error {
 func (v *DecimalList) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaDecimalList{}
-	zjDecodeDecimalList(&l, v, a)
+	zjDecode_DecimalList(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -6922,17 +7282,20 @@ func (v *DecimalList) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *DecimalList) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaDecimalList{}
-	zjDecodeDecimalList(l, v, a)
+	zjDecode_DecimalList(l, v, a)
 }
 
-// zjDecodeDecimalList decodes a JSON array/object root directly into v. Element (slice)
+// zjDecode_DecimalList decodes a JSON array/object root directly into v. Element (slice)
 // and value (map) codecs are the same ones a slice/map field uses, so
 // element structs keep their ordered fast path; the root loop itself is
 // the plain array/object protocol.
-func zjDecodeDecimalList(l *zerojson.Lexer, v *DecimalList, a *zjArenaDecimalList) {
+func zjDecode_DecimalList(l *zerojson.Lexer, v *DecimalList, a *zjArenaDecimalList) {
 	if l.IsNull() {
 		*v = nil
 		return
+	}
+	if *v != nil {
+		a.cRoot = *v
 	}
 	a.cRoot = a.cRoot[:0]
 	if l.EnterArray() {
@@ -6973,9 +7336,9 @@ type DecimalListDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -6989,7 +7352,7 @@ func (d *DecimalListDecoder) Decode(data []byte, v *DecimalList) error {
 	var zero DecimalList
 	*v = zero
 	l := zerojson.NewLexer(data, false)
-	zjDecodeDecimalList(&l, v, &d.a)
+	zjDecode_DecimalList(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -7006,27 +7369,48 @@ func (d *DecimalListDecoder) DecodeBorrow(data []byte, v *DecimalList) error {
 	var zero DecimalList
 	*v = zero
 	l := zerojson.NewLexer(data, true)
-	zjDecodeDecimalList(&l, v, &d.a)
+	zjDecode_DecimalList(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
 
-// zjArenaPointerCollections backs every pointer field of a decoded PointerCollections with a single
+// zjArenaPointerCollections holds first-use pointer cells for a decoded PointerCollections in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaPointerCollections struct {
-	f0 []string
-	c0 []string
-	s1 bool
-	f1 map[string]int
-	m1 map[string]int
-	f2 []EventLeg
-	c2 []EventLeg
-	s3 bool
-	f3 map[string]string
-	m3 map[string]string
+	published0      bool
+	slicePublished0 bool
+	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
+	f0              []string
+	c0              []string
+	published1      bool
+	f1              map[string]int
+	m1              map[string]int
+	owned1          bool // only arena-owned maps may be cleared for reuse
+	mapPublished1   bool
+	published2      bool
+	slicePublished2 bool
+	sliceBorrowed2  bool // adopted storage must not be recycled on the next pooled call
+	f2              []EventLeg
+	c2              []EventLeg
+	published3      bool
+	f3              map[string]string
+	m3              map[string]string
+	owned3          bool // only arena-owned maps may be cleared for reuse
+	mapPublished3   bool
+}
+
+func (a *zjArenaPointerCollections) beginDecode() {
+	a.published0 = false
+	a.slicePublished0 = false
+	a.published1 = false
+	a.mapPublished1 = false
+	a.published2 = false
+	a.slicePublished2 = false
+	a.published3 = false
+	a.mapPublished3 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -7148,7 +7532,7 @@ func (v *PointerCollections) UnmarshalZJSONBorrow(data []byte) error {
 func (v *PointerCollections) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaPointerCollections{}
-	zjDecodePointerCollections(&l, v, a)
+	zjDecode_PointerCollections(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -7158,22 +7542,20 @@ func (v *PointerCollections) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *PointerCollections) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaPointerCollections{}
-	zjDecodePointerCollections(l, v, a)
+	zjDecode_PointerCollections(l, v, a)
 }
 
-// zjDecodePointerCollections tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_PointerCollections tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodePointerCollections(l *zerojson.Lexer, v *PointerCollections, a *zjArenaPointerCollections) {
+func zjDecode_PointerCollections(l *zerojson.Lexer, v *PointerCollections, a *zjArenaPointerCollections) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s1 = false
-	a.s3 = false
 	start := l.Mark()
-	if zjDecodeOrderedPointerCollections(l, v, a) {
+	if zjDecodeOrdered_PointerCollections(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -7184,17 +7566,17 @@ func zjDecodePointerCollections(l *zerojson.Lexer, v *PointerCollections, a *zjA
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackPointerCollections(l, v, a)
+	zjDecodeFallback_PointerCollections(l, v, a)
 }
 
-// zjDecodeOrderedPointerCollections speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_PointerCollections speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackPointerCollections;
+// non-compact syntax. The caller retries those through zjDecodeFallback_PointerCollections;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedPointerCollections(l *zerojson.Lexer, v *PointerCollections, a *zjArenaPointerCollections) bool {
+func zjDecodeOrdered_PointerCollections(l *zerojson.Lexer, v *PointerCollections, a *zjArenaPointerCollections) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.Names != nil || v.Index != nil || v.Legs != nil || v.Tags != nil {
@@ -7262,7 +7644,7 @@ func zjDecodeOrderedPointerCollections(l *zerojson.Lexer, v *PointerCollections,
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldPointerCollections(l, v, a, matched) {
+			if !zjDecodeOrderedField_PointerCollections(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -7284,19 +7666,17 @@ func zjDecodeOrderedPointerCollections(l *zerojson.Lexer, v *PointerCollections,
 	}
 }
 
-func zjDecodeOrderedFieldPointerCollections(l *zerojson.Lexer, v *PointerCollections, a *zjArenaPointerCollections, k int) bool {
+func zjDecodeOrderedField_PointerCollections(l *zerojson.Lexer, v *PointerCollections, a *zjArenaPointerCollections, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
 			v.Names = nil
 		case 1:
 			v.Index = nil
-			a.s1 = false
 		case 2:
 			v.Legs = nil
 		case 3:
 			v.Tags = nil
-			a.s3 = false
 		}
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesPointerCollections[k])
@@ -7306,6 +7686,14 @@ func zjDecodeOrderedFieldPointerCollections(l *zerojson.Lexer, v *PointerCollect
 	}
 	switch k {
 	case 0:
+		if v.Names != nil && *v.Names != nil {
+			a.c0 = *v.Names
+			a.sliceBorrowed0 = true
+		} else if a.slicePublished0 || a.sliceBorrowed0 {
+			a.c0 = nil
+			a.sliceBorrowed0 = false
+		}
+		a.slicePublished0 = true
 		a.c0 = a.c0[:0]
 		if l.EnterArray() {
 			for {
@@ -7333,22 +7721,29 @@ func zjDecodeOrderedFieldPointerCollections(l *zerojson.Lexer, v *PointerCollect
 			a.c0 = []string{}
 		}
 		if v.Names == nil {
-			a.f0 = a.c0
-			v.Names = &a.f0
-		} else {
-			*v.Names = a.c0
+			if a.published0 {
+				v.Names = new([]string)
+			} else {
+				var zjZero []string
+				a.f0 = zjZero
+				v.Names = &a.f0
+				a.published0 = true
+			}
 		}
+		*v.Names = a.c0
 	case 1:
-		if !a.s1 {
-			a.s1 = true
+		{
 			if v.Index != nil && (*v.Index) != nil {
 				a.m1 = (*v.Index)
-			} else if a.m1 == nil {
+				a.owned1 = false
+			} else if a.m1 == nil || !a.owned1 || a.mapPublished1 {
 				a.m1 = make(map[string]int)
+				a.owned1 = true
 			} else {
 				clear(a.m1)
 			}
 		}
+		a.mapPublished1 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -7366,12 +7761,25 @@ func zjDecodeOrderedFieldPointerCollections(l *zerojson.Lexer, v *PointerCollect
 			}
 		}
 		if v.Index == nil {
-			a.f1 = a.m1
-			v.Index = &a.f1
-		} else {
-			*v.Index = a.m1
+			if a.published1 {
+				v.Index = new(map[string]int)
+			} else {
+				var zjZero map[string]int
+				a.f1 = zjZero
+				v.Index = &a.f1
+				a.published1 = true
+			}
 		}
+		*v.Index = a.m1
 	case 2:
+		if v.Legs != nil && *v.Legs != nil {
+			a.c2 = *v.Legs
+			a.sliceBorrowed2 = true
+		} else if a.slicePublished2 || a.sliceBorrowed2 {
+			a.c2 = nil
+			a.sliceBorrowed2 = false
+		}
+		a.slicePublished2 = true
 		a.c2 = a.c2[:0]
 		if l.EnterArray() {
 			for {
@@ -7383,7 +7791,7 @@ func zjDecodeOrderedFieldPointerCollections(l *zerojson.Lexer, v *PointerCollect
 				}
 				if !l.IsNull() {
 					var ea zjArenaEventLeg
-					zjDecodeEventLeg(l, &a.c2[len(a.c2)-1], &ea)
+					zjDecode_EventLeg(l, &a.c2[len(a.c2)-1], &ea)
 				}
 				if l.Err() != nil {
 					break
@@ -7397,22 +7805,29 @@ func zjDecodeOrderedFieldPointerCollections(l *zerojson.Lexer, v *PointerCollect
 			a.c2 = []EventLeg{}
 		}
 		if v.Legs == nil {
-			a.f2 = a.c2
-			v.Legs = &a.f2
-		} else {
-			*v.Legs = a.c2
+			if a.published2 {
+				v.Legs = new([]EventLeg)
+			} else {
+				var zjZero []EventLeg
+				a.f2 = zjZero
+				v.Legs = &a.f2
+				a.published2 = true
+			}
 		}
+		*v.Legs = a.c2
 	case 3:
-		if !a.s3 {
-			a.s3 = true
+		{
 			if v.Tags != nil && (*v.Tags) != nil {
 				a.m3 = (*v.Tags)
-			} else if a.m3 == nil {
+				a.owned3 = false
+			} else if a.m3 == nil || !a.owned3 || a.mapPublished3 {
 				a.m3 = make(map[string]string)
+				a.owned3 = true
 			} else {
 				clear(a.m3)
 			}
 		}
+		a.mapPublished3 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -7430,11 +7845,16 @@ func zjDecodeOrderedFieldPointerCollections(l *zerojson.Lexer, v *PointerCollect
 			}
 		}
 		if v.Tags == nil {
-			a.f3 = a.m3
-			v.Tags = &a.f3
-		} else {
-			*v.Tags = a.m3
+			if a.published3 {
+				v.Tags = new(map[string]string)
+			} else {
+				var zjZero map[string]string
+				a.f3 = zjZero
+				v.Tags = &a.f3
+				a.published3 = true
+			}
 		}
+		*v.Tags = a.m3
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesPointerCollections[k])
@@ -7507,10 +7927,10 @@ func zjIsDeclaredKeyPointerCollections(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackPointerCollections is the general keyed decoder: every member is read via
+// zjDecodeFallback_PointerCollections is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackPointerCollections(l *zerojson.Lexer, v *PointerCollections, a *zjArenaPointerCollections) {
+func zjDecodeFallback_PointerCollections(l *zerojson.Lexer, v *PointerCollections, a *zjArenaPointerCollections) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -7526,12 +7946,10 @@ func zjDecodeFallbackPointerCollections(l *zerojson.Lexer, v *PointerCollections
 				v.Names = nil
 			case "index":
 				v.Index = nil
-				a.s1 = false
 			case "legs":
 				v.Legs = nil
 			case "tags":
 				v.Tags = nil
-				a.s3 = false
 			}
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -7544,6 +7962,14 @@ func zjDecodeFallbackPointerCollections(l *zerojson.Lexer, v *PointerCollections
 		}
 		switch string(key) {
 		case "names":
+			if v.Names != nil && *v.Names != nil {
+				a.c0 = *v.Names
+				a.sliceBorrowed0 = true
+			} else if a.slicePublished0 || a.sliceBorrowed0 {
+				a.c0 = nil
+				a.sliceBorrowed0 = false
+			}
+			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -7571,22 +7997,29 @@ func zjDecodeFallbackPointerCollections(l *zerojson.Lexer, v *PointerCollections
 				a.c0 = []string{}
 			}
 			if v.Names == nil {
-				a.f0 = a.c0
-				v.Names = &a.f0
-			} else {
-				*v.Names = a.c0
+				if a.published0 {
+					v.Names = new([]string)
+				} else {
+					var zjZero []string
+					a.f0 = zjZero
+					v.Names = &a.f0
+					a.published0 = true
+				}
 			}
+			*v.Names = a.c0
 		case "index":
-			if !a.s1 {
-				a.s1 = true
+			{
 				if v.Index != nil && (*v.Index) != nil {
 					a.m1 = (*v.Index)
-				} else if a.m1 == nil {
+					a.owned1 = false
+				} else if a.m1 == nil || !a.owned1 || a.mapPublished1 {
 					a.m1 = make(map[string]int)
+					a.owned1 = true
 				} else {
 					clear(a.m1)
 				}
 			}
+			a.mapPublished1 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -7604,12 +8037,25 @@ func zjDecodeFallbackPointerCollections(l *zerojson.Lexer, v *PointerCollections
 				}
 			}
 			if v.Index == nil {
-				a.f1 = a.m1
-				v.Index = &a.f1
-			} else {
-				*v.Index = a.m1
+				if a.published1 {
+					v.Index = new(map[string]int)
+				} else {
+					var zjZero map[string]int
+					a.f1 = zjZero
+					v.Index = &a.f1
+					a.published1 = true
+				}
 			}
+			*v.Index = a.m1
 		case "legs":
+			if v.Legs != nil && *v.Legs != nil {
+				a.c2 = *v.Legs
+				a.sliceBorrowed2 = true
+			} else if a.slicePublished2 || a.sliceBorrowed2 {
+				a.c2 = nil
+				a.sliceBorrowed2 = false
+			}
+			a.slicePublished2 = true
 			a.c2 = a.c2[:0]
 			if l.EnterArray() {
 				for {
@@ -7621,7 +8067,7 @@ func zjDecodeFallbackPointerCollections(l *zerojson.Lexer, v *PointerCollections
 					}
 					if !l.IsNull() {
 						var ea zjArenaEventLeg
-						zjDecodeEventLeg(l, &a.c2[len(a.c2)-1], &ea)
+						zjDecode_EventLeg(l, &a.c2[len(a.c2)-1], &ea)
 					}
 					if l.Err() != nil {
 						break
@@ -7635,22 +8081,29 @@ func zjDecodeFallbackPointerCollections(l *zerojson.Lexer, v *PointerCollections
 				a.c2 = []EventLeg{}
 			}
 			if v.Legs == nil {
-				a.f2 = a.c2
-				v.Legs = &a.f2
-			} else {
-				*v.Legs = a.c2
+				if a.published2 {
+					v.Legs = new([]EventLeg)
+				} else {
+					var zjZero []EventLeg
+					a.f2 = zjZero
+					v.Legs = &a.f2
+					a.published2 = true
+				}
 			}
+			*v.Legs = a.c2
 		case "tags":
-			if !a.s3 {
-				a.s3 = true
+			{
 				if v.Tags != nil && (*v.Tags) != nil {
 					a.m3 = (*v.Tags)
-				} else if a.m3 == nil {
+					a.owned3 = false
+				} else if a.m3 == nil || !a.owned3 || a.mapPublished3 {
 					a.m3 = make(map[string]string)
+					a.owned3 = true
 				} else {
 					clear(a.m3)
 				}
 			}
+			a.mapPublished3 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -7668,11 +8121,16 @@ func zjDecodeFallbackPointerCollections(l *zerojson.Lexer, v *PointerCollections
 				}
 			}
 			if v.Tags == nil {
-				a.f3 = a.m3
-				v.Tags = &a.f3
-			} else {
-				*v.Tags = a.m3
+				if a.published3 {
+					v.Tags = new(map[string]string)
+				} else {
+					var zjZero map[string]string
+					a.f3 = zjZero
+					v.Tags = &a.f3
+					a.published3 = true
+				}
 			}
+			*v.Tags = a.m3
 		default:
 			l.Skip()
 		}
@@ -7696,9 +8154,9 @@ type PointerCollectionsDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -7711,8 +8169,9 @@ func (d *PointerCollectionsDecoder) Decode(data []byte, v *PointerCollections) e
 	defer d.busy.Store(false)
 	var zero PointerCollections
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, false)
-	zjDecodePointerCollections(&l, v, &d.a)
+	zjDecode_PointerCollections(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -7728,23 +8187,36 @@ func (d *PointerCollectionsDecoder) DecodeBorrow(data []byte, v *PointerCollecti
 	defer d.busy.Store(false)
 	var zero PointerCollections
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, true)
-	zjDecodePointerCollections(&l, v, &d.a)
+	zjDecode_PointerCollections(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
 
-// zjArenaNumberCases backs every pointer field of a decoded NumberCases with a single
+// zjArenaNumberCases holds first-use pointer cells for a decoded NumberCases in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaNumberCases struct {
-	f2 json_.Number
-	c3 []json_.Number
-	s4 bool
-	m4 map[string]json_.Number
-	f6 int64
+	published2      bool
+	f2              json_.Number
+	slicePublished3 bool
+	sliceBorrowed3  bool // adopted storage must not be recycled on the next pooled call
+	c3              []json_.Number
+	m4              map[string]json_.Number
+	owned4          bool // only arena-owned maps may be cleared for reuse
+	mapPublished4   bool
+	published6      bool
+	f6              int64
+}
+
+func (a *zjArenaNumberCases) beginDecode() {
+	a.published2 = false
+	a.slicePublished3 = false
+	a.mapPublished4 = false
+	a.published6 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -7877,7 +8349,7 @@ func (v *NumberCases) UnmarshalZJSONBorrow(data []byte) error {
 func (v *NumberCases) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaNumberCases{}
-	zjDecodeNumberCases(&l, v, a)
+	zjDecode_NumberCases(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -7887,21 +8359,20 @@ func (v *NumberCases) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *NumberCases) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaNumberCases{}
-	zjDecodeNumberCases(l, v, a)
+	zjDecode_NumberCases(l, v, a)
 }
 
-// zjDecodeNumberCases tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_NumberCases tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeNumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNumberCases) {
+func zjDecode_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNumberCases) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s4 = false
 	start := l.Mark()
-	if zjDecodeOrderedNumberCases(l, v, a) {
+	if zjDecodeOrdered_NumberCases(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -7912,17 +8383,17 @@ func zjDecodeNumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNumberCase
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackNumberCases(l, v, a)
+	zjDecodeFallback_NumberCases(l, v, a)
 }
 
-// zjDecodeOrderedNumberCases speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_NumberCases speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackNumberCases;
+// non-compact syntax. The caller retries those through zjDecodeFallback_NumberCases;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedNumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNumberCases) bool {
+func zjDecodeOrdered_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNumberCases) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.NP != nil || v.PtrS != nil {
@@ -7990,7 +8461,7 @@ func zjDecodeOrderedNumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNum
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldNumberCases(l, v, a, matched) {
+			if !zjDecodeOrderedField_NumberCases(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -8012,7 +8483,7 @@ func zjDecodeOrderedNumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNum
 	}
 }
 
-func zjDecodeOrderedFieldNumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNumberCases, k int) bool {
+func zjDecodeOrderedField_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNumberCases, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 2:
@@ -8021,7 +8492,6 @@ func zjDecodeOrderedFieldNumberCases(l *zerojson.Lexer, v *NumberCases, a *zjAre
 			v.NS = nil
 		case 4:
 			v.NM = nil
-			a.s4 = false
 		case 6:
 			v.PtrS = nil
 		}
@@ -8038,12 +8508,25 @@ func zjDecodeOrderedFieldNumberCases(l *zerojson.Lexer, v *NumberCases, a *zjAre
 		v.NO = json_.Number(l.ReadJSONNumber())
 	case 2:
 		if v.NP == nil {
-			a.f2 = json_.Number(l.ReadJSONNumber())
-			v.NP = &a.f2
-		} else {
-			*v.NP = json_.Number(l.ReadJSONNumber())
+			if a.published2 {
+				v.NP = new(json_.Number)
+			} else {
+				var zjZero json_.Number
+				a.f2 = zjZero
+				v.NP = &a.f2
+				a.published2 = true
+			}
 		}
+		*v.NP = json_.Number(l.ReadJSONNumber())
 	case 3:
+		if v.NS != nil {
+			a.c3 = v.NS
+			a.sliceBorrowed3 = true
+		} else if a.slicePublished3 || a.sliceBorrowed3 {
+			a.c3 = nil
+			a.sliceBorrowed3 = false
+		}
+		a.slicePublished3 = true
 		a.c3 = a.c3[:0]
 		if l.EnterArray() {
 			for {
@@ -8072,16 +8555,18 @@ func zjDecodeOrderedFieldNumberCases(l *zerojson.Lexer, v *NumberCases, a *zjAre
 		}
 		v.NS = a.c3
 	case 4:
-		if !a.s4 {
-			a.s4 = true
+		{
 			if v.NM != nil {
 				a.m4 = v.NM
-			} else if a.m4 == nil {
+				a.owned4 = false
+			} else if a.m4 == nil || !a.owned4 || a.mapPublished4 {
 				a.m4 = make(map[string]json_.Number)
+				a.owned4 = true
 			} else {
 				clear(a.m4)
 			}
 		}
+		a.mapPublished4 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -8109,11 +8594,16 @@ func zjDecodeOrderedFieldNumberCases(l *zerojson.Lexer, v *NumberCases, a *zjAre
 			v.PtrS = nil
 		} else {
 			if v.PtrS == nil {
-				a.f6 = int64(l.ReadQuotedInt64())
-				v.PtrS = &a.f6
-			} else {
-				*v.PtrS = int64(l.ReadQuotedInt64())
+				if a.published6 {
+					v.PtrS = new(int64)
+				} else {
+					var zjZero int64
+					a.f6 = zjZero
+					v.PtrS = &a.f6
+					a.published6 = true
+				}
 			}
+			*v.PtrS = int64(l.ReadQuotedInt64())
 		}
 	}
 	if l.Err() != nil {
@@ -8217,10 +8707,10 @@ func zjIsDeclaredKeyNumberCases(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackNumberCases is the general keyed decoder: every member is read via
+// zjDecodeFallback_NumberCases is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackNumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNumberCases) {
+func zjDecodeFallback_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNumberCases) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -8238,7 +8728,6 @@ func zjDecodeFallbackNumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNu
 				v.NS = nil
 			case "nm":
 				v.NM = nil
-				a.s4 = false
 			case "ptr_s":
 				v.PtrS = nil
 			}
@@ -8258,12 +8747,25 @@ func zjDecodeFallbackNumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNu
 			v.NO = json_.Number(l.ReadJSONNumber())
 		case "np":
 			if v.NP == nil {
-				a.f2 = json_.Number(l.ReadJSONNumber())
-				v.NP = &a.f2
-			} else {
-				*v.NP = json_.Number(l.ReadJSONNumber())
+				if a.published2 {
+					v.NP = new(json_.Number)
+				} else {
+					var zjZero json_.Number
+					a.f2 = zjZero
+					v.NP = &a.f2
+					a.published2 = true
+				}
 			}
+			*v.NP = json_.Number(l.ReadJSONNumber())
 		case "ns":
+			if v.NS != nil {
+				a.c3 = v.NS
+				a.sliceBorrowed3 = true
+			} else if a.slicePublished3 || a.sliceBorrowed3 {
+				a.c3 = nil
+				a.sliceBorrowed3 = false
+			}
+			a.slicePublished3 = true
 			a.c3 = a.c3[:0]
 			if l.EnterArray() {
 				for {
@@ -8292,16 +8794,18 @@ func zjDecodeFallbackNumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNu
 			}
 			v.NS = a.c3
 		case "nm":
-			if !a.s4 {
-				a.s4 = true
+			{
 				if v.NM != nil {
 					a.m4 = v.NM
-				} else if a.m4 == nil {
+					a.owned4 = false
+				} else if a.m4 == nil || !a.owned4 || a.mapPublished4 {
 					a.m4 = make(map[string]json_.Number)
+					a.owned4 = true
 				} else {
 					clear(a.m4)
 				}
 			}
+			a.mapPublished4 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -8329,11 +8833,16 @@ func zjDecodeFallbackNumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNu
 				v.PtrS = nil
 			} else {
 				if v.PtrS == nil {
-					a.f6 = int64(l.ReadQuotedInt64())
-					v.PtrS = &a.f6
-				} else {
-					*v.PtrS = int64(l.ReadQuotedInt64())
+					if a.published6 {
+						v.PtrS = new(int64)
+					} else {
+						var zjZero int64
+						a.f6 = zjZero
+						v.PtrS = &a.f6
+						a.published6 = true
+					}
 				}
+				*v.PtrS = int64(l.ReadQuotedInt64())
 			}
 		default:
 			l.Skip()
@@ -8358,9 +8867,9 @@ type NumberCasesDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -8373,8 +8882,9 @@ func (d *NumberCasesDecoder) Decode(data []byte, v *NumberCases) error {
 	defer d.busy.Store(false)
 	var zero NumberCases
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, false)
-	zjDecodeNumberCases(&l, v, &d.a)
+	zjDecode_NumberCases(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -8390,22 +8900,33 @@ func (d *NumberCasesDecoder) DecodeBorrow(data []byte, v *NumberCases) error {
 	defer d.busy.Store(false)
 	var zero NumberCases
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, true)
-	zjDecodeNumberCases(&l, v, &d.a)
+	zjDecode_NumberCases(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
 
-// zjArenaNullCases backs every pointer field of a decoded NullCases with a single
+// zjArenaNullCases holds first-use pointer cells for a decoded NullCases in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaNullCases struct {
-	c1 []NullAware
-	s2 bool
-	m2 map[string]NullAware
-	f3 NullAware
+	slicePublished1 bool
+	sliceBorrowed1  bool // adopted storage must not be recycled on the next pooled call
+	c1              []NullAware
+	m2              map[string]NullAware
+	owned2          bool // only arena-owned maps may be cleared for reuse
+	mapPublished2   bool
+	published3      bool
+	f3              NullAware
+}
+
+func (a *zjArenaNullCases) beginDecode() {
+	a.slicePublished1 = false
+	a.mapPublished2 = false
+	a.published3 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -8521,7 +9042,7 @@ func (v *NullCases) UnmarshalZJSONBorrow(data []byte) error {
 func (v *NullCases) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaNullCases{}
-	zjDecodeNullCases(&l, v, a)
+	zjDecode_NullCases(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -8531,26 +9052,25 @@ func (v *NullCases) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *NullCases) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaNullCases{}
-	zjDecodeNullCases(l, v, a)
+	zjDecode_NullCases(l, v, a)
 }
 
-// zjDecodeNullCases tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_NullCases tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeNullCases(l *zerojson.Lexer, v *NullCases, a *zjArenaNullCases) {
+func zjDecode_NullCases(l *zerojson.Lexer, v *NullCases, a *zjArenaNullCases) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s2 = false
-	zjDecodeFallbackNullCases(l, v, a)
+	zjDecodeFallback_NullCases(l, v, a)
 }
 
-// zjDecodeFallbackNullCases is the general keyed decoder: every member is read via
+// zjDecodeFallback_NullCases is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackNullCases(l *zerojson.Lexer, v *NullCases, a *zjArenaNullCases) {
+func zjDecodeFallback_NullCases(l *zerojson.Lexer, v *NullCases, a *zjArenaNullCases) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -8570,7 +9090,6 @@ func zjDecodeFallbackNullCases(l *zerojson.Lexer, v *NullCases, a *zjArenaNullCa
 				v.Many = nil
 			case "index":
 				v.Index = nil
-				a.s2 = false
 			case "ptr":
 				v.Ptr = nil
 			}
@@ -8591,6 +9110,14 @@ func zjDecodeFallbackNullCases(l *zerojson.Lexer, v *NullCases, a *zjArenaNullCa
 				}
 			}
 		case "many":
+			if v.Many != nil {
+				a.c1 = v.Many
+				a.sliceBorrowed1 = true
+			} else if a.slicePublished1 || a.sliceBorrowed1 {
+				a.c1 = nil
+				a.sliceBorrowed1 = false
+			}
+			a.slicePublished1 = true
 			a.c1 = a.c1[:0]
 			if l.EnterArray() {
 				for {
@@ -8627,16 +9154,18 @@ func zjDecodeFallbackNullCases(l *zerojson.Lexer, v *NullCases, a *zjArenaNullCa
 			}
 			v.Many = a.c1
 		case "index":
-			if !a.s2 {
-				a.s2 = true
+			{
 				if v.Index != nil {
 					a.m2 = v.Index
-				} else if a.m2 == nil {
+					a.owned2 = false
+				} else if a.m2 == nil || !a.owned2 || a.mapPublished2 {
 					a.m2 = make(map[string]NullAware)
+					a.owned2 = true
 				} else {
 					clear(a.m2)
 				}
 			}
+			a.mapPublished2 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -8664,9 +9193,14 @@ func zjDecodeFallbackNullCases(l *zerojson.Lexer, v *NullCases, a *zjArenaNullCa
 			v.Index = a.m2
 		case "ptr":
 			if v.Ptr == nil {
-				var zjZero NullAware
-				a.f3 = zjZero
-				v.Ptr = &a.f3
+				if a.published3 {
+					v.Ptr = new(NullAware)
+				} else {
+					var zjZero NullAware
+					a.f3 = zjZero
+					v.Ptr = &a.f3
+					a.published3 = true
+				}
 			}
 			if raw := l.RawValue(); l.Err() == nil {
 				if err := v.Ptr.UnmarshalJSON(raw); err != nil {
@@ -8696,9 +9230,9 @@ type NullCasesDecoder struct {
 }
 
 // Decode decodes data into v, reusing the Decoder's arena.
-// Field decoding may still allocate. *v is reset to its zero value first: the
-// arena adopts no caller-owned map or pointee, so a target reused
-// across calls can never have its own data cleared by a later decode.
+// Field decoding may still allocate. *v is reset to its zero value first,
+// so its pre-existing storage is not adopted. Storage supplied by callbacks
+// may be used within the call but is not recycled by a later call.
 // The result aliases the arena and is invalidated by the next
 // Decode/DecodeBorrow on this Decoder. Concurrent calls on one Decoder
 // panic; use one Decoder per goroutine (e.g. via sync.Pool).
@@ -8711,8 +9245,9 @@ func (d *NullCasesDecoder) Decode(data []byte, v *NullCases) error {
 	defer d.busy.Store(false)
 	var zero NullCases
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, false)
-	zjDecodeNullCases(&l, v, &d.a)
+	zjDecode_NullCases(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
@@ -8728,20 +9263,28 @@ func (d *NullCasesDecoder) DecodeBorrow(data []byte, v *NullCases) error {
 	defer d.busy.Store(false)
 	var zero NullCases
 	*v = zero
+	d.a.beginDecode()
 	l := zerojson.NewLexer(data, true)
-	zjDecodeNullCases(&l, v, &d.a)
+	zjDecode_NullCases(&l, v, &d.a)
 	l.Finish()
 	return l.Err()
 }
 
-// zjArenaEventMeta backs every pointer field of a decoded EventMeta with a single
+// zjArenaEventMeta holds first-use pointer cells for a decoded EventMeta in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaEventMeta struct {
-	f0 string
-	f1 testleaf.Decimal
+	published0 bool
+	f0         string
+	published1 bool
+	f1         testleaf.Decimal
+}
+
+func (a *zjArenaEventMeta) beginDecode() {
+	a.published0 = false
+	a.published1 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -8792,7 +9335,7 @@ func (v *EventMeta) UnmarshalZJSONBorrow(data []byte) error {
 func (v *EventMeta) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaEventMeta{}
-	zjDecodeEventMeta(&l, v, a)
+	zjDecode_EventMeta(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -8802,20 +9345,20 @@ func (v *EventMeta) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *EventMeta) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaEventMeta{}
-	zjDecodeEventMeta(l, v, a)
+	zjDecode_EventMeta(l, v, a)
 }
 
-// zjDecodeEventMeta tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_EventMeta tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeEventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventMeta) {
+func zjDecode_EventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventMeta) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedEventMeta(l, v, a) {
+	if zjDecodeOrdered_EventMeta(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -8826,17 +9369,17 @@ func zjDecodeEventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventMeta) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackEventMeta(l, v, a)
+	zjDecodeFallback_EventMeta(l, v, a)
 }
 
-// zjDecodeOrderedEventMeta speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_EventMeta speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackEventMeta;
+// non-compact syntax. The caller retries those through zjDecodeFallback_EventMeta;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedEventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventMeta) bool {
+func zjDecodeOrdered_EventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventMeta) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.Note != nil || v.Cost != nil {
@@ -8904,7 +9447,7 @@ func zjDecodeOrderedEventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventMe
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldEventMeta(l, v, a, matched) {
+			if !zjDecodeOrderedField_EventMeta(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -8926,7 +9469,7 @@ func zjDecodeOrderedEventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventMe
 	}
 }
 
-func zjDecodeOrderedFieldEventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventMeta, k int) bool {
+func zjDecodeOrderedField_EventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventMeta, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -8943,16 +9486,26 @@ func zjDecodeOrderedFieldEventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEv
 	switch k {
 	case 0:
 		if v.Note == nil {
-			a.f0 = l.ReadString()
-			v.Note = &a.f0
-		} else {
-			*v.Note = l.ReadString()
+			if a.published0 {
+				v.Note = new(string)
+			} else {
+				var zjZero string
+				a.f0 = zjZero
+				v.Note = &a.f0
+				a.published0 = true
+			}
 		}
+		*v.Note = l.ReadString()
 	case 1:
 		if v.Cost == nil {
-			var zjZero testleaf.Decimal
-			a.f1 = zjZero
-			v.Cost = &a.f1
+			if a.published1 {
+				v.Cost = new(testleaf.Decimal)
+			} else {
+				var zjZero testleaf.Decimal
+				a.f1 = zjZero
+				v.Cost = &a.f1
+				a.published1 = true
+			}
 		}
 		testleaf.Read(l, v.Cost)
 	case 2:
@@ -9019,10 +9572,10 @@ func zjIsDeclaredKeyEventMeta(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackEventMeta is the general keyed decoder: every member is read via
+// zjDecodeFallback_EventMeta is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackEventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventMeta) {
+func zjDecodeFallback_EventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventMeta) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -9051,16 +9604,26 @@ func zjDecodeFallbackEventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventM
 		switch string(key) {
 		case "note":
 			if v.Note == nil {
-				a.f0 = l.ReadString()
-				v.Note = &a.f0
-			} else {
-				*v.Note = l.ReadString()
+				if a.published0 {
+					v.Note = new(string)
+				} else {
+					var zjZero string
+					a.f0 = zjZero
+					v.Note = &a.f0
+					a.published0 = true
+				}
 			}
+			*v.Note = l.ReadString()
 		case "cost":
 			if v.Cost == nil {
-				var zjZero testleaf.Decimal
-				a.f1 = zjZero
-				v.Cost = &a.f1
+				if a.published1 {
+					v.Cost = new(testleaf.Decimal)
+				} else {
+					var zjZero testleaf.Decimal
+					a.f1 = zjZero
+					v.Cost = &a.f1
+					a.published1 = true
+				}
 			}
 			testleaf.Read(l, v.Cost)
 		case "internal":
@@ -9078,12 +9641,15 @@ func zjDecodeFallbackEventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventM
 	}
 }
 
-// zjArenaReuseInner backs every pointer field of a decoded ReuseInner with a single
+// zjArenaReuseInner holds first-use pointer cells for a decoded ReuseInner in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaReuseInner struct {
+}
+
+func (a *zjArenaReuseInner) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -9127,7 +9693,7 @@ func (v *ReuseInner) UnmarshalZJSONBorrow(data []byte) error {
 func (v *ReuseInner) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaReuseInner{}
-	zjDecodeReuseInner(&l, v, a)
+	zjDecode_ReuseInner(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -9137,20 +9703,20 @@ func (v *ReuseInner) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *ReuseInner) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaReuseInner{}
-	zjDecodeReuseInner(l, v, a)
+	zjDecode_ReuseInner(l, v, a)
 }
 
-// zjDecodeReuseInner tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_ReuseInner tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReuseInner) {
+func zjDecode_ReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReuseInner) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedReuseInner(l, v, a) {
+	if zjDecodeOrdered_ReuseInner(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -9161,17 +9727,17 @@ func zjDecodeReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReuseInner) 
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackReuseInner(l, v, a)
+	zjDecodeFallback_ReuseInner(l, v, a)
 }
 
-// zjDecodeOrderedReuseInner speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_ReuseInner speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackReuseInner;
+// non-compact syntax. The caller retries those through zjDecodeFallback_ReuseInner;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReuseInner) bool {
+func zjDecodeOrdered_ReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReuseInner) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -9235,7 +9801,7 @@ func zjDecodeOrderedReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReuse
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldReuseInner(l, v, a, matched) {
+			if !zjDecodeOrderedField_ReuseInner(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -9257,7 +9823,7 @@ func zjDecodeOrderedReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReuse
 	}
 }
 
-func zjDecodeOrderedFieldReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReuseInner, k int) bool {
+func zjDecodeOrderedField_ReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReuseInner, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesReuseInner[k])
@@ -9322,10 +9888,10 @@ func zjIsDeclaredKeyReuseInner(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackReuseInner is the general keyed decoder: every member is read via
+// zjDecodeFallback_ReuseInner is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReuseInner) {
+func zjDecodeFallback_ReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReuseInner) {
 	_ = a
 	if !l.EnterObject() {
 		return

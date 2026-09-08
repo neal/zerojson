@@ -63,7 +63,7 @@ type BadList []BadTags
 		"zjFuzzNoOracleBadList(t, data)",
 		// Which must still assert what does not involve the oracle.
 		"func zjFuzzNoOracleBadTags(t *testing.T, data []byte) {",
-		"zjDecodeFallbackBadTags(&lFallback, &viaFallback, &zjArenaBadTags{})",
+		"zjDecodeFallback_BadTags(&lFallback, &viaFallback, &zjArenaBadTags{})",
 		"could not re-decode its own output",
 		"ordered-vs-fallback divergence",
 	} {

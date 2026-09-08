@@ -12,12 +12,15 @@ import (
 	"time"
 )
 
-// zjArenaC_bytes backs every pointer field of a decoded C_bytes with a single
+// zjArenaC_bytes holds first-use pointer cells for a decoded C_bytes in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_bytes struct {
+}
+
+func (a *zjArenaC_bytes) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -54,7 +57,7 @@ func (v *C_bytes) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_bytes) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_bytes{}
-	zjDecodeC_bytes(&l, v, a)
+	zjDecode_C_bytes(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -64,20 +67,20 @@ func (v *C_bytes) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_bytes) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_bytes{}
-	zjDecodeC_bytes(l, v, a)
+	zjDecode_C_bytes(l, v, a)
 }
 
-// zjDecodeC_bytes tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_bytes tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) {
+func zjDecode_C_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedC_bytes(l, v, a) {
+	if zjDecodeOrdered_C_bytes(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -88,17 +91,17 @@ func zjDecodeC_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_bytes(l, v, a)
+	zjDecodeFallback_C_bytes(l, v, a)
 }
 
-// zjDecodeOrderedC_bytes speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_bytes speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_bytes;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_bytes;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) bool {
+func zjDecodeOrdered_C_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -162,7 +165,7 @@ func zjDecodeOrderedC_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) bo
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_bytes(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_bytes(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -184,7 +187,7 @@ func zjDecodeOrderedC_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) bo
 	}
 }
 
-func zjDecodeOrderedFieldC_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes, k int) bool {
+func zjDecodeOrderedField_C_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -241,10 +244,10 @@ func zjIsDeclaredKeyC_bytes(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_bytes is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_bytes is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) {
+func zjDecodeFallback_C_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -284,12 +287,15 @@ func zjDecodeFallbackC_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) {
 	}
 }
 
-// zjArenaC_bytes_named backs every pointer field of a decoded C_bytes_named with a single
+// zjArenaC_bytes_named holds first-use pointer cells for a decoded C_bytes_named in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_bytes_named struct {
+}
+
+func (a *zjArenaC_bytes_named) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -326,7 +332,7 @@ func (v *C_bytes_named) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_bytes_named) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_bytes_named{}
-	zjDecodeC_bytes_named(&l, v, a)
+	zjDecode_C_bytes_named(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -336,20 +342,20 @@ func (v *C_bytes_named) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_bytes_named) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_bytes_named{}
-	zjDecodeC_bytes_named(l, v, a)
+	zjDecode_C_bytes_named(l, v, a)
 }
 
-// zjDecodeC_bytes_named tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_bytes_named tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjArenaC_bytes_named) {
+func zjDecode_C_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjArenaC_bytes_named) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedC_bytes_named(l, v, a) {
+	if zjDecodeOrdered_C_bytes_named(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -360,17 +366,17 @@ func zjDecodeC_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjArenaC_byte
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_bytes_named(l, v, a)
+	zjDecodeFallback_C_bytes_named(l, v, a)
 }
 
-// zjDecodeOrderedC_bytes_named speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_bytes_named speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_bytes_named;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_bytes_named;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjArenaC_bytes_named) bool {
+func zjDecodeOrdered_C_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjArenaC_bytes_named) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -434,7 +440,7 @@ func zjDecodeOrderedC_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjAren
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_bytes_named(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_bytes_named(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -456,7 +462,7 @@ func zjDecodeOrderedC_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjAren
 	}
 }
 
-func zjDecodeOrderedFieldC_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjArenaC_bytes_named, k int) bool {
+func zjDecodeOrderedField_C_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjArenaC_bytes_named, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -513,10 +519,10 @@ func zjIsDeclaredKeyC_bytes_named(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_bytes_named is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_bytes_named is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjArenaC_bytes_named) {
+func zjDecodeFallback_C_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjArenaC_bytes_named) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -556,12 +562,15 @@ func zjDecodeFallbackC_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjAre
 	}
 }
 
-// zjArenaC_bytes_named_oe backs every pointer field of a decoded C_bytes_named_oe with a single
+// zjArenaC_bytes_named_oe holds first-use pointer cells for a decoded C_bytes_named_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_bytes_named_oe struct {
+}
+
+func (a *zjArenaC_bytes_named_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -598,7 +607,7 @@ func (v *C_bytes_named_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_bytes_named_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_bytes_named_oe{}
-	zjDecodeC_bytes_named_oe(&l, v, a)
+	zjDecode_C_bytes_named_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -608,20 +617,20 @@ func (v *C_bytes_named_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_bytes_named_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_bytes_named_oe{}
-	zjDecodeC_bytes_named_oe(l, v, a)
+	zjDecode_C_bytes_named_oe(l, v, a)
 }
 
-// zjDecodeC_bytes_named_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_bytes_named_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a *zjArenaC_bytes_named_oe) {
+func zjDecode_C_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a *zjArenaC_bytes_named_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedC_bytes_named_oe(l, v, a) {
+	if zjDecodeOrdered_C_bytes_named_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -632,17 +641,17 @@ func zjDecodeC_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a *zjArena
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_bytes_named_oe(l, v, a)
+	zjDecodeFallback_C_bytes_named_oe(l, v, a)
 }
 
-// zjDecodeOrderedC_bytes_named_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_bytes_named_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_bytes_named_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_bytes_named_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a *zjArenaC_bytes_named_oe) bool {
+func zjDecodeOrdered_C_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a *zjArenaC_bytes_named_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -706,7 +715,7 @@ func zjDecodeOrderedC_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a *
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_bytes_named_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_bytes_named_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -728,7 +737,7 @@ func zjDecodeOrderedC_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a *
 	}
 }
 
-func zjDecodeOrderedFieldC_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a *zjArenaC_bytes_named_oe, k int) bool {
+func zjDecodeOrderedField_C_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a *zjArenaC_bytes_named_oe, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -785,10 +794,10 @@ func zjIsDeclaredKeyC_bytes_named_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_bytes_named_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_bytes_named_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a *zjArenaC_bytes_named_oe) {
+func zjDecodeFallback_C_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a *zjArenaC_bytes_named_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -828,13 +837,19 @@ func zjDecodeFallbackC_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a 
 	}
 }
 
-// zjArenaC_bytes_nested_slice backs every pointer field of a decoded C_bytes_nested_slice with a single
+// zjArenaC_bytes_nested_slice holds first-use pointer cells for a decoded C_bytes_nested_slice in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_bytes_nested_slice struct {
-	c0 [][]byte
+	slicePublished0 bool
+	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
+	c0              [][]byte
+}
+
+func (a *zjArenaC_bytes_nested_slice) beginDecode() {
+	a.slicePublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -882,7 +897,7 @@ func (v *C_bytes_nested_slice) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_bytes_nested_slice) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_bytes_nested_slice{}
-	zjDecodeC_bytes_nested_slice(&l, v, a)
+	zjDecode_C_bytes_nested_slice(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -892,20 +907,20 @@ func (v *C_bytes_nested_slice) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_bytes_nested_slice) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_bytes_nested_slice{}
-	zjDecodeC_bytes_nested_slice(l, v, a)
+	zjDecode_C_bytes_nested_slice(l, v, a)
 }
 
-// zjDecodeC_bytes_nested_slice tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_bytes_nested_slice tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_slice, a *zjArenaC_bytes_nested_slice) {
+func zjDecode_C_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_slice, a *zjArenaC_bytes_nested_slice) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedC_bytes_nested_slice(l, v, a) {
+	if zjDecodeOrdered_C_bytes_nested_slice(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -916,17 +931,17 @@ func zjDecodeC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_slice, a 
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_bytes_nested_slice(l, v, a)
+	zjDecodeFallback_C_bytes_nested_slice(l, v, a)
 }
 
-// zjDecodeOrderedC_bytes_nested_slice speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_bytes_nested_slice speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_bytes_nested_slice;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_bytes_nested_slice;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_slice, a *zjArenaC_bytes_nested_slice) bool {
+func zjDecodeOrdered_C_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_slice, a *zjArenaC_bytes_nested_slice) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -990,7 +1005,7 @@ func zjDecodeOrderedC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_sl
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_bytes_nested_slice(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_bytes_nested_slice(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -1012,7 +1027,7 @@ func zjDecodeOrderedC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_sl
 	}
 }
 
-func zjDecodeOrderedFieldC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_slice, a *zjArenaC_bytes_nested_slice, k int) bool {
+func zjDecodeOrderedField_C_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_slice, a *zjArenaC_bytes_nested_slice, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -1026,6 +1041,14 @@ func zjDecodeOrderedFieldC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nest
 	}
 	switch k {
 	case 0:
+		if v.F != nil {
+			a.c0 = v.F
+			a.sliceBorrowed0 = true
+		} else if a.slicePublished0 || a.sliceBorrowed0 {
+			a.c0 = nil
+			a.sliceBorrowed0 = false
+		}
+		a.slicePublished0 = true
 		a.c0 = a.c0[:0]
 		if l.EnterArray() {
 			for {
@@ -1095,10 +1118,10 @@ func zjIsDeclaredKeyC_bytes_nested_slice(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_bytes_nested_slice is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_bytes_nested_slice is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_slice, a *zjArenaC_bytes_nested_slice) {
+func zjDecodeFallback_C_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_slice, a *zjArenaC_bytes_nested_slice) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -1124,6 +1147,14 @@ func zjDecodeFallbackC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_s
 		}
 		switch string(key) {
 		case "f":
+			if v.F != nil {
+				a.c0 = v.F
+				a.sliceBorrowed0 = true
+			} else if a.slicePublished0 || a.sliceBorrowed0 {
+				a.c0 = nil
+				a.sliceBorrowed0 = false
+			}
+			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -1164,13 +1195,19 @@ func zjDecodeFallbackC_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_s
 	}
 }
 
-// zjArenaC_bytes_nested_slice_oe backs every pointer field of a decoded C_bytes_nested_slice_oe with a single
+// zjArenaC_bytes_nested_slice_oe holds first-use pointer cells for a decoded C_bytes_nested_slice_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_bytes_nested_slice_oe struct {
-	c0 [][]byte
+	slicePublished0 bool
+	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
+	c0              [][]byte
+}
+
+func (a *zjArenaC_bytes_nested_slice_oe) beginDecode() {
+	a.slicePublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -1218,7 +1255,7 @@ func (v *C_bytes_nested_slice_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_bytes_nested_slice_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_bytes_nested_slice_oe{}
-	zjDecodeC_bytes_nested_slice_oe(&l, v, a)
+	zjDecode_C_bytes_nested_slice_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -1228,20 +1265,20 @@ func (v *C_bytes_nested_slice_oe) unmarshalZJSON(data []byte, borrow bool) error
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_bytes_nested_slice_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_bytes_nested_slice_oe{}
-	zjDecodeC_bytes_nested_slice_oe(l, v, a)
+	zjDecode_C_bytes_nested_slice_oe(l, v, a)
 }
 
-// zjDecodeC_bytes_nested_slice_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_bytes_nested_slice_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested_slice_oe, a *zjArenaC_bytes_nested_slice_oe) {
+func zjDecode_C_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested_slice_oe, a *zjArenaC_bytes_nested_slice_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedC_bytes_nested_slice_oe(l, v, a) {
+	if zjDecodeOrdered_C_bytes_nested_slice_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -1252,17 +1289,17 @@ func zjDecodeC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested_slice_
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_bytes_nested_slice_oe(l, v, a)
+	zjDecodeFallback_C_bytes_nested_slice_oe(l, v, a)
 }
 
-// zjDecodeOrderedC_bytes_nested_slice_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_bytes_nested_slice_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_bytes_nested_slice_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_bytes_nested_slice_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested_slice_oe, a *zjArenaC_bytes_nested_slice_oe) bool {
+func zjDecodeOrdered_C_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested_slice_oe, a *zjArenaC_bytes_nested_slice_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -1326,7 +1363,7 @@ func zjDecodeOrderedC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_bytes_nested_slice_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_bytes_nested_slice_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -1348,7 +1385,7 @@ func zjDecodeOrderedC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested
 	}
 }
 
-func zjDecodeOrderedFieldC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested_slice_oe, a *zjArenaC_bytes_nested_slice_oe, k int) bool {
+func zjDecodeOrderedField_C_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested_slice_oe, a *zjArenaC_bytes_nested_slice_oe, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -1362,6 +1399,14 @@ func zjDecodeOrderedFieldC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_n
 	}
 	switch k {
 	case 0:
+		if v.F != nil {
+			a.c0 = v.F
+			a.sliceBorrowed0 = true
+		} else if a.slicePublished0 || a.sliceBorrowed0 {
+			a.c0 = nil
+			a.sliceBorrowed0 = false
+		}
+		a.slicePublished0 = true
 		a.c0 = a.c0[:0]
 		if l.EnterArray() {
 			for {
@@ -1431,10 +1476,10 @@ func zjIsDeclaredKeyC_bytes_nested_slice_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_bytes_nested_slice_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_bytes_nested_slice_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested_slice_oe, a *zjArenaC_bytes_nested_slice_oe) {
+func zjDecodeFallback_C_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested_slice_oe, a *zjArenaC_bytes_nested_slice_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -1460,6 +1505,14 @@ func zjDecodeFallbackC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_neste
 		}
 		switch string(key) {
 		case "f":
+			if v.F != nil {
+				a.c0 = v.F
+				a.sliceBorrowed0 = true
+			} else if a.slicePublished0 || a.sliceBorrowed0 {
+				a.c0 = nil
+				a.sliceBorrowed0 = false
+			}
+			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -1500,12 +1553,15 @@ func zjDecodeFallbackC_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_neste
 	}
 }
 
-// zjArenaC_bytes_oe backs every pointer field of a decoded C_bytes_oe with a single
+// zjArenaC_bytes_oe holds first-use pointer cells for a decoded C_bytes_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_bytes_oe struct {
+}
+
+func (a *zjArenaC_bytes_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -1542,7 +1598,7 @@ func (v *C_bytes_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_bytes_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_bytes_oe{}
-	zjDecodeC_bytes_oe(&l, v, a)
+	zjDecode_C_bytes_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -1552,20 +1608,20 @@ func (v *C_bytes_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_bytes_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_bytes_oe{}
-	zjDecodeC_bytes_oe(l, v, a)
+	zjDecode_C_bytes_oe(l, v, a)
 }
 
-// zjDecodeC_bytes_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_bytes_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_bytes_oe) {
+func zjDecode_C_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_bytes_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedC_bytes_oe(l, v, a) {
+	if zjDecodeOrdered_C_bytes_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -1576,17 +1632,17 @@ func zjDecodeC_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_bytes_oe) 
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_bytes_oe(l, v, a)
+	zjDecodeFallback_C_bytes_oe(l, v, a)
 }
 
-// zjDecodeOrderedC_bytes_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_bytes_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_bytes_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_bytes_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_bytes_oe) bool {
+func zjDecodeOrdered_C_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_bytes_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -1650,7 +1706,7 @@ func zjDecodeOrderedC_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_byt
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_bytes_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_bytes_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -1672,7 +1728,7 @@ func zjDecodeOrderedC_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_byt
 	}
 }
 
-func zjDecodeOrderedFieldC_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_bytes_oe, k int) bool {
+func zjDecodeOrderedField_C_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_bytes_oe, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -1729,10 +1785,10 @@ func zjIsDeclaredKeyC_bytes_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_bytes_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_bytes_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_bytes_oe) {
+func zjDecodeFallback_C_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_bytes_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -1772,13 +1828,18 @@ func zjDecodeFallbackC_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_by
 	}
 }
 
-// zjArenaC_bytes_ptr backs every pointer field of a decoded C_bytes_ptr with a single
+// zjArenaC_bytes_ptr holds first-use pointer cells for a decoded C_bytes_ptr in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_bytes_ptr struct {
-	f0 []byte
+	published0 bool
+	f0         []byte
+}
+
+func (a *zjArenaC_bytes_ptr) beginDecode() {
+	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -1819,7 +1880,7 @@ func (v *C_bytes_ptr) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_bytes_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_bytes_ptr{}
-	zjDecodeC_bytes_ptr(&l, v, a)
+	zjDecode_C_bytes_ptr(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -1829,20 +1890,20 @@ func (v *C_bytes_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_bytes_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_bytes_ptr{}
-	zjDecodeC_bytes_ptr(l, v, a)
+	zjDecode_C_bytes_ptr(l, v, a)
 }
 
-// zjDecodeC_bytes_ptr tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_bytes_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_bytes_ptr) {
+func zjDecode_C_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_bytes_ptr) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedC_bytes_ptr(l, v, a) {
+	if zjDecodeOrdered_C_bytes_ptr(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -1853,17 +1914,17 @@ func zjDecodeC_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_bytes_pt
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_bytes_ptr(l, v, a)
+	zjDecodeFallback_C_bytes_ptr(l, v, a)
 }
 
-// zjDecodeOrderedC_bytes_ptr speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_bytes_ptr speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_bytes_ptr;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_bytes_ptr;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_bytes_ptr) bool {
+func zjDecodeOrdered_C_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_bytes_ptr) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.F != nil {
@@ -1931,7 +1992,7 @@ func zjDecodeOrderedC_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_b
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_bytes_ptr(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_bytes_ptr(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -1953,7 +2014,7 @@ func zjDecodeOrderedC_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_b
 	}
 }
 
-func zjDecodeOrderedFieldC_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_bytes_ptr, k int) bool {
+func zjDecodeOrderedField_C_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_bytes_ptr, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -1968,11 +2029,16 @@ func zjDecodeOrderedFieldC_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjAre
 	switch k {
 	case 0:
 		if v.F == nil {
-			a.f0 = []byte(l.ReadBytesBase64())
-			v.F = &a.f0
-		} else {
-			*v.F = []byte(l.ReadBytesBase64())
+			if a.published0 {
+				v.F = new([]byte)
+			} else {
+				var zjZero []byte
+				a.f0 = zjZero
+				v.F = &a.f0
+				a.published0 = true
+			}
 		}
+		*v.F = []byte(l.ReadBytesBase64())
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesC_bytes_ptr[k])
@@ -2015,10 +2081,10 @@ func zjIsDeclaredKeyC_bytes_ptr(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_bytes_ptr is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_bytes_ptr is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_bytes_ptr) {
+func zjDecodeFallback_C_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_bytes_ptr) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -2045,11 +2111,16 @@ func zjDecodeFallbackC_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_
 		switch string(key) {
 		case "f":
 			if v.F == nil {
-				a.f0 = []byte(l.ReadBytesBase64())
-				v.F = &a.f0
-			} else {
-				*v.F = []byte(l.ReadBytesBase64())
+				if a.published0 {
+					v.F = new([]byte)
+				} else {
+					var zjZero []byte
+					a.f0 = zjZero
+					v.F = &a.f0
+					a.published0 = true
+				}
 			}
+			*v.F = []byte(l.ReadBytesBase64())
 		default:
 			l.Skip()
 		}
@@ -2063,14 +2134,19 @@ func zjDecodeFallbackC_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_
 	}
 }
 
-// zjArenaC_map_bytes backs every pointer field of a decoded C_map_bytes with a single
+// zjArenaC_map_bytes holds first-use pointer cells for a decoded C_map_bytes in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_map_bytes struct {
-	s0 bool
-	m0 map[string][]byte
+	m0            map[string][]byte
+	owned0        bool // only arena-owned maps may be cleared for reuse
+	mapPublished0 bool
+}
+
+func (a *zjArenaC_map_bytes) beginDecode() {
+	a.mapPublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -2122,7 +2198,7 @@ func (v *C_map_bytes) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_map_bytes) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_bytes{}
-	zjDecodeC_map_bytes(&l, v, a)
+	zjDecode_C_map_bytes(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -2132,21 +2208,20 @@ func (v *C_map_bytes) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_map_bytes) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_bytes{}
-	zjDecodeC_map_bytes(l, v, a)
+	zjDecode_C_map_bytes(l, v, a)
 }
 
-// zjDecodeC_map_bytes tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_map_bytes tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_map_bytes) {
+func zjDecode_C_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_map_bytes) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s0 = false
 	start := l.Mark()
-	if zjDecodeOrderedC_map_bytes(l, v, a) {
+	if zjDecodeOrdered_C_map_bytes(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -2157,17 +2232,17 @@ func zjDecodeC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_map_byte
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_map_bytes(l, v, a)
+	zjDecodeFallback_C_map_bytes(l, v, a)
 }
 
-// zjDecodeOrderedC_map_bytes speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_map_bytes speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_map_bytes;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_map_bytes;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_map_bytes) bool {
+func zjDecodeOrdered_C_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_map_bytes) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -2231,7 +2306,7 @@ func zjDecodeOrderedC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_m
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_map_bytes(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_map_bytes(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -2253,12 +2328,11 @@ func zjDecodeOrderedC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_m
 	}
 }
 
-func zjDecodeOrderedFieldC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_map_bytes, k int) bool {
+func zjDecodeOrderedField_C_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_map_bytes, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
 			v.F = nil
-			a.s0 = false
 		}
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesC_map_bytes[k])
@@ -2268,16 +2342,18 @@ func zjDecodeOrderedFieldC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjAre
 	}
 	switch k {
 	case 0:
-		if !a.s0 {
-			a.s0 = true
+		{
 			if v.F != nil {
 				a.m0 = v.F
-			} else if a.m0 == nil {
+				a.owned0 = false
+			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 				a.m0 = make(map[string][]byte)
+				a.owned0 = true
 			} else {
 				clear(a.m0)
 			}
 		}
+		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -2337,10 +2413,10 @@ func zjIsDeclaredKeyC_map_bytes(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_map_bytes is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_map_bytes is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_map_bytes) {
+func zjDecodeFallback_C_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_map_bytes) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -2354,7 +2430,6 @@ func zjDecodeFallbackC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_
 			switch string(key) {
 			case "f":
 				v.F = nil
-				a.s0 = false
 			}
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -2367,16 +2442,18 @@ func zjDecodeFallbackC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_
 		}
 		switch string(key) {
 		case "f":
-			if !a.s0 {
-				a.s0 = true
+			{
 				if v.F != nil {
 					a.m0 = v.F
-				} else if a.m0 == nil {
+					a.owned0 = false
+				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 					a.m0 = make(map[string][]byte)
+					a.owned0 = true
 				} else {
 					clear(a.m0)
 				}
 			}
+			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -2407,14 +2484,19 @@ func zjDecodeFallbackC_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_
 	}
 }
 
-// zjArenaC_map_bytes_oe backs every pointer field of a decoded C_map_bytes_oe with a single
+// zjArenaC_map_bytes_oe holds first-use pointer cells for a decoded C_map_bytes_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_map_bytes_oe struct {
-	s0 bool
-	m0 map[string][]byte
+	m0            map[string][]byte
+	owned0        bool // only arena-owned maps may be cleared for reuse
+	mapPublished0 bool
+}
+
+func (a *zjArenaC_map_bytes_oe) beginDecode() {
+	a.mapPublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -2466,7 +2548,7 @@ func (v *C_map_bytes_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_map_bytes_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_bytes_oe{}
-	zjDecodeC_map_bytes_oe(&l, v, a)
+	zjDecode_C_map_bytes_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -2476,21 +2558,20 @@ func (v *C_map_bytes_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_map_bytes_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_bytes_oe{}
-	zjDecodeC_map_bytes_oe(l, v, a)
+	zjDecode_C_map_bytes_oe(l, v, a)
 }
 
-// zjDecodeC_map_bytes_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_map_bytes_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjArenaC_map_bytes_oe) {
+func zjDecode_C_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjArenaC_map_bytes_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s0 = false
 	start := l.Mark()
-	if zjDecodeOrderedC_map_bytes_oe(l, v, a) {
+	if zjDecodeOrdered_C_map_bytes_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -2501,17 +2582,17 @@ func zjDecodeC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjArenaC_ma
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_map_bytes_oe(l, v, a)
+	zjDecodeFallback_C_map_bytes_oe(l, v, a)
 }
 
-// zjDecodeOrderedC_map_bytes_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_map_bytes_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_map_bytes_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_map_bytes_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjArenaC_map_bytes_oe) bool {
+func zjDecodeOrdered_C_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjArenaC_map_bytes_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -2575,7 +2656,7 @@ func zjDecodeOrderedC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjAr
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_map_bytes_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_map_bytes_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -2597,12 +2678,11 @@ func zjDecodeOrderedC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjAr
 	}
 }
 
-func zjDecodeOrderedFieldC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjArenaC_map_bytes_oe, k int) bool {
+func zjDecodeOrderedField_C_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjArenaC_map_bytes_oe, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
 			v.F = nil
-			a.s0 = false
 		}
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesC_map_bytes_oe[k])
@@ -2612,16 +2692,18 @@ func zjDecodeOrderedFieldC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a 
 	}
 	switch k {
 	case 0:
-		if !a.s0 {
-			a.s0 = true
+		{
 			if v.F != nil {
 				a.m0 = v.F
-			} else if a.m0 == nil {
+				a.owned0 = false
+			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 				a.m0 = make(map[string][]byte)
+				a.owned0 = true
 			} else {
 				clear(a.m0)
 			}
 		}
+		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -2681,10 +2763,10 @@ func zjIsDeclaredKeyC_map_bytes_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_map_bytes_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_map_bytes_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjArenaC_map_bytes_oe) {
+func zjDecodeFallback_C_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjArenaC_map_bytes_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -2698,7 +2780,6 @@ func zjDecodeFallbackC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjA
 			switch string(key) {
 			case "f":
 				v.F = nil
-				a.s0 = false
 			}
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -2711,16 +2792,18 @@ func zjDecodeFallbackC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjA
 		}
 		switch string(key) {
 		case "f":
-			if !a.s0 {
-				a.s0 = true
+			{
 				if v.F != nil {
 					a.m0 = v.F
-				} else if a.m0 == nil {
+					a.owned0 = false
+				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 					a.m0 = make(map[string][]byte)
+					a.owned0 = true
 				} else {
 					clear(a.m0)
 				}
 			}
+			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -2751,14 +2834,19 @@ func zjDecodeFallbackC_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjA
 	}
 }
 
-// zjArenaC_map_decimal backs every pointer field of a decoded C_map_decimal with a single
+// zjArenaC_map_decimal holds first-use pointer cells for a decoded C_map_decimal in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_map_decimal struct {
-	s0 bool
-	m0 map[string]testleaf.Decimal
+	m0            map[string]testleaf.Decimal
+	owned0        bool // only arena-owned maps may be cleared for reuse
+	mapPublished0 bool
+}
+
+func (a *zjArenaC_map_decimal) beginDecode() {
+	a.mapPublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -2810,7 +2898,7 @@ func (v *C_map_decimal) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_map_decimal) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_decimal{}
-	zjDecodeC_map_decimal(&l, v, a)
+	zjDecode_C_map_decimal(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -2820,21 +2908,20 @@ func (v *C_map_decimal) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_map_decimal) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_decimal{}
-	zjDecodeC_map_decimal(l, v, a)
+	zjDecode_C_map_decimal(l, v, a)
 }
 
-// zjDecodeC_map_decimal tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_map_decimal tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjArenaC_map_decimal) {
+func zjDecode_C_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjArenaC_map_decimal) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s0 = false
 	start := l.Mark()
-	if zjDecodeOrderedC_map_decimal(l, v, a) {
+	if zjDecodeOrdered_C_map_decimal(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -2845,17 +2932,17 @@ func zjDecodeC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjArenaC_map_
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_map_decimal(l, v, a)
+	zjDecodeFallback_C_map_decimal(l, v, a)
 }
 
-// zjDecodeOrderedC_map_decimal speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_map_decimal speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_map_decimal;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_map_decimal;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjArenaC_map_decimal) bool {
+func zjDecodeOrdered_C_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjArenaC_map_decimal) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -2919,7 +3006,7 @@ func zjDecodeOrderedC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjAren
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_map_decimal(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_map_decimal(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -2941,12 +3028,11 @@ func zjDecodeOrderedC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjAren
 	}
 }
 
-func zjDecodeOrderedFieldC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjArenaC_map_decimal, k int) bool {
+func zjDecodeOrderedField_C_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjArenaC_map_decimal, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
 			v.F = nil
-			a.s0 = false
 		}
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesC_map_decimal[k])
@@ -2956,16 +3042,18 @@ func zjDecodeOrderedFieldC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *z
 	}
 	switch k {
 	case 0:
-		if !a.s0 {
-			a.s0 = true
+		{
 			if v.F != nil {
 				a.m0 = v.F
-			} else if a.m0 == nil {
+				a.owned0 = false
+			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 				a.m0 = make(map[string]testleaf.Decimal)
+				a.owned0 = true
 			} else {
 				clear(a.m0)
 			}
 		}
+		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -3025,10 +3113,10 @@ func zjIsDeclaredKeyC_map_decimal(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_map_decimal is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_map_decimal is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjArenaC_map_decimal) {
+func zjDecodeFallback_C_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjArenaC_map_decimal) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -3042,7 +3130,6 @@ func zjDecodeFallbackC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjAre
 			switch string(key) {
 			case "f":
 				v.F = nil
-				a.s0 = false
 			}
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -3055,16 +3142,18 @@ func zjDecodeFallbackC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjAre
 		}
 		switch string(key) {
 		case "f":
-			if !a.s0 {
-				a.s0 = true
+			{
 				if v.F != nil {
 					a.m0 = v.F
-				} else if a.m0 == nil {
+					a.owned0 = false
+				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 					a.m0 = make(map[string]testleaf.Decimal)
+					a.owned0 = true
 				} else {
 					clear(a.m0)
 				}
 			}
+			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -3095,14 +3184,19 @@ func zjDecodeFallbackC_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjAre
 	}
 }
 
-// zjArenaC_map_decimal_oe backs every pointer field of a decoded C_map_decimal_oe with a single
+// zjArenaC_map_decimal_oe holds first-use pointer cells for a decoded C_map_decimal_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_map_decimal_oe struct {
-	s0 bool
-	m0 map[string]testleaf.Decimal
+	m0            map[string]testleaf.Decimal
+	owned0        bool // only arena-owned maps may be cleared for reuse
+	mapPublished0 bool
+}
+
+func (a *zjArenaC_map_decimal_oe) beginDecode() {
+	a.mapPublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -3154,7 +3248,7 @@ func (v *C_map_decimal_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_map_decimal_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_decimal_oe{}
-	zjDecodeC_map_decimal_oe(&l, v, a)
+	zjDecode_C_map_decimal_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -3164,21 +3258,20 @@ func (v *C_map_decimal_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_map_decimal_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_decimal_oe{}
-	zjDecodeC_map_decimal_oe(l, v, a)
+	zjDecode_C_map_decimal_oe(l, v, a)
 }
 
-// zjDecodeC_map_decimal_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_map_decimal_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a *zjArenaC_map_decimal_oe) {
+func zjDecode_C_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a *zjArenaC_map_decimal_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s0 = false
 	start := l.Mark()
-	if zjDecodeOrderedC_map_decimal_oe(l, v, a) {
+	if zjDecodeOrdered_C_map_decimal_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -3189,17 +3282,17 @@ func zjDecodeC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a *zjArena
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_map_decimal_oe(l, v, a)
+	zjDecodeFallback_C_map_decimal_oe(l, v, a)
 }
 
-// zjDecodeOrderedC_map_decimal_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_map_decimal_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_map_decimal_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_map_decimal_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a *zjArenaC_map_decimal_oe) bool {
+func zjDecodeOrdered_C_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a *zjArenaC_map_decimal_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -3263,7 +3356,7 @@ func zjDecodeOrderedC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a *
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_map_decimal_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_map_decimal_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -3285,12 +3378,11 @@ func zjDecodeOrderedC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a *
 	}
 }
 
-func zjDecodeOrderedFieldC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a *zjArenaC_map_decimal_oe, k int) bool {
+func zjDecodeOrderedField_C_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a *zjArenaC_map_decimal_oe, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
 			v.F = nil
-			a.s0 = false
 		}
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesC_map_decimal_oe[k])
@@ -3300,16 +3392,18 @@ func zjDecodeOrderedFieldC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe
 	}
 	switch k {
 	case 0:
-		if !a.s0 {
-			a.s0 = true
+		{
 			if v.F != nil {
 				a.m0 = v.F
-			} else if a.m0 == nil {
+				a.owned0 = false
+			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 				a.m0 = make(map[string]testleaf.Decimal)
+				a.owned0 = true
 			} else {
 				clear(a.m0)
 			}
 		}
+		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -3369,10 +3463,10 @@ func zjIsDeclaredKeyC_map_decimal_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_map_decimal_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_map_decimal_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a *zjArenaC_map_decimal_oe) {
+func zjDecodeFallback_C_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a *zjArenaC_map_decimal_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -3386,7 +3480,6 @@ func zjDecodeFallbackC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a 
 			switch string(key) {
 			case "f":
 				v.F = nil
-				a.s0 = false
 			}
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -3399,16 +3492,18 @@ func zjDecodeFallbackC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a 
 		}
 		switch string(key) {
 		case "f":
-			if !a.s0 {
-				a.s0 = true
+			{
 				if v.F != nil {
 					a.m0 = v.F
-				} else if a.m0 == nil {
+					a.owned0 = false
+				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 					a.m0 = make(map[string]testleaf.Decimal)
+					a.owned0 = true
 				} else {
 					clear(a.m0)
 				}
 			}
+			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -3439,14 +3534,19 @@ func zjDecodeFallbackC_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a 
 	}
 }
 
-// zjArenaC_map_int backs every pointer field of a decoded C_map_int with a single
+// zjArenaC_map_int holds first-use pointer cells for a decoded C_map_int in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_map_int struct {
-	s0 bool
-	m0 map[string]int
+	m0            map[string]int
+	owned0        bool // only arena-owned maps may be cleared for reuse
+	mapPublished0 bool
+}
+
+func (a *zjArenaC_map_int) beginDecode() {
+	a.mapPublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -3498,7 +3598,7 @@ func (v *C_map_int) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_map_int) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_int{}
-	zjDecodeC_map_int(&l, v, a)
+	zjDecode_C_map_int(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -3508,21 +3608,20 @@ func (v *C_map_int) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_map_int) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_int{}
-	zjDecodeC_map_int(l, v, a)
+	zjDecode_C_map_int(l, v, a)
 }
 
-// zjDecodeC_map_int tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_map_int tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_int) {
+func zjDecode_C_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_int) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s0 = false
 	start := l.Mark()
-	if zjDecodeOrderedC_map_int(l, v, a) {
+	if zjDecodeOrdered_C_map_int(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -3533,17 +3632,17 @@ func zjDecodeC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_int) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_map_int(l, v, a)
+	zjDecodeFallback_C_map_int(l, v, a)
 }
 
-// zjDecodeOrderedC_map_int speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_map_int speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_map_int;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_map_int;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_int) bool {
+func zjDecodeOrdered_C_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_int) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -3607,7 +3706,7 @@ func zjDecodeOrderedC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_i
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_map_int(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_map_int(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -3629,12 +3728,11 @@ func zjDecodeOrderedC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_i
 	}
 }
 
-func zjDecodeOrderedFieldC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_int, k int) bool {
+func zjDecodeOrderedField_C_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_int, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
 			v.F = nil
-			a.s0 = false
 		}
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesC_map_int[k])
@@ -3644,16 +3742,18 @@ func zjDecodeOrderedFieldC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_
 	}
 	switch k {
 	case 0:
-		if !a.s0 {
-			a.s0 = true
+		{
 			if v.F != nil {
 				a.m0 = v.F
-			} else if a.m0 == nil {
+				a.owned0 = false
+			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 				a.m0 = make(map[string]int)
+				a.owned0 = true
 			} else {
 				clear(a.m0)
 			}
 		}
+		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -3713,10 +3813,10 @@ func zjIsDeclaredKeyC_map_int(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_map_int is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_map_int is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_int) {
+func zjDecodeFallback_C_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_int) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -3730,7 +3830,6 @@ func zjDecodeFallbackC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_
 			switch string(key) {
 			case "f":
 				v.F = nil
-				a.s0 = false
 			}
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -3743,16 +3842,18 @@ func zjDecodeFallbackC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_
 		}
 		switch string(key) {
 		case "f":
-			if !a.s0 {
-				a.s0 = true
+			{
 				if v.F != nil {
 					a.m0 = v.F
-				} else if a.m0 == nil {
+					a.owned0 = false
+				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 					a.m0 = make(map[string]int)
+					a.owned0 = true
 				} else {
 					clear(a.m0)
 				}
 			}
+			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -3783,14 +3884,19 @@ func zjDecodeFallbackC_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_
 	}
 }
 
-// zjArenaC_map_int_oe backs every pointer field of a decoded C_map_int_oe with a single
+// zjArenaC_map_int_oe holds first-use pointer cells for a decoded C_map_int_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_map_int_oe struct {
-	s0 bool
-	m0 map[string]int
+	m0            map[string]int
+	owned0        bool // only arena-owned maps may be cleared for reuse
+	mapPublished0 bool
+}
+
+func (a *zjArenaC_map_int_oe) beginDecode() {
+	a.mapPublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -3842,7 +3948,7 @@ func (v *C_map_int_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_map_int_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_int_oe{}
-	zjDecodeC_map_int_oe(&l, v, a)
+	zjDecode_C_map_int_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -3852,21 +3958,20 @@ func (v *C_map_int_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_map_int_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_int_oe{}
-	zjDecodeC_map_int_oe(l, v, a)
+	zjDecode_C_map_int_oe(l, v, a)
 }
 
-// zjDecodeC_map_int_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_map_int_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArenaC_map_int_oe) {
+func zjDecode_C_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArenaC_map_int_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s0 = false
 	start := l.Mark()
-	if zjDecodeOrderedC_map_int_oe(l, v, a) {
+	if zjDecodeOrdered_C_map_int_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -3877,17 +3982,17 @@ func zjDecodeC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArenaC_map_in
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_map_int_oe(l, v, a)
+	zjDecodeFallback_C_map_int_oe(l, v, a)
 }
 
-// zjDecodeOrderedC_map_int_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_map_int_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_map_int_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_map_int_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArenaC_map_int_oe) bool {
+func zjDecodeOrdered_C_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArenaC_map_int_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -3951,7 +4056,7 @@ func zjDecodeOrderedC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArenaC
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_map_int_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_map_int_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -3973,12 +4078,11 @@ func zjDecodeOrderedC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArenaC
 	}
 }
 
-func zjDecodeOrderedFieldC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArenaC_map_int_oe, k int) bool {
+func zjDecodeOrderedField_C_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArenaC_map_int_oe, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
 			v.F = nil
-			a.s0 = false
 		}
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesC_map_int_oe[k])
@@ -3988,16 +4092,18 @@ func zjDecodeOrderedFieldC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjA
 	}
 	switch k {
 	case 0:
-		if !a.s0 {
-			a.s0 = true
+		{
 			if v.F != nil {
 				a.m0 = v.F
-			} else if a.m0 == nil {
+				a.owned0 = false
+			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 				a.m0 = make(map[string]int)
+				a.owned0 = true
 			} else {
 				clear(a.m0)
 			}
 		}
+		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -4057,10 +4163,10 @@ func zjIsDeclaredKeyC_map_int_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_map_int_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_map_int_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArenaC_map_int_oe) {
+func zjDecodeFallback_C_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArenaC_map_int_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -4074,7 +4180,6 @@ func zjDecodeFallbackC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArena
 			switch string(key) {
 			case "f":
 				v.F = nil
-				a.s0 = false
 			}
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -4087,16 +4192,18 @@ func zjDecodeFallbackC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArena
 		}
 		switch string(key) {
 		case "f":
-			if !a.s0 {
-				a.s0 = true
+			{
 				if v.F != nil {
 					a.m0 = v.F
-				} else if a.m0 == nil {
+					a.owned0 = false
+				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 					a.m0 = make(map[string]int)
+					a.owned0 = true
 				} else {
 					clear(a.m0)
 				}
 			}
+			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -4127,14 +4234,19 @@ func zjDecodeFallbackC_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArena
 	}
 }
 
-// zjArenaC_map_set backs every pointer field of a decoded C_map_set with a single
+// zjArenaC_map_set holds first-use pointer cells for a decoded C_map_set in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_map_set struct {
-	s0 bool
-	m0 map[string]struct{}
+	m0            map[string]struct{}
+	owned0        bool // only arena-owned maps may be cleared for reuse
+	mapPublished0 bool
+}
+
+func (a *zjArenaC_map_set) beginDecode() {
+	a.mapPublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -4187,7 +4299,7 @@ func (v *C_map_set) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_map_set) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_set{}
-	zjDecodeC_map_set(&l, v, a)
+	zjDecode_C_map_set(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -4197,21 +4309,20 @@ func (v *C_map_set) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_map_set) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_set{}
-	zjDecodeC_map_set(l, v, a)
+	zjDecode_C_map_set(l, v, a)
 }
 
-// zjDecodeC_map_set tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_map_set tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_set) {
+func zjDecode_C_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_set) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s0 = false
 	start := l.Mark()
-	if zjDecodeOrderedC_map_set(l, v, a) {
+	if zjDecodeOrdered_C_map_set(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -4222,17 +4333,17 @@ func zjDecodeC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_set) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_map_set(l, v, a)
+	zjDecodeFallback_C_map_set(l, v, a)
 }
 
-// zjDecodeOrderedC_map_set speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_map_set speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_map_set;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_map_set;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_set) bool {
+func zjDecodeOrdered_C_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_set) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -4296,7 +4407,7 @@ func zjDecodeOrderedC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_s
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_map_set(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_map_set(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -4318,12 +4429,11 @@ func zjDecodeOrderedC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_s
 	}
 }
 
-func zjDecodeOrderedFieldC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_set, k int) bool {
+func zjDecodeOrderedField_C_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_set, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
 			v.F = nil
-			a.s0 = false
 		}
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesC_map_set[k])
@@ -4333,16 +4443,18 @@ func zjDecodeOrderedFieldC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_
 	}
 	switch k {
 	case 0:
-		if !a.s0 {
-			a.s0 = true
+		{
 			if v.F != nil {
 				a.m0 = v.F
-			} else if a.m0 == nil {
+				a.owned0 = false
+			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 				a.m0 = make(map[string]struct{})
+				a.owned0 = true
 			} else {
 				clear(a.m0)
 			}
 		}
+		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -4402,10 +4514,10 @@ func zjIsDeclaredKeyC_map_set(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_map_set is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_map_set is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_set) {
+func zjDecodeFallback_C_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_set) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -4419,7 +4531,6 @@ func zjDecodeFallbackC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_
 			switch string(key) {
 			case "f":
 				v.F = nil
-				a.s0 = false
 			}
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -4432,16 +4543,18 @@ func zjDecodeFallbackC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_
 		}
 		switch string(key) {
 		case "f":
-			if !a.s0 {
-				a.s0 = true
+			{
 				if v.F != nil {
 					a.m0 = v.F
-				} else if a.m0 == nil {
+					a.owned0 = false
+				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 					a.m0 = make(map[string]struct{})
+					a.owned0 = true
 				} else {
 					clear(a.m0)
 				}
 			}
+			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -4472,14 +4585,19 @@ func zjDecodeFallbackC_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_
 	}
 }
 
-// zjArenaC_map_set_oe backs every pointer field of a decoded C_map_set_oe with a single
+// zjArenaC_map_set_oe holds first-use pointer cells for a decoded C_map_set_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_map_set_oe struct {
-	s0 bool
-	m0 map[string]struct{}
+	m0            map[string]struct{}
+	owned0        bool // only arena-owned maps may be cleared for reuse
+	mapPublished0 bool
+}
+
+func (a *zjArenaC_map_set_oe) beginDecode() {
+	a.mapPublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -4532,7 +4650,7 @@ func (v *C_map_set_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_map_set_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_set_oe{}
-	zjDecodeC_map_set_oe(&l, v, a)
+	zjDecode_C_map_set_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -4542,21 +4660,20 @@ func (v *C_map_set_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_map_set_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_set_oe{}
-	zjDecodeC_map_set_oe(l, v, a)
+	zjDecode_C_map_set_oe(l, v, a)
 }
 
-// zjDecodeC_map_set_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_map_set_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArenaC_map_set_oe) {
+func zjDecode_C_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArenaC_map_set_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s0 = false
 	start := l.Mark()
-	if zjDecodeOrderedC_map_set_oe(l, v, a) {
+	if zjDecodeOrdered_C_map_set_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -4567,17 +4684,17 @@ func zjDecodeC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArenaC_map_se
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_map_set_oe(l, v, a)
+	zjDecodeFallback_C_map_set_oe(l, v, a)
 }
 
-// zjDecodeOrderedC_map_set_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_map_set_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_map_set_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_map_set_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArenaC_map_set_oe) bool {
+func zjDecodeOrdered_C_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArenaC_map_set_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -4641,7 +4758,7 @@ func zjDecodeOrderedC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArenaC
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_map_set_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_map_set_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -4663,12 +4780,11 @@ func zjDecodeOrderedC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArenaC
 	}
 }
 
-func zjDecodeOrderedFieldC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArenaC_map_set_oe, k int) bool {
+func zjDecodeOrderedField_C_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArenaC_map_set_oe, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
 			v.F = nil
-			a.s0 = false
 		}
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesC_map_set_oe[k])
@@ -4678,16 +4794,18 @@ func zjDecodeOrderedFieldC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjA
 	}
 	switch k {
 	case 0:
-		if !a.s0 {
-			a.s0 = true
+		{
 			if v.F != nil {
 				a.m0 = v.F
-			} else if a.m0 == nil {
+				a.owned0 = false
+			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 				a.m0 = make(map[string]struct{})
+				a.owned0 = true
 			} else {
 				clear(a.m0)
 			}
 		}
+		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -4747,10 +4865,10 @@ func zjIsDeclaredKeyC_map_set_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_map_set_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_map_set_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArenaC_map_set_oe) {
+func zjDecodeFallback_C_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArenaC_map_set_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -4764,7 +4882,6 @@ func zjDecodeFallbackC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArena
 			switch string(key) {
 			case "f":
 				v.F = nil
-				a.s0 = false
 			}
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -4777,16 +4894,18 @@ func zjDecodeFallbackC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArena
 		}
 		switch string(key) {
 		case "f":
-			if !a.s0 {
-				a.s0 = true
+			{
 				if v.F != nil {
 					a.m0 = v.F
-				} else if a.m0 == nil {
+					a.owned0 = false
+				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 					a.m0 = make(map[string]struct{})
+					a.owned0 = true
 				} else {
 					clear(a.m0)
 				}
 			}
+			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -4817,14 +4936,19 @@ func zjDecodeFallbackC_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArena
 	}
 }
 
-// zjArenaC_map_struct backs every pointer field of a decoded C_map_struct with a single
+// zjArenaC_map_struct holds first-use pointer cells for a decoded C_map_struct in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_map_struct struct {
-	s0 bool
-	m0 map[string]Inner
+	m0            map[string]Inner
+	owned0        bool // only arena-owned maps may be cleared for reuse
+	mapPublished0 bool
+}
+
+func (a *zjArenaC_map_struct) beginDecode() {
+	a.mapPublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -4880,7 +5004,7 @@ func (v *C_map_struct) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_map_struct) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_struct{}
-	zjDecodeC_map_struct(&l, v, a)
+	zjDecode_C_map_struct(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -4890,21 +5014,20 @@ func (v *C_map_struct) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_map_struct) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_struct{}
-	zjDecodeC_map_struct(l, v, a)
+	zjDecode_C_map_struct(l, v, a)
 }
 
-// zjDecodeC_map_struct tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_map_struct tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArenaC_map_struct) {
+func zjDecode_C_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArenaC_map_struct) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s0 = false
 	start := l.Mark()
-	if zjDecodeOrderedC_map_struct(l, v, a) {
+	if zjDecodeOrdered_C_map_struct(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -4915,17 +5038,17 @@ func zjDecodeC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArenaC_map_st
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_map_struct(l, v, a)
+	zjDecodeFallback_C_map_struct(l, v, a)
 }
 
-// zjDecodeOrderedC_map_struct speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_map_struct speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_map_struct;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_map_struct;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArenaC_map_struct) bool {
+func zjDecodeOrdered_C_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArenaC_map_struct) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -4989,7 +5112,7 @@ func zjDecodeOrderedC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArenaC
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_map_struct(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_map_struct(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -5011,12 +5134,11 @@ func zjDecodeOrderedC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArenaC
 	}
 }
 
-func zjDecodeOrderedFieldC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArenaC_map_struct, k int) bool {
+func zjDecodeOrderedField_C_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArenaC_map_struct, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
 			v.F = nil
-			a.s0 = false
 		}
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesC_map_struct[k])
@@ -5026,23 +5148,25 @@ func zjDecodeOrderedFieldC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjA
 	}
 	switch k {
 	case 0:
-		if !a.s0 {
-			a.s0 = true
+		{
 			if v.F != nil {
 				a.m0 = v.F
-			} else if a.m0 == nil {
+				a.owned0 = false
+			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 				a.m0 = make(map[string]Inner)
+				a.owned0 = true
 			} else {
 				clear(a.m0)
 			}
 		}
+		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
 				var mv Inner
 				if !l.IsNull() {
 					var ea zjArenaInner
-					zjDecodeInner(l, &mv, &ea)
+					zjDecode_Inner(l, &mv, &ea)
 				}
 				if l.Err() != nil {
 					break
@@ -5096,10 +5220,10 @@ func zjIsDeclaredKeyC_map_struct(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_map_struct is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_map_struct is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArenaC_map_struct) {
+func zjDecodeFallback_C_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArenaC_map_struct) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -5113,7 +5237,6 @@ func zjDecodeFallbackC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArena
 			switch string(key) {
 			case "f":
 				v.F = nil
-				a.s0 = false
 			}
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -5126,23 +5249,25 @@ func zjDecodeFallbackC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArena
 		}
 		switch string(key) {
 		case "f":
-			if !a.s0 {
-				a.s0 = true
+			{
 				if v.F != nil {
 					a.m0 = v.F
-				} else if a.m0 == nil {
+					a.owned0 = false
+				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 					a.m0 = make(map[string]Inner)
+					a.owned0 = true
 				} else {
 					clear(a.m0)
 				}
 			}
+			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
 					var mv Inner
 					if !l.IsNull() {
 						var ea zjArenaInner
-						zjDecodeInner(l, &mv, &ea)
+						zjDecode_Inner(l, &mv, &ea)
 					}
 					if l.Err() != nil {
 						break
@@ -5167,14 +5292,19 @@ func zjDecodeFallbackC_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArena
 	}
 }
 
-// zjArenaC_map_struct_oe backs every pointer field of a decoded C_map_struct_oe with a single
+// zjArenaC_map_struct_oe holds first-use pointer cells for a decoded C_map_struct_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_map_struct_oe struct {
-	s0 bool
-	m0 map[string]Inner
+	m0            map[string]Inner
+	owned0        bool // only arena-owned maps may be cleared for reuse
+	mapPublished0 bool
+}
+
+func (a *zjArenaC_map_struct_oe) beginDecode() {
+	a.mapPublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -5230,7 +5360,7 @@ func (v *C_map_struct_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_map_struct_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_struct_oe{}
-	zjDecodeC_map_struct_oe(&l, v, a)
+	zjDecode_C_map_struct_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -5240,21 +5370,20 @@ func (v *C_map_struct_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_map_struct_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_struct_oe{}
-	zjDecodeC_map_struct_oe(l, v, a)
+	zjDecode_C_map_struct_oe(l, v, a)
 }
 
-// zjDecodeC_map_struct_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_map_struct_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *zjArenaC_map_struct_oe) {
+func zjDecode_C_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *zjArenaC_map_struct_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	a.s0 = false
 	start := l.Mark()
-	if zjDecodeOrderedC_map_struct_oe(l, v, a) {
+	if zjDecodeOrdered_C_map_struct_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -5265,17 +5394,17 @@ func zjDecodeC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *zjArenaC_
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_map_struct_oe(l, v, a)
+	zjDecodeFallback_C_map_struct_oe(l, v, a)
 }
 
-// zjDecodeOrderedC_map_struct_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_map_struct_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_map_struct_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_map_struct_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *zjArenaC_map_struct_oe) bool {
+func zjDecodeOrdered_C_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *zjArenaC_map_struct_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -5339,7 +5468,7 @@ func zjDecodeOrderedC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *zj
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_map_struct_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_map_struct_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -5361,12 +5490,11 @@ func zjDecodeOrderedC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *zj
 	}
 }
 
-func zjDecodeOrderedFieldC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *zjArenaC_map_struct_oe, k int) bool {
+func zjDecodeOrderedField_C_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *zjArenaC_map_struct_oe, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
 			v.F = nil
-			a.s0 = false
 		}
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesC_map_struct_oe[k])
@@ -5376,23 +5504,25 @@ func zjDecodeOrderedFieldC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, 
 	}
 	switch k {
 	case 0:
-		if !a.s0 {
-			a.s0 = true
+		{
 			if v.F != nil {
 				a.m0 = v.F
-			} else if a.m0 == nil {
+				a.owned0 = false
+			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 				a.m0 = make(map[string]Inner)
+				a.owned0 = true
 			} else {
 				clear(a.m0)
 			}
 		}
+		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
 				var mv Inner
 				if !l.IsNull() {
 					var ea zjArenaInner
-					zjDecodeInner(l, &mv, &ea)
+					zjDecode_Inner(l, &mv, &ea)
 				}
 				if l.Err() != nil {
 					break
@@ -5446,10 +5576,10 @@ func zjIsDeclaredKeyC_map_struct_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_map_struct_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_map_struct_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *zjArenaC_map_struct_oe) {
+func zjDecodeFallback_C_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *zjArenaC_map_struct_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -5463,7 +5593,6 @@ func zjDecodeFallbackC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *z
 			switch string(key) {
 			case "f":
 				v.F = nil
-				a.s0 = false
 			}
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -5476,23 +5605,25 @@ func zjDecodeFallbackC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *z
 		}
 		switch string(key) {
 		case "f":
-			if !a.s0 {
-				a.s0 = true
+			{
 				if v.F != nil {
 					a.m0 = v.F
-				} else if a.m0 == nil {
+					a.owned0 = false
+				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
 					a.m0 = make(map[string]Inner)
+					a.owned0 = true
 				} else {
 					clear(a.m0)
 				}
 			}
+			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
 					var mv Inner
 					if !l.IsNull() {
 						var ea zjArenaInner
-						zjDecodeInner(l, &mv, &ea)
+						zjDecode_Inner(l, &mv, &ea)
 					}
 					if l.Err() != nil {
 						break
@@ -5517,13 +5648,19 @@ func zjDecodeFallbackC_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *z
 	}
 }
 
-// zjArenaC_slice_decimal backs every pointer field of a decoded C_slice_decimal with a single
+// zjArenaC_slice_decimal holds first-use pointer cells for a decoded C_slice_decimal in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_slice_decimal struct {
-	c0 []testleaf.Decimal
+	slicePublished0 bool
+	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
+	c0              []testleaf.Decimal
+}
+
+func (a *zjArenaC_slice_decimal) beginDecode() {
+	a.slicePublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -5571,7 +5708,7 @@ func (v *C_slice_decimal) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_slice_decimal) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_decimal{}
-	zjDecodeC_slice_decimal(&l, v, a)
+	zjDecode_C_slice_decimal(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -5581,20 +5718,20 @@ func (v *C_slice_decimal) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_slice_decimal) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_decimal{}
-	zjDecodeC_slice_decimal(l, v, a)
+	zjDecode_C_slice_decimal(l, v, a)
 }
 
-// zjDecodeC_slice_decimal tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_slice_decimal tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *zjArenaC_slice_decimal) {
+func zjDecode_C_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *zjArenaC_slice_decimal) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedC_slice_decimal(l, v, a) {
+	if zjDecodeOrdered_C_slice_decimal(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -5605,17 +5742,17 @@ func zjDecodeC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *zjArenaC_
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_slice_decimal(l, v, a)
+	zjDecodeFallback_C_slice_decimal(l, v, a)
 }
 
-// zjDecodeOrderedC_slice_decimal speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_slice_decimal speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_slice_decimal;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_slice_decimal;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *zjArenaC_slice_decimal) bool {
+func zjDecodeOrdered_C_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *zjArenaC_slice_decimal) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -5679,7 +5816,7 @@ func zjDecodeOrderedC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *zj
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_slice_decimal(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_slice_decimal(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -5701,7 +5838,7 @@ func zjDecodeOrderedC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *zj
 	}
 }
 
-func zjDecodeOrderedFieldC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *zjArenaC_slice_decimal, k int) bool {
+func zjDecodeOrderedField_C_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *zjArenaC_slice_decimal, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -5715,6 +5852,14 @@ func zjDecodeOrderedFieldC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, 
 	}
 	switch k {
 	case 0:
+		if v.F != nil {
+			a.c0 = v.F
+			a.sliceBorrowed0 = true
+		} else if a.slicePublished0 || a.sliceBorrowed0 {
+			a.c0 = nil
+			a.sliceBorrowed0 = false
+		}
+		a.slicePublished0 = true
 		a.c0 = a.c0[:0]
 		if l.EnterArray() {
 			for {
@@ -5784,10 +5929,10 @@ func zjIsDeclaredKeyC_slice_decimal(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_slice_decimal is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_slice_decimal is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *zjArenaC_slice_decimal) {
+func zjDecodeFallback_C_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *zjArenaC_slice_decimal) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -5813,6 +5958,14 @@ func zjDecodeFallbackC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *z
 		}
 		switch string(key) {
 		case "f":
+			if v.F != nil {
+				a.c0 = v.F
+				a.sliceBorrowed0 = true
+			} else if a.slicePublished0 || a.sliceBorrowed0 {
+				a.c0 = nil
+				a.sliceBorrowed0 = false
+			}
+			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -5853,13 +6006,19 @@ func zjDecodeFallbackC_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *z
 	}
 }
 
-// zjArenaC_slice_decimal_oe backs every pointer field of a decoded C_slice_decimal_oe with a single
+// zjArenaC_slice_decimal_oe holds first-use pointer cells for a decoded C_slice_decimal_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_slice_decimal_oe struct {
-	c0 []testleaf.Decimal
+	slicePublished0 bool
+	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
+	c0              []testleaf.Decimal
+}
+
+func (a *zjArenaC_slice_decimal_oe) beginDecode() {
+	a.slicePublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -5907,7 +6066,7 @@ func (v *C_slice_decimal_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_slice_decimal_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_decimal_oe{}
-	zjDecodeC_slice_decimal_oe(&l, v, a)
+	zjDecode_C_slice_decimal_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -5917,20 +6076,20 @@ func (v *C_slice_decimal_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_slice_decimal_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_decimal_oe{}
-	zjDecodeC_slice_decimal_oe(l, v, a)
+	zjDecode_C_slice_decimal_oe(l, v, a)
 }
 
-// zjDecodeC_slice_decimal_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_slice_decimal_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe, a *zjArenaC_slice_decimal_oe) {
+func zjDecode_C_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe, a *zjArenaC_slice_decimal_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedC_slice_decimal_oe(l, v, a) {
+	if zjDecodeOrdered_C_slice_decimal_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -5941,17 +6100,17 @@ func zjDecodeC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe, a *zjA
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_slice_decimal_oe(l, v, a)
+	zjDecodeFallback_C_slice_decimal_oe(l, v, a)
 }
 
-// zjDecodeOrderedC_slice_decimal_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_slice_decimal_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_slice_decimal_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_slice_decimal_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe, a *zjArenaC_slice_decimal_oe) bool {
+func zjDecodeOrdered_C_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe, a *zjArenaC_slice_decimal_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -6015,7 +6174,7 @@ func zjDecodeOrderedC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe,
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_slice_decimal_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_slice_decimal_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -6037,7 +6196,7 @@ func zjDecodeOrderedC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe,
 	}
 }
 
-func zjDecodeOrderedFieldC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe, a *zjArenaC_slice_decimal_oe, k int) bool {
+func zjDecodeOrderedField_C_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe, a *zjArenaC_slice_decimal_oe, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -6051,6 +6210,14 @@ func zjDecodeOrderedFieldC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decima
 	}
 	switch k {
 	case 0:
+		if v.F != nil {
+			a.c0 = v.F
+			a.sliceBorrowed0 = true
+		} else if a.slicePublished0 || a.sliceBorrowed0 {
+			a.c0 = nil
+			a.sliceBorrowed0 = false
+		}
+		a.slicePublished0 = true
 		a.c0 = a.c0[:0]
 		if l.EnterArray() {
 			for {
@@ -6120,10 +6287,10 @@ func zjIsDeclaredKeyC_slice_decimal_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_slice_decimal_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_slice_decimal_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe, a *zjArenaC_slice_decimal_oe) {
+func zjDecodeFallback_C_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe, a *zjArenaC_slice_decimal_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -6149,6 +6316,14 @@ func zjDecodeFallbackC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe
 		}
 		switch string(key) {
 		case "f":
+			if v.F != nil {
+				a.c0 = v.F
+				a.sliceBorrowed0 = true
+			} else if a.slicePublished0 || a.sliceBorrowed0 {
+				a.c0 = nil
+				a.sliceBorrowed0 = false
+			}
+			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -6189,13 +6364,19 @@ func zjDecodeFallbackC_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe
 	}
 }
 
-// zjArenaC_slice_int backs every pointer field of a decoded C_slice_int with a single
+// zjArenaC_slice_int holds first-use pointer cells for a decoded C_slice_int in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_slice_int struct {
-	c0 []int
+	slicePublished0 bool
+	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
+	c0              []int
+}
+
+func (a *zjArenaC_slice_int) beginDecode() {
+	a.slicePublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -6243,7 +6424,7 @@ func (v *C_slice_int) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_slice_int) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_int{}
-	zjDecodeC_slice_int(&l, v, a)
+	zjDecode_C_slice_int(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -6253,20 +6434,20 @@ func (v *C_slice_int) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_slice_int) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_int{}
-	zjDecodeC_slice_int(l, v, a)
+	zjDecode_C_slice_int(l, v, a)
 }
 
-// zjDecodeC_slice_int tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_slice_int tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_slice_int) {
+func zjDecode_C_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_slice_int) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedC_slice_int(l, v, a) {
+	if zjDecodeOrdered_C_slice_int(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -6277,17 +6458,17 @@ func zjDecodeC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_slice_in
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_slice_int(l, v, a)
+	zjDecodeFallback_C_slice_int(l, v, a)
 }
 
-// zjDecodeOrderedC_slice_int speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_slice_int speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_slice_int;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_slice_int;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_slice_int) bool {
+func zjDecodeOrdered_C_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_slice_int) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -6351,7 +6532,7 @@ func zjDecodeOrderedC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_s
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_slice_int(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_slice_int(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -6373,7 +6554,7 @@ func zjDecodeOrderedC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_s
 	}
 }
 
-func zjDecodeOrderedFieldC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_slice_int, k int) bool {
+func zjDecodeOrderedField_C_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_slice_int, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -6387,6 +6568,14 @@ func zjDecodeOrderedFieldC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjAre
 	}
 	switch k {
 	case 0:
+		if v.F != nil {
+			a.c0 = v.F
+			a.sliceBorrowed0 = true
+		} else if a.slicePublished0 || a.sliceBorrowed0 {
+			a.c0 = nil
+			a.sliceBorrowed0 = false
+		}
+		a.slicePublished0 = true
 		a.c0 = a.c0[:0]
 		if l.EnterArray() {
 			for {
@@ -6456,10 +6645,10 @@ func zjIsDeclaredKeyC_slice_int(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_slice_int is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_slice_int is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_slice_int) {
+func zjDecodeFallback_C_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_slice_int) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -6485,6 +6674,14 @@ func zjDecodeFallbackC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_
 		}
 		switch string(key) {
 		case "f":
+			if v.F != nil {
+				a.c0 = v.F
+				a.sliceBorrowed0 = true
+			} else if a.slicePublished0 || a.sliceBorrowed0 {
+				a.c0 = nil
+				a.sliceBorrowed0 = false
+			}
+			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -6525,13 +6722,19 @@ func zjDecodeFallbackC_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_
 	}
 }
 
-// zjArenaC_slice_int_oe backs every pointer field of a decoded C_slice_int_oe with a single
+// zjArenaC_slice_int_oe holds first-use pointer cells for a decoded C_slice_int_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_slice_int_oe struct {
-	c0 []int
+	slicePublished0 bool
+	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
+	c0              []int
+}
+
+func (a *zjArenaC_slice_int_oe) beginDecode() {
+	a.slicePublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -6579,7 +6782,7 @@ func (v *C_slice_int_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_slice_int_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_int_oe{}
-	zjDecodeC_slice_int_oe(&l, v, a)
+	zjDecode_C_slice_int_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -6589,20 +6792,20 @@ func (v *C_slice_int_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_slice_int_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_int_oe{}
-	zjDecodeC_slice_int_oe(l, v, a)
+	zjDecode_C_slice_int_oe(l, v, a)
 }
 
-// zjDecodeC_slice_int_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_slice_int_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjArenaC_slice_int_oe) {
+func zjDecode_C_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjArenaC_slice_int_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedC_slice_int_oe(l, v, a) {
+	if zjDecodeOrdered_C_slice_int_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -6613,17 +6816,17 @@ func zjDecodeC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjArenaC_sl
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_slice_int_oe(l, v, a)
+	zjDecodeFallback_C_slice_int_oe(l, v, a)
 }
 
-// zjDecodeOrderedC_slice_int_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_slice_int_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_slice_int_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_slice_int_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjArenaC_slice_int_oe) bool {
+func zjDecodeOrdered_C_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjArenaC_slice_int_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -6687,7 +6890,7 @@ func zjDecodeOrderedC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjAr
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_slice_int_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_slice_int_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -6709,7 +6912,7 @@ func zjDecodeOrderedC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjAr
 	}
 }
 
-func zjDecodeOrderedFieldC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjArenaC_slice_int_oe, k int) bool {
+func zjDecodeOrderedField_C_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjArenaC_slice_int_oe, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -6723,6 +6926,14 @@ func zjDecodeOrderedFieldC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a 
 	}
 	switch k {
 	case 0:
+		if v.F != nil {
+			a.c0 = v.F
+			a.sliceBorrowed0 = true
+		} else if a.slicePublished0 || a.sliceBorrowed0 {
+			a.c0 = nil
+			a.sliceBorrowed0 = false
+		}
+		a.slicePublished0 = true
 		a.c0 = a.c0[:0]
 		if l.EnterArray() {
 			for {
@@ -6792,10 +7003,10 @@ func zjIsDeclaredKeyC_slice_int_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_slice_int_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_slice_int_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjArenaC_slice_int_oe) {
+func zjDecodeFallback_C_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjArenaC_slice_int_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -6821,6 +7032,14 @@ func zjDecodeFallbackC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjA
 		}
 		switch string(key) {
 		case "f":
+			if v.F != nil {
+				a.c0 = v.F
+				a.sliceBorrowed0 = true
+			} else if a.slicePublished0 || a.sliceBorrowed0 {
+				a.c0 = nil
+				a.sliceBorrowed0 = false
+			}
+			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -6861,13 +7080,19 @@ func zjDecodeFallbackC_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjA
 	}
 }
 
-// zjArenaC_slice_ptrstruct backs every pointer field of a decoded C_slice_ptrstruct with a single
+// zjArenaC_slice_ptrstruct holds first-use pointer cells for a decoded C_slice_ptrstruct in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_slice_ptrstruct struct {
-	c0 []*Inner
+	slicePublished0 bool
+	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
+	c0              []*Inner
+}
+
+func (a *zjArenaC_slice_ptrstruct) beginDecode() {
+	a.slicePublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -6923,7 +7148,7 @@ func (v *C_slice_ptrstruct) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_slice_ptrstruct) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_ptrstruct{}
-	zjDecodeC_slice_ptrstruct(&l, v, a)
+	zjDecode_C_slice_ptrstruct(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -6933,20 +7158,20 @@ func (v *C_slice_ptrstruct) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_slice_ptrstruct) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_ptrstruct{}
-	zjDecodeC_slice_ptrstruct(l, v, a)
+	zjDecode_C_slice_ptrstruct(l, v, a)
 }
 
-// zjDecodeC_slice_ptrstruct tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_slice_ptrstruct tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a *zjArenaC_slice_ptrstruct) {
+func zjDecode_C_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a *zjArenaC_slice_ptrstruct) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedC_slice_ptrstruct(l, v, a) {
+	if zjDecodeOrdered_C_slice_ptrstruct(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -6957,17 +7182,17 @@ func zjDecodeC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a *zjAre
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_slice_ptrstruct(l, v, a)
+	zjDecodeFallback_C_slice_ptrstruct(l, v, a)
 }
 
-// zjDecodeOrderedC_slice_ptrstruct speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_slice_ptrstruct speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_slice_ptrstruct;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_slice_ptrstruct;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a *zjArenaC_slice_ptrstruct) bool {
+func zjDecodeOrdered_C_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a *zjArenaC_slice_ptrstruct) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -7031,7 +7256,7 @@ func zjDecodeOrderedC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_slice_ptrstruct(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_slice_ptrstruct(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -7053,7 +7278,7 @@ func zjDecodeOrderedC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a
 	}
 }
 
-func zjDecodeOrderedFieldC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a *zjArenaC_slice_ptrstruct, k int) bool {
+func zjDecodeOrderedField_C_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a *zjArenaC_slice_ptrstruct, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -7067,6 +7292,14 @@ func zjDecodeOrderedFieldC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstru
 	}
 	switch k {
 	case 0:
+		if v.F != nil {
+			a.c0 = v.F
+			a.sliceBorrowed0 = true
+		} else if a.slicePublished0 || a.sliceBorrowed0 {
+			a.c0 = nil
+			a.sliceBorrowed0 = false
+		}
+		a.slicePublished0 = true
 		a.c0 = a.c0[:0]
 		if l.EnterArray() {
 			for {
@@ -7079,7 +7312,7 @@ func zjDecodeOrderedFieldC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstru
 				if !l.IsNull() {
 					e := new(Inner)
 					var ea zjArenaInner
-					zjDecodeInner(l, e, &ea)
+					zjDecode_Inner(l, e, &ea)
 					a.c0[len(a.c0)-1] = e
 				}
 				if l.Err() != nil {
@@ -7136,10 +7369,10 @@ func zjIsDeclaredKeyC_slice_ptrstruct(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_slice_ptrstruct is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_slice_ptrstruct is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a *zjArenaC_slice_ptrstruct) {
+func zjDecodeFallback_C_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a *zjArenaC_slice_ptrstruct) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -7165,6 +7398,14 @@ func zjDecodeFallbackC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, 
 		}
 		switch string(key) {
 		case "f":
+			if v.F != nil {
+				a.c0 = v.F
+				a.sliceBorrowed0 = true
+			} else if a.slicePublished0 || a.sliceBorrowed0 {
+				a.c0 = nil
+				a.sliceBorrowed0 = false
+			}
+			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -7177,7 +7418,7 @@ func zjDecodeFallbackC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, 
 					if !l.IsNull() {
 						e := new(Inner)
 						var ea zjArenaInner
-						zjDecodeInner(l, e, &ea)
+						zjDecode_Inner(l, e, &ea)
 						a.c0[len(a.c0)-1] = e
 					}
 					if l.Err() != nil {
@@ -7205,13 +7446,19 @@ func zjDecodeFallbackC_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, 
 	}
 }
 
-// zjArenaC_slice_ptrstruct_oe backs every pointer field of a decoded C_slice_ptrstruct_oe with a single
+// zjArenaC_slice_ptrstruct_oe holds first-use pointer cells for a decoded C_slice_ptrstruct_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_slice_ptrstruct_oe struct {
-	c0 []*Inner
+	slicePublished0 bool
+	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
+	c0              []*Inner
+}
+
+func (a *zjArenaC_slice_ptrstruct_oe) beginDecode() {
+	a.slicePublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -7267,7 +7514,7 @@ func (v *C_slice_ptrstruct_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_slice_ptrstruct_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_ptrstruct_oe{}
-	zjDecodeC_slice_ptrstruct_oe(&l, v, a)
+	zjDecode_C_slice_ptrstruct_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -7277,20 +7524,20 @@ func (v *C_slice_ptrstruct_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_slice_ptrstruct_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_ptrstruct_oe{}
-	zjDecodeC_slice_ptrstruct_oe(l, v, a)
+	zjDecode_C_slice_ptrstruct_oe(l, v, a)
 }
 
-// zjDecodeC_slice_ptrstruct_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_slice_ptrstruct_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct_oe, a *zjArenaC_slice_ptrstruct_oe) {
+func zjDecode_C_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct_oe, a *zjArenaC_slice_ptrstruct_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedC_slice_ptrstruct_oe(l, v, a) {
+	if zjDecodeOrdered_C_slice_ptrstruct_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -7301,17 +7548,17 @@ func zjDecodeC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct_oe, a 
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_slice_ptrstruct_oe(l, v, a)
+	zjDecodeFallback_C_slice_ptrstruct_oe(l, v, a)
 }
 
-// zjDecodeOrderedC_slice_ptrstruct_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_slice_ptrstruct_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_slice_ptrstruct_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_slice_ptrstruct_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct_oe, a *zjArenaC_slice_ptrstruct_oe) bool {
+func zjDecodeOrdered_C_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct_oe, a *zjArenaC_slice_ptrstruct_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -7375,7 +7622,7 @@ func zjDecodeOrderedC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_slice_ptrstruct_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_slice_ptrstruct_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -7397,7 +7644,7 @@ func zjDecodeOrderedC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct
 	}
 }
 
-func zjDecodeOrderedFieldC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct_oe, a *zjArenaC_slice_ptrstruct_oe, k int) bool {
+func zjDecodeOrderedField_C_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct_oe, a *zjArenaC_slice_ptrstruct_oe, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -7411,6 +7658,14 @@ func zjDecodeOrderedFieldC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrs
 	}
 	switch k {
 	case 0:
+		if v.F != nil {
+			a.c0 = v.F
+			a.sliceBorrowed0 = true
+		} else if a.slicePublished0 || a.sliceBorrowed0 {
+			a.c0 = nil
+			a.sliceBorrowed0 = false
+		}
+		a.slicePublished0 = true
 		a.c0 = a.c0[:0]
 		if l.EnterArray() {
 			for {
@@ -7423,7 +7678,7 @@ func zjDecodeOrderedFieldC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrs
 				if !l.IsNull() {
 					e := new(Inner)
 					var ea zjArenaInner
-					zjDecodeInner(l, e, &ea)
+					zjDecode_Inner(l, e, &ea)
 					a.c0[len(a.c0)-1] = e
 				}
 				if l.Err() != nil {
@@ -7480,10 +7735,10 @@ func zjIsDeclaredKeyC_slice_ptrstruct_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_slice_ptrstruct_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_slice_ptrstruct_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct_oe, a *zjArenaC_slice_ptrstruct_oe) {
+func zjDecodeFallback_C_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct_oe, a *zjArenaC_slice_ptrstruct_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -7509,6 +7764,14 @@ func zjDecodeFallbackC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruc
 		}
 		switch string(key) {
 		case "f":
+			if v.F != nil {
+				a.c0 = v.F
+				a.sliceBorrowed0 = true
+			} else if a.slicePublished0 || a.sliceBorrowed0 {
+				a.c0 = nil
+				a.sliceBorrowed0 = false
+			}
+			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -7521,7 +7784,7 @@ func zjDecodeFallbackC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruc
 					if !l.IsNull() {
 						e := new(Inner)
 						var ea zjArenaInner
-						zjDecodeInner(l, e, &ea)
+						zjDecode_Inner(l, e, &ea)
 						a.c0[len(a.c0)-1] = e
 					}
 					if l.Err() != nil {
@@ -7549,13 +7812,19 @@ func zjDecodeFallbackC_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruc
 	}
 }
 
-// zjArenaC_slice_string backs every pointer field of a decoded C_slice_string with a single
+// zjArenaC_slice_string holds first-use pointer cells for a decoded C_slice_string in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_slice_string struct {
-	c0 []string
+	slicePublished0 bool
+	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
+	c0              []string
+}
+
+func (a *zjArenaC_slice_string) beginDecode() {
+	a.slicePublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -7603,7 +7872,7 @@ func (v *C_slice_string) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_slice_string) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_string{}
-	zjDecodeC_slice_string(&l, v, a)
+	zjDecode_C_slice_string(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -7613,20 +7882,20 @@ func (v *C_slice_string) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_slice_string) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_string{}
-	zjDecodeC_slice_string(l, v, a)
+	zjDecode_C_slice_string(l, v, a)
 }
 
-// zjDecodeC_slice_string tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_slice_string tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjArenaC_slice_string) {
+func zjDecode_C_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjArenaC_slice_string) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedC_slice_string(l, v, a) {
+	if zjDecodeOrdered_C_slice_string(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -7637,17 +7906,17 @@ func zjDecodeC_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjArenaC_sl
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_slice_string(l, v, a)
+	zjDecodeFallback_C_slice_string(l, v, a)
 }
 
-// zjDecodeOrderedC_slice_string speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_slice_string speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_slice_string;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_slice_string;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjArenaC_slice_string) bool {
+func zjDecodeOrdered_C_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjArenaC_slice_string) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -7711,7 +7980,7 @@ func zjDecodeOrderedC_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjAr
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_slice_string(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_slice_string(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -7733,7 +8002,7 @@ func zjDecodeOrderedC_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjAr
 	}
 }
 
-func zjDecodeOrderedFieldC_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjArenaC_slice_string, k int) bool {
+func zjDecodeOrderedField_C_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjArenaC_slice_string, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -7747,6 +8016,14 @@ func zjDecodeOrderedFieldC_slice_string(l *zerojson.Lexer, v *C_slice_string, a 
 	}
 	switch k {
 	case 0:
+		if v.F != nil {
+			a.c0 = v.F
+			a.sliceBorrowed0 = true
+		} else if a.slicePublished0 || a.sliceBorrowed0 {
+			a.c0 = nil
+			a.sliceBorrowed0 = false
+		}
+		a.slicePublished0 = true
 		a.c0 = a.c0[:0]
 		if l.EnterArray() {
 			for {
@@ -7816,10 +8093,10 @@ func zjIsDeclaredKeyC_slice_string(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_slice_string is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_slice_string is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjArenaC_slice_string) {
+func zjDecodeFallback_C_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjArenaC_slice_string) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -7845,6 +8122,14 @@ func zjDecodeFallbackC_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjA
 		}
 		switch string(key) {
 		case "f":
+			if v.F != nil {
+				a.c0 = v.F
+				a.sliceBorrowed0 = true
+			} else if a.slicePublished0 || a.sliceBorrowed0 {
+				a.c0 = nil
+				a.sliceBorrowed0 = false
+			}
+			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -7885,13 +8170,19 @@ func zjDecodeFallbackC_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjA
 	}
 }
 
-// zjArenaC_slice_string_oe backs every pointer field of a decoded C_slice_string_oe with a single
+// zjArenaC_slice_string_oe holds first-use pointer cells for a decoded C_slice_string_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_slice_string_oe struct {
-	c0 []string
+	slicePublished0 bool
+	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
+	c0              []string
+}
+
+func (a *zjArenaC_slice_string_oe) beginDecode() {
+	a.slicePublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -7939,7 +8230,7 @@ func (v *C_slice_string_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_slice_string_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_string_oe{}
-	zjDecodeC_slice_string_oe(&l, v, a)
+	zjDecode_C_slice_string_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -7949,20 +8240,20 @@ func (v *C_slice_string_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_slice_string_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_string_oe{}
-	zjDecodeC_slice_string_oe(l, v, a)
+	zjDecode_C_slice_string_oe(l, v, a)
 }
 
-// zjDecodeC_slice_string_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_slice_string_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a *zjArenaC_slice_string_oe) {
+func zjDecode_C_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a *zjArenaC_slice_string_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedC_slice_string_oe(l, v, a) {
+	if zjDecodeOrdered_C_slice_string_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -7973,17 +8264,17 @@ func zjDecodeC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a *zjAre
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_slice_string_oe(l, v, a)
+	zjDecodeFallback_C_slice_string_oe(l, v, a)
 }
 
-// zjDecodeOrderedC_slice_string_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_slice_string_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_slice_string_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_slice_string_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a *zjArenaC_slice_string_oe) bool {
+func zjDecodeOrdered_C_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a *zjArenaC_slice_string_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -8047,7 +8338,7 @@ func zjDecodeOrderedC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_slice_string_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_slice_string_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -8069,7 +8360,7 @@ func zjDecodeOrderedC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a
 	}
 }
 
-func zjDecodeOrderedFieldC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a *zjArenaC_slice_string_oe, k int) bool {
+func zjDecodeOrderedField_C_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a *zjArenaC_slice_string_oe, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -8083,6 +8374,14 @@ func zjDecodeOrderedFieldC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_
 	}
 	switch k {
 	case 0:
+		if v.F != nil {
+			a.c0 = v.F
+			a.sliceBorrowed0 = true
+		} else if a.slicePublished0 || a.sliceBorrowed0 {
+			a.c0 = nil
+			a.sliceBorrowed0 = false
+		}
+		a.slicePublished0 = true
 		a.c0 = a.c0[:0]
 		if l.EnterArray() {
 			for {
@@ -8152,10 +8451,10 @@ func zjIsDeclaredKeyC_slice_string_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_slice_string_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_slice_string_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a *zjArenaC_slice_string_oe) {
+func zjDecodeFallback_C_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a *zjArenaC_slice_string_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -8181,6 +8480,14 @@ func zjDecodeFallbackC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, 
 		}
 		switch string(key) {
 		case "f":
+			if v.F != nil {
+				a.c0 = v.F
+				a.sliceBorrowed0 = true
+			} else if a.slicePublished0 || a.sliceBorrowed0 {
+				a.c0 = nil
+				a.sliceBorrowed0 = false
+			}
+			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -8221,13 +8528,19 @@ func zjDecodeFallbackC_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, 
 	}
 }
 
-// zjArenaC_slice_struct backs every pointer field of a decoded C_slice_struct with a single
+// zjArenaC_slice_struct holds first-use pointer cells for a decoded C_slice_struct in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_slice_struct struct {
-	c0 []Inner
+	slicePublished0 bool
+	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
+	c0              []Inner
+}
+
+func (a *zjArenaC_slice_struct) beginDecode() {
+	a.slicePublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -8279,7 +8592,7 @@ func (v *C_slice_struct) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_slice_struct) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_struct{}
-	zjDecodeC_slice_struct(&l, v, a)
+	zjDecode_C_slice_struct(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -8289,20 +8602,20 @@ func (v *C_slice_struct) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_slice_struct) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_struct{}
-	zjDecodeC_slice_struct(l, v, a)
+	zjDecode_C_slice_struct(l, v, a)
 }
 
-// zjDecodeC_slice_struct tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_slice_struct tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjArenaC_slice_struct) {
+func zjDecode_C_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjArenaC_slice_struct) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedC_slice_struct(l, v, a) {
+	if zjDecodeOrdered_C_slice_struct(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -8313,17 +8626,17 @@ func zjDecodeC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjArenaC_sl
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_slice_struct(l, v, a)
+	zjDecodeFallback_C_slice_struct(l, v, a)
 }
 
-// zjDecodeOrderedC_slice_struct speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_slice_struct speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_slice_struct;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_slice_struct;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjArenaC_slice_struct) bool {
+func zjDecodeOrdered_C_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjArenaC_slice_struct) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -8387,7 +8700,7 @@ func zjDecodeOrderedC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjAr
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_slice_struct(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_slice_struct(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -8409,7 +8722,7 @@ func zjDecodeOrderedC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjAr
 	}
 }
 
-func zjDecodeOrderedFieldC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjArenaC_slice_struct, k int) bool {
+func zjDecodeOrderedField_C_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjArenaC_slice_struct, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -8423,6 +8736,14 @@ func zjDecodeOrderedFieldC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a 
 	}
 	switch k {
 	case 0:
+		if v.F != nil {
+			a.c0 = v.F
+			a.sliceBorrowed0 = true
+		} else if a.slicePublished0 || a.sliceBorrowed0 {
+			a.c0 = nil
+			a.sliceBorrowed0 = false
+		}
+		a.slicePublished0 = true
 		a.c0 = a.c0[:0]
 		if l.EnterArray() {
 			for {
@@ -8434,7 +8755,7 @@ func zjDecodeOrderedFieldC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a 
 				}
 				if !l.IsNull() {
 					var ea zjArenaInner
-					zjDecodeInner(l, &a.c0[len(a.c0)-1], &ea)
+					zjDecode_Inner(l, &a.c0[len(a.c0)-1], &ea)
 				}
 				if l.Err() != nil {
 					break
@@ -8490,10 +8811,10 @@ func zjIsDeclaredKeyC_slice_struct(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_slice_struct is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_slice_struct is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjArenaC_slice_struct) {
+func zjDecodeFallback_C_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjArenaC_slice_struct) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -8519,6 +8840,14 @@ func zjDecodeFallbackC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjA
 		}
 		switch string(key) {
 		case "f":
+			if v.F != nil {
+				a.c0 = v.F
+				a.sliceBorrowed0 = true
+			} else if a.slicePublished0 || a.sliceBorrowed0 {
+				a.c0 = nil
+				a.sliceBorrowed0 = false
+			}
+			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -8530,7 +8859,7 @@ func zjDecodeFallbackC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjA
 					}
 					if !l.IsNull() {
 						var ea zjArenaInner
-						zjDecodeInner(l, &a.c0[len(a.c0)-1], &ea)
+						zjDecode_Inner(l, &a.c0[len(a.c0)-1], &ea)
 					}
 					if l.Err() != nil {
 						break
@@ -8557,13 +8886,19 @@ func zjDecodeFallbackC_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjA
 	}
 }
 
-// zjArenaC_slice_struct_oe backs every pointer field of a decoded C_slice_struct_oe with a single
+// zjArenaC_slice_struct_oe holds first-use pointer cells for a decoded C_slice_struct_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaC_slice_struct_oe struct {
-	c0 []Inner
+	slicePublished0 bool
+	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
+	c0              []Inner
+}
+
+func (a *zjArenaC_slice_struct_oe) beginDecode() {
+	a.slicePublished0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -8615,7 +8950,7 @@ func (v *C_slice_struct_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *C_slice_struct_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_struct_oe{}
-	zjDecodeC_slice_struct_oe(&l, v, a)
+	zjDecode_C_slice_struct_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -8625,20 +8960,20 @@ func (v *C_slice_struct_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *C_slice_struct_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_struct_oe{}
-	zjDecodeC_slice_struct_oe(l, v, a)
+	zjDecode_C_slice_struct_oe(l, v, a)
 }
 
-// zjDecodeC_slice_struct_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_C_slice_struct_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, a *zjArenaC_slice_struct_oe) {
+func zjDecode_C_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, a *zjArenaC_slice_struct_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedC_slice_struct_oe(l, v, a) {
+	if zjDecodeOrdered_C_slice_struct_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -8649,17 +8984,17 @@ func zjDecodeC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, a *zjAre
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackC_slice_struct_oe(l, v, a)
+	zjDecodeFallback_C_slice_struct_oe(l, v, a)
 }
 
-// zjDecodeOrderedC_slice_struct_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_C_slice_struct_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackC_slice_struct_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_C_slice_struct_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, a *zjArenaC_slice_struct_oe) bool {
+func zjDecodeOrdered_C_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, a *zjArenaC_slice_struct_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -8723,7 +9058,7 @@ func zjDecodeOrderedC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, a
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldC_slice_struct_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_C_slice_struct_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -8745,7 +9080,7 @@ func zjDecodeOrderedC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, a
 	}
 }
 
-func zjDecodeOrderedFieldC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, a *zjArenaC_slice_struct_oe, k int) bool {
+func zjDecodeOrderedField_C_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, a *zjArenaC_slice_struct_oe, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -8759,6 +9094,14 @@ func zjDecodeOrderedFieldC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_
 	}
 	switch k {
 	case 0:
+		if v.F != nil {
+			a.c0 = v.F
+			a.sliceBorrowed0 = true
+		} else if a.slicePublished0 || a.sliceBorrowed0 {
+			a.c0 = nil
+			a.sliceBorrowed0 = false
+		}
+		a.slicePublished0 = true
 		a.c0 = a.c0[:0]
 		if l.EnterArray() {
 			for {
@@ -8770,7 +9113,7 @@ func zjDecodeOrderedFieldC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_
 				}
 				if !l.IsNull() {
 					var ea zjArenaInner
-					zjDecodeInner(l, &a.c0[len(a.c0)-1], &ea)
+					zjDecode_Inner(l, &a.c0[len(a.c0)-1], &ea)
 				}
 				if l.Err() != nil {
 					break
@@ -8826,10 +9169,10 @@ func zjIsDeclaredKeyC_slice_struct_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackC_slice_struct_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_C_slice_struct_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, a *zjArenaC_slice_struct_oe) {
+func zjDecodeFallback_C_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, a *zjArenaC_slice_struct_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -8855,6 +9198,14 @@ func zjDecodeFallbackC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, 
 		}
 		switch string(key) {
 		case "f":
+			if v.F != nil {
+				a.c0 = v.F
+				a.sliceBorrowed0 = true
+			} else if a.slicePublished0 || a.sliceBorrowed0 {
+				a.c0 = nil
+				a.sliceBorrowed0 = false
+			}
+			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -8866,7 +9217,7 @@ func zjDecodeFallbackC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, 
 					}
 					if !l.IsNull() {
 						var ea zjArenaInner
-						zjDecodeInner(l, &a.c0[len(a.c0)-1], &ea)
+						zjDecode_Inner(l, &a.c0[len(a.c0)-1], &ea)
 					}
 					if l.Err() != nil {
 						break
@@ -8893,12 +9244,15 @@ func zjDecodeFallbackC_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, 
 	}
 }
 
-// zjArenaE_embed_first backs every pointer field of a decoded E_embed_first with a single
+// zjArenaE_embed_first holds first-use pointer cells for a decoded E_embed_first in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaE_embed_first struct {
+}
+
+func (a *zjArenaE_embed_first) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -8949,7 +9303,7 @@ func (v *E_embed_first) UnmarshalZJSONBorrow(data []byte) error {
 func (v *E_embed_first) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaE_embed_first{}
-	zjDecodeE_embed_first(&l, v, a)
+	zjDecode_E_embed_first(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -8959,20 +9313,20 @@ func (v *E_embed_first) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *E_embed_first) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaE_embed_first{}
-	zjDecodeE_embed_first(l, v, a)
+	zjDecode_E_embed_first(l, v, a)
 }
 
-// zjDecodeE_embed_first tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_E_embed_first tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeE_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjArenaE_embed_first) {
+func zjDecode_E_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjArenaE_embed_first) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedE_embed_first(l, v, a) {
+	if zjDecodeOrdered_E_embed_first(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -8983,17 +9337,17 @@ func zjDecodeE_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjArenaE_embe
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackE_embed_first(l, v, a)
+	zjDecodeFallback_E_embed_first(l, v, a)
 }
 
-// zjDecodeOrderedE_embed_first speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_E_embed_first speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackE_embed_first;
+// non-compact syntax. The caller retries those through zjDecodeFallback_E_embed_first;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedE_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjArenaE_embed_first) bool {
+func zjDecodeOrdered_E_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjArenaE_embed_first) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -9057,7 +9411,7 @@ func zjDecodeOrderedE_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjAren
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldE_embed_first(l, v, a, matched) {
+			if !zjDecodeOrderedField_E_embed_first(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -9079,7 +9433,7 @@ func zjDecodeOrderedE_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjAren
 	}
 }
 
-func zjDecodeOrderedFieldE_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjArenaE_embed_first, k int) bool {
+func zjDecodeOrderedField_E_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjArenaE_embed_first, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesE_embed_first[k])
@@ -9156,10 +9510,10 @@ func zjIsDeclaredKeyE_embed_first(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackE_embed_first is the general keyed decoder: every member is read via
+// zjDecodeFallback_E_embed_first is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackE_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjArenaE_embed_first) {
+func zjDecodeFallback_E_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjArenaE_embed_first) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -9199,12 +9553,15 @@ func zjDecodeFallbackE_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjAre
 	}
 }
 
-// zjArenaE_embed_last backs every pointer field of a decoded E_embed_last with a single
+// zjArenaE_embed_last holds first-use pointer cells for a decoded E_embed_last in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaE_embed_last struct {
+}
+
+func (a *zjArenaE_embed_last) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -9255,7 +9612,7 @@ func (v *E_embed_last) UnmarshalZJSONBorrow(data []byte) error {
 func (v *E_embed_last) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaE_embed_last{}
-	zjDecodeE_embed_last(&l, v, a)
+	zjDecode_E_embed_last(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -9265,20 +9622,20 @@ func (v *E_embed_last) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *E_embed_last) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaE_embed_last{}
-	zjDecodeE_embed_last(l, v, a)
+	zjDecode_E_embed_last(l, v, a)
 }
 
-// zjDecodeE_embed_last tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_E_embed_last tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeE_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArenaE_embed_last) {
+func zjDecode_E_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArenaE_embed_last) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedE_embed_last(l, v, a) {
+	if zjDecodeOrdered_E_embed_last(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -9289,17 +9646,17 @@ func zjDecodeE_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArenaE_embed_
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackE_embed_last(l, v, a)
+	zjDecodeFallback_E_embed_last(l, v, a)
 }
 
-// zjDecodeOrderedE_embed_last speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_E_embed_last speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackE_embed_last;
+// non-compact syntax. The caller retries those through zjDecodeFallback_E_embed_last;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedE_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArenaE_embed_last) bool {
+func zjDecodeOrdered_E_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArenaE_embed_last) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -9363,7 +9720,7 @@ func zjDecodeOrderedE_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArenaE
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldE_embed_last(l, v, a, matched) {
+			if !zjDecodeOrderedField_E_embed_last(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -9385,7 +9742,7 @@ func zjDecodeOrderedE_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArenaE
 	}
 }
 
-func zjDecodeOrderedFieldE_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArenaE_embed_last, k int) bool {
+func zjDecodeOrderedField_E_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArenaE_embed_last, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesE_embed_last[k])
@@ -9462,10 +9819,10 @@ func zjIsDeclaredKeyE_embed_last(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackE_embed_last is the general keyed decoder: every member is read via
+// zjDecodeFallback_E_embed_last is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackE_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArenaE_embed_last) {
+func zjDecodeFallback_E_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArenaE_embed_last) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -9505,12 +9862,15 @@ func zjDecodeFallbackE_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArena
 	}
 }
 
-// zjArenaE_embed_unexported backs every pointer field of a decoded E_embed_unexported with a single
+// zjArenaE_embed_unexported holds first-use pointer cells for a decoded E_embed_unexported in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaE_embed_unexported struct {
+}
+
+func (a *zjArenaE_embed_unexported) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -9554,7 +9914,7 @@ func (v *E_embed_unexported) UnmarshalZJSONBorrow(data []byte) error {
 func (v *E_embed_unexported) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaE_embed_unexported{}
-	zjDecodeE_embed_unexported(&l, v, a)
+	zjDecode_E_embed_unexported(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -9564,20 +9924,20 @@ func (v *E_embed_unexported) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *E_embed_unexported) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaE_embed_unexported{}
-	zjDecodeE_embed_unexported(l, v, a)
+	zjDecode_E_embed_unexported(l, v, a)
 }
 
-// zjDecodeE_embed_unexported tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_E_embed_unexported tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeE_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported, a *zjArenaE_embed_unexported) {
+func zjDecode_E_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported, a *zjArenaE_embed_unexported) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedE_embed_unexported(l, v, a) {
+	if zjDecodeOrdered_E_embed_unexported(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -9588,17 +9948,17 @@ func zjDecodeE_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported, a *zjA
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackE_embed_unexported(l, v, a)
+	zjDecodeFallback_E_embed_unexported(l, v, a)
 }
 
-// zjDecodeOrderedE_embed_unexported speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_E_embed_unexported speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackE_embed_unexported;
+// non-compact syntax. The caller retries those through zjDecodeFallback_E_embed_unexported;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedE_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported, a *zjArenaE_embed_unexported) bool {
+func zjDecodeOrdered_E_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported, a *zjArenaE_embed_unexported) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -9662,7 +10022,7 @@ func zjDecodeOrderedE_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported,
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldE_embed_unexported(l, v, a, matched) {
+			if !zjDecodeOrderedField_E_embed_unexported(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -9684,7 +10044,7 @@ func zjDecodeOrderedE_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported,
 	}
 }
 
-func zjDecodeOrderedFieldE_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported, a *zjArenaE_embed_unexported, k int) bool {
+func zjDecodeOrderedField_E_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported, a *zjArenaE_embed_unexported, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesE_embed_unexported[k])
@@ -9749,10 +10109,10 @@ func zjIsDeclaredKeyE_embed_unexported(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackE_embed_unexported is the general keyed decoder: every member is read via
+// zjDecodeFallback_E_embed_unexported is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackE_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported, a *zjArenaE_embed_unexported) {
+func zjDecodeFallback_E_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported, a *zjArenaE_embed_unexported) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -9790,12 +10150,15 @@ func zjDecodeFallbackE_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported
 	}
 }
 
-// zjArenaL_appender backs every pointer field of a decoded L_appender with a single
+// zjArenaL_appender holds first-use pointer cells for a decoded L_appender in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_appender struct {
+}
+
+func (a *zjArenaL_appender) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -9836,7 +10199,7 @@ func (v *L_appender) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_appender) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_appender{}
-	zjDecodeL_appender(&l, v, a)
+	zjDecode_L_appender(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -9846,25 +10209,25 @@ func (v *L_appender) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_appender) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_appender{}
-	zjDecodeL_appender(l, v, a)
+	zjDecode_L_appender(l, v, a)
 }
 
-// zjDecodeL_appender tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_appender tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_appender(l *zerojson.Lexer, v *L_appender, a *zjArenaL_appender) {
+func zjDecode_L_appender(l *zerojson.Lexer, v *L_appender, a *zjArenaL_appender) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	zjDecodeFallbackL_appender(l, v, a)
+	zjDecodeFallback_L_appender(l, v, a)
 }
 
-// zjDecodeFallbackL_appender is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_appender is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_appender(l *zerojson.Lexer, v *L_appender, a *zjArenaL_appender) {
+func zjDecodeFallback_L_appender(l *zerojson.Lexer, v *L_appender, a *zjArenaL_appender) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -9906,12 +10269,15 @@ func zjDecodeFallbackL_appender(l *zerojson.Lexer, v *L_appender, a *zjArenaL_ap
 	}
 }
 
-// zjArenaL_appender_oe backs every pointer field of a decoded L_appender_oe with a single
+// zjArenaL_appender_oe holds first-use pointer cells for a decoded L_appender_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_appender_oe struct {
+}
+
+func (a *zjArenaL_appender_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -9952,7 +10318,7 @@ func (v *L_appender_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_appender_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_appender_oe{}
-	zjDecodeL_appender_oe(&l, v, a)
+	zjDecode_L_appender_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -9962,25 +10328,25 @@ func (v *L_appender_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_appender_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_appender_oe{}
-	zjDecodeL_appender_oe(l, v, a)
+	zjDecode_L_appender_oe(l, v, a)
 }
 
-// zjDecodeL_appender_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_appender_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_appender_oe(l *zerojson.Lexer, v *L_appender_oe, a *zjArenaL_appender_oe) {
+func zjDecode_L_appender_oe(l *zerojson.Lexer, v *L_appender_oe, a *zjArenaL_appender_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	zjDecodeFallbackL_appender_oe(l, v, a)
+	zjDecodeFallback_L_appender_oe(l, v, a)
 }
 
-// zjDecodeFallbackL_appender_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_appender_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_appender_oe(l *zerojson.Lexer, v *L_appender_oe, a *zjArenaL_appender_oe) {
+func zjDecodeFallback_L_appender_oe(l *zerojson.Lexer, v *L_appender_oe, a *zjArenaL_appender_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -10022,13 +10388,18 @@ func zjDecodeFallbackL_appender_oe(l *zerojson.Lexer, v *L_appender_oe, a *zjAre
 	}
 }
 
-// zjArenaL_appender_ptr backs every pointer field of a decoded L_appender_ptr with a single
+// zjArenaL_appender_ptr holds first-use pointer cells for a decoded L_appender_ptr in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_appender_ptr struct {
-	f0 Cents
+	published0 bool
+	f0         Cents
+}
+
+func (a *zjArenaL_appender_ptr) beginDecode() {
+	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -10073,7 +10444,7 @@ func (v *L_appender_ptr) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_appender_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_appender_ptr{}
-	zjDecodeL_appender_ptr(&l, v, a)
+	zjDecode_L_appender_ptr(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -10083,25 +10454,25 @@ func (v *L_appender_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_appender_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_appender_ptr{}
-	zjDecodeL_appender_ptr(l, v, a)
+	zjDecode_L_appender_ptr(l, v, a)
 }
 
-// zjDecodeL_appender_ptr tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_appender_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_appender_ptr(l *zerojson.Lexer, v *L_appender_ptr, a *zjArenaL_appender_ptr) {
+func zjDecode_L_appender_ptr(l *zerojson.Lexer, v *L_appender_ptr, a *zjArenaL_appender_ptr) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	zjDecodeFallbackL_appender_ptr(l, v, a)
+	zjDecodeFallback_L_appender_ptr(l, v, a)
 }
 
-// zjDecodeFallbackL_appender_ptr is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_appender_ptr is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_appender_ptr(l *zerojson.Lexer, v *L_appender_ptr, a *zjArenaL_appender_ptr) {
+func zjDecodeFallback_L_appender_ptr(l *zerojson.Lexer, v *L_appender_ptr, a *zjArenaL_appender_ptr) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -10128,9 +10499,14 @@ func zjDecodeFallbackL_appender_ptr(l *zerojson.Lexer, v *L_appender_ptr, a *zjA
 		switch string(key) {
 		case "f":
 			if v.F == nil {
-				var zjZero Cents
-				a.f0 = zjZero
-				v.F = &a.f0
+				if a.published0 {
+					v.F = new(Cents)
+				} else {
+					var zjZero Cents
+					a.f0 = zjZero
+					v.F = &a.f0
+					a.published0 = true
+				}
 			}
 			v.F.ReadZJSON(l)
 		default:
@@ -10146,12 +10522,15 @@ func zjDecodeFallbackL_appender_ptr(l *zerojson.Lexer, v *L_appender_ptr, a *zjA
 	}
 }
 
-// zjArenaL_bool backs every pointer field of a decoded L_bool with a single
+// zjArenaL_bool holds first-use pointer cells for a decoded L_bool in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_bool struct {
+}
+
+func (a *zjArenaL_bool) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -10188,7 +10567,7 @@ func (v *L_bool) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_bool) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_bool{}
-	zjDecodeL_bool(&l, v, a)
+	zjDecode_L_bool(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -10198,20 +10577,20 @@ func (v *L_bool) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_bool) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_bool{}
-	zjDecodeL_bool(l, v, a)
+	zjDecode_L_bool(l, v, a)
 }
 
-// zjDecodeL_bool tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_bool tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) {
+func zjDecode_L_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_bool(l, v, a) {
+	if zjDecodeOrdered_L_bool(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -10222,17 +10601,17 @@ func zjDecodeL_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_bool(l, v, a)
+	zjDecodeFallback_L_bool(l, v, a)
 }
 
-// zjDecodeOrderedL_bool speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_bool speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_bool;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_bool;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) bool {
+func zjDecodeOrdered_L_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -10296,7 +10675,7 @@ func zjDecodeOrderedL_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) bool 
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_bool(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_bool(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -10318,7 +10697,7 @@ func zjDecodeOrderedL_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) bool 
 	}
 }
 
-func zjDecodeOrderedFieldL_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool, k int) bool {
+func zjDecodeOrderedField_L_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_bool[k])
@@ -10371,10 +10750,10 @@ func zjIsDeclaredKeyL_bool(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_bool is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_bool is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) {
+func zjDecodeFallback_L_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -10410,12 +10789,15 @@ func zjDecodeFallbackL_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) {
 	}
 }
 
-// zjArenaL_bool_oe backs every pointer field of a decoded L_bool_oe with a single
+// zjArenaL_bool_oe holds first-use pointer cells for a decoded L_bool_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_bool_oe struct {
+}
+
+func (a *zjArenaL_bool_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -10452,7 +10834,7 @@ func (v *L_bool_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_bool_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_bool_oe{}
-	zjDecodeL_bool_oe(&l, v, a)
+	zjDecode_L_bool_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -10462,20 +10844,20 @@ func (v *L_bool_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_bool_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_bool_oe{}
-	zjDecodeL_bool_oe(l, v, a)
+	zjDecode_L_bool_oe(l, v, a)
 }
 
-// zjDecodeL_bool_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_bool_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool_oe) {
+func zjDecode_L_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_bool_oe(l, v, a) {
+	if zjDecodeOrdered_L_bool_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -10486,17 +10868,17 @@ func zjDecodeL_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool_oe) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_bool_oe(l, v, a)
+	zjDecodeFallback_L_bool_oe(l, v, a)
 }
 
-// zjDecodeOrderedL_bool_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_bool_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_bool_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_bool_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool_oe) bool {
+func zjDecodeOrdered_L_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -10560,7 +10942,7 @@ func zjDecodeOrderedL_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool_
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_bool_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_bool_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -10582,7 +10964,7 @@ func zjDecodeOrderedL_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool_
 	}
 }
 
-func zjDecodeOrderedFieldL_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool_oe, k int) bool {
+func zjDecodeOrderedField_L_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool_oe, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_bool_oe[k])
@@ -10635,10 +11017,10 @@ func zjIsDeclaredKeyL_bool_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_bool_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_bool_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool_oe) {
+func zjDecodeFallback_L_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -10674,13 +11056,18 @@ func zjDecodeFallbackL_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool
 	}
 }
 
-// zjArenaL_bool_ptr backs every pointer field of a decoded L_bool_ptr with a single
+// zjArenaL_bool_ptr holds first-use pointer cells for a decoded L_bool_ptr in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_bool_ptr struct {
-	f0 bool
+	published0 bool
+	f0         bool
+}
+
+func (a *zjArenaL_bool_ptr) beginDecode() {
+	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -10721,7 +11108,7 @@ func (v *L_bool_ptr) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_bool_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_bool_ptr{}
-	zjDecodeL_bool_ptr(&l, v, a)
+	zjDecode_L_bool_ptr(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -10731,20 +11118,20 @@ func (v *L_bool_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_bool_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_bool_ptr{}
-	zjDecodeL_bool_ptr(l, v, a)
+	zjDecode_L_bool_ptr(l, v, a)
 }
 
-// zjDecodeL_bool_ptr tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_bool_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bool_ptr) {
+func zjDecode_L_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bool_ptr) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_bool_ptr(l, v, a) {
+	if zjDecodeOrdered_L_bool_ptr(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -10755,17 +11142,17 @@ func zjDecodeL_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bool_ptr) 
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_bool_ptr(l, v, a)
+	zjDecodeFallback_L_bool_ptr(l, v, a)
 }
 
-// zjDecodeOrderedL_bool_ptr speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_bool_ptr speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_bool_ptr;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_bool_ptr;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bool_ptr) bool {
+func zjDecodeOrdered_L_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bool_ptr) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.F != nil {
@@ -10833,7 +11220,7 @@ func zjDecodeOrderedL_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_boo
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_bool_ptr(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_bool_ptr(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -10855,7 +11242,7 @@ func zjDecodeOrderedL_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_boo
 	}
 }
 
-func zjDecodeOrderedFieldL_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bool_ptr, k int) bool {
+func zjDecodeOrderedField_L_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bool_ptr, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -10870,11 +11257,16 @@ func zjDecodeOrderedFieldL_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArena
 	switch k {
 	case 0:
 		if v.F == nil {
-			a.f0 = bool(l.ReadBool())
-			v.F = &a.f0
-		} else {
-			*v.F = bool(l.ReadBool())
+			if a.published0 {
+				v.F = new(bool)
+			} else {
+				var zjZero bool
+				a.f0 = zjZero
+				v.F = &a.f0
+				a.published0 = true
+			}
 		}
+		*v.F = bool(l.ReadBool())
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesL_bool_ptr[k])
@@ -10917,10 +11309,10 @@ func zjIsDeclaredKeyL_bool_ptr(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_bool_ptr is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_bool_ptr is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bool_ptr) {
+func zjDecodeFallback_L_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bool_ptr) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -10947,11 +11339,16 @@ func zjDecodeFallbackL_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bo
 		switch string(key) {
 		case "f":
 			if v.F == nil {
-				a.f0 = bool(l.ReadBool())
-				v.F = &a.f0
-			} else {
-				*v.F = bool(l.ReadBool())
+				if a.published0 {
+					v.F = new(bool)
+				} else {
+					var zjZero bool
+					a.f0 = zjZero
+					v.F = &a.f0
+					a.published0 = true
+				}
 			}
+			*v.F = bool(l.ReadBool())
 		default:
 			l.Skip()
 		}
@@ -10965,12 +11362,15 @@ func zjDecodeFallbackL_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bo
 	}
 }
 
-// zjArenaL_decimal backs every pointer field of a decoded L_decimal with a single
+// zjArenaL_decimal holds first-use pointer cells for a decoded L_decimal in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_decimal struct {
+}
+
+func (a *zjArenaL_decimal) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -11007,7 +11407,7 @@ func (v *L_decimal) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_decimal) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_decimal{}
-	zjDecodeL_decimal(&l, v, a)
+	zjDecode_L_decimal(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -11017,20 +11417,20 @@ func (v *L_decimal) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_decimal) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_decimal{}
-	zjDecodeL_decimal(l, v, a)
+	zjDecode_L_decimal(l, v, a)
 }
 
-// zjDecodeL_decimal tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_decimal tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_decimal) {
+func zjDecode_L_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_decimal) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_decimal(l, v, a) {
+	if zjDecodeOrdered_L_decimal(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -11041,17 +11441,17 @@ func zjDecodeL_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_decimal) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_decimal(l, v, a)
+	zjDecodeFallback_L_decimal(l, v, a)
 }
 
-// zjDecodeOrderedL_decimal speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_decimal speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_decimal;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_decimal;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_decimal) bool {
+func zjDecodeOrdered_L_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_decimal) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -11115,7 +11515,7 @@ func zjDecodeOrderedL_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_decim
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_decimal(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_decimal(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -11137,7 +11537,7 @@ func zjDecodeOrderedL_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_decim
 	}
 }
 
-func zjDecodeOrderedFieldL_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_decimal, k int) bool {
+func zjDecodeOrderedField_L_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_decimal, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_decimal[k])
@@ -11190,10 +11590,10 @@ func zjIsDeclaredKeyL_decimal(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_decimal is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_decimal is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_decimal) {
+func zjDecodeFallback_L_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_decimal) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -11229,12 +11629,15 @@ func zjDecodeFallbackL_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_deci
 	}
 }
 
-// zjArenaL_decimal_oe backs every pointer field of a decoded L_decimal_oe with a single
+// zjArenaL_decimal_oe holds first-use pointer cells for a decoded L_decimal_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_decimal_oe struct {
+}
+
+func (a *zjArenaL_decimal_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -11271,7 +11674,7 @@ func (v *L_decimal_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_decimal_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_decimal_oe{}
-	zjDecodeL_decimal_oe(&l, v, a)
+	zjDecode_L_decimal_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -11281,20 +11684,20 @@ func (v *L_decimal_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_decimal_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_decimal_oe{}
-	zjDecodeL_decimal_oe(l, v, a)
+	zjDecode_L_decimal_oe(l, v, a)
 }
 
-// zjDecodeL_decimal_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_decimal_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArenaL_decimal_oe) {
+func zjDecode_L_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArenaL_decimal_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_decimal_oe(l, v, a) {
+	if zjDecodeOrdered_L_decimal_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -11305,17 +11708,17 @@ func zjDecodeL_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArenaL_decima
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_decimal_oe(l, v, a)
+	zjDecodeFallback_L_decimal_oe(l, v, a)
 }
 
-// zjDecodeOrderedL_decimal_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_decimal_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_decimal_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_decimal_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArenaL_decimal_oe) bool {
+func zjDecodeOrdered_L_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArenaL_decimal_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -11379,7 +11782,7 @@ func zjDecodeOrderedL_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArenaL
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_decimal_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_decimal_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -11401,7 +11804,7 @@ func zjDecodeOrderedL_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArenaL
 	}
 }
 
-func zjDecodeOrderedFieldL_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArenaL_decimal_oe, k int) bool {
+func zjDecodeOrderedField_L_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArenaL_decimal_oe, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_decimal_oe[k])
@@ -11454,10 +11857,10 @@ func zjIsDeclaredKeyL_decimal_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_decimal_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_decimal_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArenaL_decimal_oe) {
+func zjDecodeFallback_L_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArenaL_decimal_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -11493,13 +11896,18 @@ func zjDecodeFallbackL_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArena
 	}
 }
 
-// zjArenaL_decimal_ptr backs every pointer field of a decoded L_decimal_ptr with a single
+// zjArenaL_decimal_ptr holds first-use pointer cells for a decoded L_decimal_ptr in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_decimal_ptr struct {
-	f0 testleaf.Decimal
+	published0 bool
+	f0         testleaf.Decimal
+}
+
+func (a *zjArenaL_decimal_ptr) beginDecode() {
+	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -11540,7 +11948,7 @@ func (v *L_decimal_ptr) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_decimal_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_decimal_ptr{}
-	zjDecodeL_decimal_ptr(&l, v, a)
+	zjDecode_L_decimal_ptr(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -11550,20 +11958,20 @@ func (v *L_decimal_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_decimal_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_decimal_ptr{}
-	zjDecodeL_decimal_ptr(l, v, a)
+	zjDecode_L_decimal_ptr(l, v, a)
 }
 
-// zjDecodeL_decimal_ptr tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_decimal_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjArenaL_decimal_ptr) {
+func zjDecode_L_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjArenaL_decimal_ptr) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_decimal_ptr(l, v, a) {
+	if zjDecodeOrdered_L_decimal_ptr(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -11574,17 +11982,17 @@ func zjDecodeL_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjArenaL_deci
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_decimal_ptr(l, v, a)
+	zjDecodeFallback_L_decimal_ptr(l, v, a)
 }
 
-// zjDecodeOrderedL_decimal_ptr speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_decimal_ptr speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_decimal_ptr;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_decimal_ptr;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjArenaL_decimal_ptr) bool {
+func zjDecodeOrdered_L_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjArenaL_decimal_ptr) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.F != nil {
@@ -11652,7 +12060,7 @@ func zjDecodeOrderedL_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjAren
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_decimal_ptr(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_decimal_ptr(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -11674,7 +12082,7 @@ func zjDecodeOrderedL_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjAren
 	}
 }
 
-func zjDecodeOrderedFieldL_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjArenaL_decimal_ptr, k int) bool {
+func zjDecodeOrderedField_L_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjArenaL_decimal_ptr, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -11689,9 +12097,14 @@ func zjDecodeOrderedFieldL_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *z
 	switch k {
 	case 0:
 		if v.F == nil {
-			var zjZero testleaf.Decimal
-			a.f0 = zjZero
-			v.F = &a.f0
+			if a.published0 {
+				v.F = new(testleaf.Decimal)
+			} else {
+				var zjZero testleaf.Decimal
+				a.f0 = zjZero
+				v.F = &a.f0
+				a.published0 = true
+			}
 		}
 		testleaf.Read(l, v.F)
 	}
@@ -11736,10 +12149,10 @@ func zjIsDeclaredKeyL_decimal_ptr(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_decimal_ptr is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_decimal_ptr is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjArenaL_decimal_ptr) {
+func zjDecodeFallback_L_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjArenaL_decimal_ptr) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -11766,9 +12179,14 @@ func zjDecodeFallbackL_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjAre
 		switch string(key) {
 		case "f":
 			if v.F == nil {
-				var zjZero testleaf.Decimal
-				a.f0 = zjZero
-				v.F = &a.f0
+				if a.published0 {
+					v.F = new(testleaf.Decimal)
+				} else {
+					var zjZero testleaf.Decimal
+					a.f0 = zjZero
+					v.F = &a.f0
+					a.published0 = true
+				}
 			}
 			testleaf.Read(l, v.F)
 		default:
@@ -11784,12 +12202,15 @@ func zjDecodeFallbackL_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjAre
 	}
 }
 
-// zjArenaL_enum backs every pointer field of a decoded L_enum with a single
+// zjArenaL_enum holds first-use pointer cells for a decoded L_enum in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_enum struct {
+}
+
+func (a *zjArenaL_enum) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -11826,7 +12247,7 @@ func (v *L_enum) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_enum) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_enum{}
-	zjDecodeL_enum(&l, v, a)
+	zjDecode_L_enum(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -11836,20 +12257,20 @@ func (v *L_enum) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_enum) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_enum{}
-	zjDecodeL_enum(l, v, a)
+	zjDecode_L_enum(l, v, a)
 }
 
-// zjDecodeL_enum tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_enum tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) {
+func zjDecode_L_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_enum(l, v, a) {
+	if zjDecodeOrdered_L_enum(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -11860,17 +12281,17 @@ func zjDecodeL_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_enum(l, v, a)
+	zjDecodeFallback_L_enum(l, v, a)
 }
 
-// zjDecodeOrderedL_enum speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_enum speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_enum;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_enum;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) bool {
+func zjDecodeOrdered_L_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -11934,7 +12355,7 @@ func zjDecodeOrderedL_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) bool 
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_enum(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_enum(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -11956,7 +12377,7 @@ func zjDecodeOrderedL_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) bool 
 	}
 }
 
-func zjDecodeOrderedFieldL_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum, k int) bool {
+func zjDecodeOrderedField_L_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_enum[k])
@@ -12014,10 +12435,10 @@ func zjIsDeclaredKeyL_enum(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_enum is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_enum is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) {
+func zjDecodeFallback_L_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -12058,12 +12479,15 @@ func zjDecodeFallbackL_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) {
 	}
 }
 
-// zjArenaL_enum_oe backs every pointer field of a decoded L_enum_oe with a single
+// zjArenaL_enum_oe holds first-use pointer cells for a decoded L_enum_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_enum_oe struct {
+}
+
+func (a *zjArenaL_enum_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -12100,7 +12524,7 @@ func (v *L_enum_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_enum_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_enum_oe{}
-	zjDecodeL_enum_oe(&l, v, a)
+	zjDecode_L_enum_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -12110,20 +12534,20 @@ func (v *L_enum_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_enum_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_enum_oe{}
-	zjDecodeL_enum_oe(l, v, a)
+	zjDecode_L_enum_oe(l, v, a)
 }
 
-// zjDecodeL_enum_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_enum_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum_oe) {
+func zjDecode_L_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_enum_oe(l, v, a) {
+	if zjDecodeOrdered_L_enum_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -12134,17 +12558,17 @@ func zjDecodeL_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum_oe) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_enum_oe(l, v, a)
+	zjDecodeFallback_L_enum_oe(l, v, a)
 }
 
-// zjDecodeOrderedL_enum_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_enum_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_enum_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_enum_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum_oe) bool {
+func zjDecodeOrdered_L_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -12208,7 +12632,7 @@ func zjDecodeOrderedL_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum_
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_enum_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_enum_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -12230,7 +12654,7 @@ func zjDecodeOrderedL_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum_
 	}
 }
 
-func zjDecodeOrderedFieldL_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum_oe, k int) bool {
+func zjDecodeOrderedField_L_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum_oe, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_enum_oe[k])
@@ -12288,10 +12712,10 @@ func zjIsDeclaredKeyL_enum_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_enum_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_enum_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum_oe) {
+func zjDecodeFallback_L_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -12332,13 +12756,18 @@ func zjDecodeFallbackL_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum
 	}
 }
 
-// zjArenaL_enum_ptr backs every pointer field of a decoded L_enum_ptr with a single
+// zjArenaL_enum_ptr holds first-use pointer cells for a decoded L_enum_ptr in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_enum_ptr struct {
-	f0 Mode
+	published0 bool
+	f0         Mode
+}
+
+func (a *zjArenaL_enum_ptr) beginDecode() {
+	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -12379,7 +12808,7 @@ func (v *L_enum_ptr) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_enum_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_enum_ptr{}
-	zjDecodeL_enum_ptr(&l, v, a)
+	zjDecode_L_enum_ptr(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -12389,20 +12818,20 @@ func (v *L_enum_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_enum_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_enum_ptr{}
-	zjDecodeL_enum_ptr(l, v, a)
+	zjDecode_L_enum_ptr(l, v, a)
 }
 
-// zjDecodeL_enum_ptr tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_enum_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_enum_ptr) {
+func zjDecode_L_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_enum_ptr) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_enum_ptr(l, v, a) {
+	if zjDecodeOrdered_L_enum_ptr(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -12413,17 +12842,17 @@ func zjDecodeL_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_enum_ptr) 
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_enum_ptr(l, v, a)
+	zjDecodeFallback_L_enum_ptr(l, v, a)
 }
 
-// zjDecodeOrderedL_enum_ptr speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_enum_ptr speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_enum_ptr;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_enum_ptr;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_enum_ptr) bool {
+func zjDecodeOrdered_L_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_enum_ptr) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.F != nil {
@@ -12491,7 +12920,7 @@ func zjDecodeOrderedL_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_enu
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_enum_ptr(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_enum_ptr(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -12513,7 +12942,7 @@ func zjDecodeOrderedL_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_enu
 	}
 }
 
-func zjDecodeOrderedFieldL_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_enum_ptr, k int) bool {
+func zjDecodeOrderedField_L_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_enum_ptr, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -12528,9 +12957,14 @@ func zjDecodeOrderedFieldL_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArena
 	switch k {
 	case 0:
 		if v.F == nil {
-			var zjZero Mode
-			a.f0 = zjZero
-			v.F = &a.f0
+			if a.published0 {
+				v.F = new(Mode)
+			} else {
+				var zjZero Mode
+				a.f0 = zjZero
+				v.F = &a.f0
+				a.published0 = true
+			}
 		}
 		switch b := l.ReadEnumBytes(); string(b) {
 		case "up":
@@ -12580,10 +13014,10 @@ func zjIsDeclaredKeyL_enum_ptr(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_enum_ptr is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_enum_ptr is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_enum_ptr) {
+func zjDecodeFallback_L_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_enum_ptr) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -12610,9 +13044,14 @@ func zjDecodeFallbackL_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_en
 		switch string(key) {
 		case "f":
 			if v.F == nil {
-				var zjZero Mode
-				a.f0 = zjZero
-				v.F = &a.f0
+				if a.published0 {
+					v.F = new(Mode)
+				} else {
+					var zjZero Mode
+					a.f0 = zjZero
+					v.F = &a.f0
+					a.published0 = true
+				}
 			}
 			switch b := l.ReadEnumBytes(); string(b) {
 			case "up":
@@ -12633,12 +13072,15 @@ func zjDecodeFallbackL_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_en
 	}
 }
 
-// zjArenaL_float32 backs every pointer field of a decoded L_float32 with a single
+// zjArenaL_float32 holds first-use pointer cells for a decoded L_float32 in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_float32 struct {
+}
+
+func (a *zjArenaL_float32) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -12679,7 +13121,7 @@ func (v *L_float32) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_float32) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_float32{}
-	zjDecodeL_float32(&l, v, a)
+	zjDecode_L_float32(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -12689,20 +13131,20 @@ func (v *L_float32) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_float32) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_float32{}
-	zjDecodeL_float32(l, v, a)
+	zjDecode_L_float32(l, v, a)
 }
 
-// zjDecodeL_float32 tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_float32 tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_float32) {
+func zjDecode_L_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_float32) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_float32(l, v, a) {
+	if zjDecodeOrdered_L_float32(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -12713,17 +13155,17 @@ func zjDecodeL_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_float32) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_float32(l, v, a)
+	zjDecodeFallback_L_float32(l, v, a)
 }
 
-// zjDecodeOrderedL_float32 speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_float32 speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_float32;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_float32;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_float32) bool {
+func zjDecodeOrdered_L_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_float32) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -12787,7 +13229,7 @@ func zjDecodeOrderedL_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_float
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_float32(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_float32(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -12809,7 +13251,7 @@ func zjDecodeOrderedL_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_float
 	}
 }
 
-func zjDecodeOrderedFieldL_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_float32, k int) bool {
+func zjDecodeOrderedField_L_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_float32, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_float32[k])
@@ -12862,10 +13304,10 @@ func zjIsDeclaredKeyL_float32(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_float32 is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_float32 is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_float32) {
+func zjDecodeFallback_L_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_float32) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -12901,12 +13343,15 @@ func zjDecodeFallbackL_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_floa
 	}
 }
 
-// zjArenaL_float32_oe backs every pointer field of a decoded L_float32_oe with a single
+// zjArenaL_float32_oe holds first-use pointer cells for a decoded L_float32_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_float32_oe struct {
+}
+
+func (a *zjArenaL_float32_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -12947,7 +13392,7 @@ func (v *L_float32_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_float32_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_float32_oe{}
-	zjDecodeL_float32_oe(&l, v, a)
+	zjDecode_L_float32_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -12957,20 +13402,20 @@ func (v *L_float32_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_float32_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_float32_oe{}
-	zjDecodeL_float32_oe(l, v, a)
+	zjDecode_L_float32_oe(l, v, a)
 }
 
-// zjDecodeL_float32_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_float32_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArenaL_float32_oe) {
+func zjDecode_L_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArenaL_float32_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_float32_oe(l, v, a) {
+	if zjDecodeOrdered_L_float32_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -12981,17 +13426,17 @@ func zjDecodeL_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArenaL_float3
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_float32_oe(l, v, a)
+	zjDecodeFallback_L_float32_oe(l, v, a)
 }
 
-// zjDecodeOrderedL_float32_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_float32_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_float32_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_float32_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArenaL_float32_oe) bool {
+func zjDecodeOrdered_L_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArenaL_float32_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -13055,7 +13500,7 @@ func zjDecodeOrderedL_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArenaL
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_float32_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_float32_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -13077,7 +13522,7 @@ func zjDecodeOrderedL_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArenaL
 	}
 }
 
-func zjDecodeOrderedFieldL_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArenaL_float32_oe, k int) bool {
+func zjDecodeOrderedField_L_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArenaL_float32_oe, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_float32_oe[k])
@@ -13130,10 +13575,10 @@ func zjIsDeclaredKeyL_float32_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_float32_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_float32_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArenaL_float32_oe) {
+func zjDecodeFallback_L_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArenaL_float32_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -13169,13 +13614,18 @@ func zjDecodeFallbackL_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArena
 	}
 }
 
-// zjArenaL_float32_ptr backs every pointer field of a decoded L_float32_ptr with a single
+// zjArenaL_float32_ptr holds first-use pointer cells for a decoded L_float32_ptr in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_float32_ptr struct {
-	f0 float32
+	published0 bool
+	f0         float32
+}
+
+func (a *zjArenaL_float32_ptr) beginDecode() {
+	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -13220,7 +13670,7 @@ func (v *L_float32_ptr) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_float32_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_float32_ptr{}
-	zjDecodeL_float32_ptr(&l, v, a)
+	zjDecode_L_float32_ptr(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -13230,20 +13680,20 @@ func (v *L_float32_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_float32_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_float32_ptr{}
-	zjDecodeL_float32_ptr(l, v, a)
+	zjDecode_L_float32_ptr(l, v, a)
 }
 
-// zjDecodeL_float32_ptr tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_float32_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjArenaL_float32_ptr) {
+func zjDecode_L_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjArenaL_float32_ptr) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_float32_ptr(l, v, a) {
+	if zjDecodeOrdered_L_float32_ptr(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -13254,17 +13704,17 @@ func zjDecodeL_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjArenaL_floa
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_float32_ptr(l, v, a)
+	zjDecodeFallback_L_float32_ptr(l, v, a)
 }
 
-// zjDecodeOrderedL_float32_ptr speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_float32_ptr speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_float32_ptr;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_float32_ptr;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjArenaL_float32_ptr) bool {
+func zjDecodeOrdered_L_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjArenaL_float32_ptr) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.F != nil {
@@ -13332,7 +13782,7 @@ func zjDecodeOrderedL_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjAren
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_float32_ptr(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_float32_ptr(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -13354,7 +13804,7 @@ func zjDecodeOrderedL_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjAren
 	}
 }
 
-func zjDecodeOrderedFieldL_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjArenaL_float32_ptr, k int) bool {
+func zjDecodeOrderedField_L_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjArenaL_float32_ptr, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -13369,11 +13819,16 @@ func zjDecodeOrderedFieldL_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *z
 	switch k {
 	case 0:
 		if v.F == nil {
-			a.f0 = float32(l.ReadFloat32())
-			v.F = &a.f0
-		} else {
-			*v.F = float32(l.ReadFloat32())
+			if a.published0 {
+				v.F = new(float32)
+			} else {
+				var zjZero float32
+				a.f0 = zjZero
+				v.F = &a.f0
+				a.published0 = true
+			}
 		}
+		*v.F = float32(l.ReadFloat32())
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesL_float32_ptr[k])
@@ -13416,10 +13871,10 @@ func zjIsDeclaredKeyL_float32_ptr(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_float32_ptr is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_float32_ptr is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjArenaL_float32_ptr) {
+func zjDecodeFallback_L_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjArenaL_float32_ptr) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -13446,11 +13901,16 @@ func zjDecodeFallbackL_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjAre
 		switch string(key) {
 		case "f":
 			if v.F == nil {
-				a.f0 = float32(l.ReadFloat32())
-				v.F = &a.f0
-			} else {
-				*v.F = float32(l.ReadFloat32())
+				if a.published0 {
+					v.F = new(float32)
+				} else {
+					var zjZero float32
+					a.f0 = zjZero
+					v.F = &a.f0
+					a.published0 = true
+				}
 			}
+			*v.F = float32(l.ReadFloat32())
 		default:
 			l.Skip()
 		}
@@ -13464,12 +13924,15 @@ func zjDecodeFallbackL_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjAre
 	}
 }
 
-// zjArenaL_float64 backs every pointer field of a decoded L_float64 with a single
+// zjArenaL_float64 holds first-use pointer cells for a decoded L_float64 in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_float64 struct {
+}
+
+func (a *zjArenaL_float64) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -13510,7 +13973,7 @@ func (v *L_float64) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_float64) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_float64{}
-	zjDecodeL_float64(&l, v, a)
+	zjDecode_L_float64(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -13520,20 +13983,20 @@ func (v *L_float64) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_float64) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_float64{}
-	zjDecodeL_float64(l, v, a)
+	zjDecode_L_float64(l, v, a)
 }
 
-// zjDecodeL_float64 tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_float64 tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_float64) {
+func zjDecode_L_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_float64) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_float64(l, v, a) {
+	if zjDecodeOrdered_L_float64(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -13544,17 +14007,17 @@ func zjDecodeL_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_float64) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_float64(l, v, a)
+	zjDecodeFallback_L_float64(l, v, a)
 }
 
-// zjDecodeOrderedL_float64 speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_float64 speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_float64;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_float64;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_float64) bool {
+func zjDecodeOrdered_L_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_float64) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -13618,7 +14081,7 @@ func zjDecodeOrderedL_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_float
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_float64(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_float64(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -13640,7 +14103,7 @@ func zjDecodeOrderedL_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_float
 	}
 }
 
-func zjDecodeOrderedFieldL_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_float64, k int) bool {
+func zjDecodeOrderedField_L_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_float64, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_float64[k])
@@ -13693,10 +14156,10 @@ func zjIsDeclaredKeyL_float64(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_float64 is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_float64 is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_float64) {
+func zjDecodeFallback_L_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_float64) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -13732,12 +14195,15 @@ func zjDecodeFallbackL_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_floa
 	}
 }
 
-// zjArenaL_float64_oe backs every pointer field of a decoded L_float64_oe with a single
+// zjArenaL_float64_oe holds first-use pointer cells for a decoded L_float64_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_float64_oe struct {
+}
+
+func (a *zjArenaL_float64_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -13778,7 +14244,7 @@ func (v *L_float64_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_float64_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_float64_oe{}
-	zjDecodeL_float64_oe(&l, v, a)
+	zjDecode_L_float64_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -13788,20 +14254,20 @@ func (v *L_float64_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_float64_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_float64_oe{}
-	zjDecodeL_float64_oe(l, v, a)
+	zjDecode_L_float64_oe(l, v, a)
 }
 
-// zjDecodeL_float64_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_float64_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArenaL_float64_oe) {
+func zjDecode_L_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArenaL_float64_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_float64_oe(l, v, a) {
+	if zjDecodeOrdered_L_float64_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -13812,17 +14278,17 @@ func zjDecodeL_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArenaL_float6
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_float64_oe(l, v, a)
+	zjDecodeFallback_L_float64_oe(l, v, a)
 }
 
-// zjDecodeOrderedL_float64_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_float64_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_float64_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_float64_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArenaL_float64_oe) bool {
+func zjDecodeOrdered_L_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArenaL_float64_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -13886,7 +14352,7 @@ func zjDecodeOrderedL_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArenaL
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_float64_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_float64_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -13908,7 +14374,7 @@ func zjDecodeOrderedL_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArenaL
 	}
 }
 
-func zjDecodeOrderedFieldL_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArenaL_float64_oe, k int) bool {
+func zjDecodeOrderedField_L_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArenaL_float64_oe, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_float64_oe[k])
@@ -13961,10 +14427,10 @@ func zjIsDeclaredKeyL_float64_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_float64_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_float64_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArenaL_float64_oe) {
+func zjDecodeFallback_L_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArenaL_float64_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -14000,13 +14466,18 @@ func zjDecodeFallbackL_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArena
 	}
 }
 
-// zjArenaL_float64_ptr backs every pointer field of a decoded L_float64_ptr with a single
+// zjArenaL_float64_ptr holds first-use pointer cells for a decoded L_float64_ptr in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_float64_ptr struct {
-	f0 float64
+	published0 bool
+	f0         float64
+}
+
+func (a *zjArenaL_float64_ptr) beginDecode() {
+	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -14051,7 +14522,7 @@ func (v *L_float64_ptr) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_float64_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_float64_ptr{}
-	zjDecodeL_float64_ptr(&l, v, a)
+	zjDecode_L_float64_ptr(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -14061,20 +14532,20 @@ func (v *L_float64_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_float64_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_float64_ptr{}
-	zjDecodeL_float64_ptr(l, v, a)
+	zjDecode_L_float64_ptr(l, v, a)
 }
 
-// zjDecodeL_float64_ptr tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_float64_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjArenaL_float64_ptr) {
+func zjDecode_L_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjArenaL_float64_ptr) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_float64_ptr(l, v, a) {
+	if zjDecodeOrdered_L_float64_ptr(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -14085,17 +14556,17 @@ func zjDecodeL_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjArenaL_floa
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_float64_ptr(l, v, a)
+	zjDecodeFallback_L_float64_ptr(l, v, a)
 }
 
-// zjDecodeOrderedL_float64_ptr speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_float64_ptr speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_float64_ptr;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_float64_ptr;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjArenaL_float64_ptr) bool {
+func zjDecodeOrdered_L_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjArenaL_float64_ptr) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.F != nil {
@@ -14163,7 +14634,7 @@ func zjDecodeOrderedL_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjAren
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_float64_ptr(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_float64_ptr(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -14185,7 +14656,7 @@ func zjDecodeOrderedL_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjAren
 	}
 }
 
-func zjDecodeOrderedFieldL_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjArenaL_float64_ptr, k int) bool {
+func zjDecodeOrderedField_L_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjArenaL_float64_ptr, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -14200,11 +14671,16 @@ func zjDecodeOrderedFieldL_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *z
 	switch k {
 	case 0:
 		if v.F == nil {
-			a.f0 = float64(l.ReadFloat64())
-			v.F = &a.f0
-		} else {
-			*v.F = float64(l.ReadFloat64())
+			if a.published0 {
+				v.F = new(float64)
+			} else {
+				var zjZero float64
+				a.f0 = zjZero
+				v.F = &a.f0
+				a.published0 = true
+			}
 		}
+		*v.F = float64(l.ReadFloat64())
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesL_float64_ptr[k])
@@ -14247,10 +14723,10 @@ func zjIsDeclaredKeyL_float64_ptr(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_float64_ptr is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_float64_ptr is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjArenaL_float64_ptr) {
+func zjDecodeFallback_L_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjArenaL_float64_ptr) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -14277,11 +14753,16 @@ func zjDecodeFallbackL_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjAre
 		switch string(key) {
 		case "f":
 			if v.F == nil {
-				a.f0 = float64(l.ReadFloat64())
-				v.F = &a.f0
-			} else {
-				*v.F = float64(l.ReadFloat64())
+				if a.published0 {
+					v.F = new(float64)
+				} else {
+					var zjZero float64
+					a.f0 = zjZero
+					v.F = &a.f0
+					a.published0 = true
+				}
 			}
+			*v.F = float64(l.ReadFloat64())
 		default:
 			l.Skip()
 		}
@@ -14295,12 +14776,15 @@ func zjDecodeFallbackL_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjAre
 	}
 }
 
-// zjArenaL_int backs every pointer field of a decoded L_int with a single
+// zjArenaL_int holds first-use pointer cells for a decoded L_int in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_int struct {
+}
+
+func (a *zjArenaL_int) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -14337,7 +14821,7 @@ func (v *L_int) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_int) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_int{}
-	zjDecodeL_int(&l, v, a)
+	zjDecode_L_int(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -14347,20 +14831,20 @@ func (v *L_int) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_int) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_int{}
-	zjDecodeL_int(l, v, a)
+	zjDecode_L_int(l, v, a)
 }
 
-// zjDecodeL_int tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_int tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) {
+func zjDecode_L_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_int(l, v, a) {
+	if zjDecodeOrdered_L_int(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -14371,17 +14855,17 @@ func zjDecodeL_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_int(l, v, a)
+	zjDecodeFallback_L_int(l, v, a)
 }
 
-// zjDecodeOrderedL_int speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_int speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_int;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_int;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) bool {
+func zjDecodeOrdered_L_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -14445,7 +14929,7 @@ func zjDecodeOrderedL_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) bool {
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_int(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_int(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -14467,7 +14951,7 @@ func zjDecodeOrderedL_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) bool {
 	}
 }
 
-func zjDecodeOrderedFieldL_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int, k int) bool {
+func zjDecodeOrderedField_L_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_int[k])
@@ -14520,10 +15004,10 @@ func zjIsDeclaredKeyL_int(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_int is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_int is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) {
+func zjDecodeFallback_L_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -14559,12 +15043,15 @@ func zjDecodeFallbackL_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) {
 	}
 }
 
-// zjArenaL_int32 backs every pointer field of a decoded L_int32 with a single
+// zjArenaL_int32 holds first-use pointer cells for a decoded L_int32 in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_int32 struct {
+}
+
+func (a *zjArenaL_int32) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -14601,7 +15088,7 @@ func (v *L_int32) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_int32) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_int32{}
-	zjDecodeL_int32(&l, v, a)
+	zjDecode_L_int32(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -14611,20 +15098,20 @@ func (v *L_int32) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_int32) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_int32{}
-	zjDecodeL_int32(l, v, a)
+	zjDecode_L_int32(l, v, a)
 }
 
-// zjDecodeL_int32 tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_int32 tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) {
+func zjDecode_L_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_int32(l, v, a) {
+	if zjDecodeOrdered_L_int32(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -14635,17 +15122,17 @@ func zjDecodeL_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_int32(l, v, a)
+	zjDecodeFallback_L_int32(l, v, a)
 }
 
-// zjDecodeOrderedL_int32 speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_int32 speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_int32;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_int32;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) bool {
+func zjDecodeOrdered_L_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -14709,7 +15196,7 @@ func zjDecodeOrderedL_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) bo
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_int32(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_int32(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -14731,7 +15218,7 @@ func zjDecodeOrderedL_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) bo
 	}
 }
 
-func zjDecodeOrderedFieldL_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32, k int) bool {
+func zjDecodeOrderedField_L_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_int32[k])
@@ -14784,10 +15271,10 @@ func zjIsDeclaredKeyL_int32(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_int32 is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_int32 is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) {
+func zjDecodeFallback_L_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -14823,12 +15310,15 @@ func zjDecodeFallbackL_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) {
 	}
 }
 
-// zjArenaL_int32_oe backs every pointer field of a decoded L_int32_oe with a single
+// zjArenaL_int32_oe holds first-use pointer cells for a decoded L_int32_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_int32_oe struct {
+}
+
+func (a *zjArenaL_int32_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -14865,7 +15355,7 @@ func (v *L_int32_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_int32_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_int32_oe{}
-	zjDecodeL_int32_oe(&l, v, a)
+	zjDecode_L_int32_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -14875,20 +15365,20 @@ func (v *L_int32_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_int32_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_int32_oe{}
-	zjDecodeL_int32_oe(l, v, a)
+	zjDecode_L_int32_oe(l, v, a)
 }
 
-// zjDecodeL_int32_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_int32_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_int32_oe) {
+func zjDecode_L_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_int32_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_int32_oe(l, v, a) {
+	if zjDecodeOrdered_L_int32_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -14899,17 +15389,17 @@ func zjDecodeL_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_int32_oe) 
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_int32_oe(l, v, a)
+	zjDecodeFallback_L_int32_oe(l, v, a)
 }
 
-// zjDecodeOrderedL_int32_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_int32_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_int32_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_int32_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_int32_oe) bool {
+func zjDecodeOrdered_L_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_int32_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -14973,7 +15463,7 @@ func zjDecodeOrderedL_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_int
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_int32_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_int32_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -14995,7 +15485,7 @@ func zjDecodeOrderedL_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_int
 	}
 }
 
-func zjDecodeOrderedFieldL_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_int32_oe, k int) bool {
+func zjDecodeOrderedField_L_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_int32_oe, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_int32_oe[k])
@@ -15048,10 +15538,10 @@ func zjIsDeclaredKeyL_int32_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_int32_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_int32_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_int32_oe) {
+func zjDecodeFallback_L_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_int32_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -15087,13 +15577,18 @@ func zjDecodeFallbackL_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_in
 	}
 }
 
-// zjArenaL_int32_ptr backs every pointer field of a decoded L_int32_ptr with a single
+// zjArenaL_int32_ptr holds first-use pointer cells for a decoded L_int32_ptr in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_int32_ptr struct {
-	f0 int32
+	published0 bool
+	f0         int32
+}
+
+func (a *zjArenaL_int32_ptr) beginDecode() {
+	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -15134,7 +15629,7 @@ func (v *L_int32_ptr) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_int32_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_int32_ptr{}
-	zjDecodeL_int32_ptr(&l, v, a)
+	zjDecode_L_int32_ptr(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -15144,20 +15639,20 @@ func (v *L_int32_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_int32_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_int32_ptr{}
-	zjDecodeL_int32_ptr(l, v, a)
+	zjDecode_L_int32_ptr(l, v, a)
 }
 
-// zjDecodeL_int32_ptr tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_int32_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_int32_ptr) {
+func zjDecode_L_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_int32_ptr) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_int32_ptr(l, v, a) {
+	if zjDecodeOrdered_L_int32_ptr(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -15168,17 +15663,17 @@ func zjDecodeL_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_int32_pt
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_int32_ptr(l, v, a)
+	zjDecodeFallback_L_int32_ptr(l, v, a)
 }
 
-// zjDecodeOrderedL_int32_ptr speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_int32_ptr speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_int32_ptr;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_int32_ptr;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_int32_ptr) bool {
+func zjDecodeOrdered_L_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_int32_ptr) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.F != nil {
@@ -15246,7 +15741,7 @@ func zjDecodeOrderedL_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_i
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_int32_ptr(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_int32_ptr(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -15268,7 +15763,7 @@ func zjDecodeOrderedL_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_i
 	}
 }
 
-func zjDecodeOrderedFieldL_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_int32_ptr, k int) bool {
+func zjDecodeOrderedField_L_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_int32_ptr, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -15283,11 +15778,16 @@ func zjDecodeOrderedFieldL_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjAre
 	switch k {
 	case 0:
 		if v.F == nil {
-			a.f0 = int32(l.ReadInt32())
-			v.F = &a.f0
-		} else {
-			*v.F = int32(l.ReadInt32())
+			if a.published0 {
+				v.F = new(int32)
+			} else {
+				var zjZero int32
+				a.f0 = zjZero
+				v.F = &a.f0
+				a.published0 = true
+			}
 		}
+		*v.F = int32(l.ReadInt32())
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesL_int32_ptr[k])
@@ -15330,10 +15830,10 @@ func zjIsDeclaredKeyL_int32_ptr(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_int32_ptr is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_int32_ptr is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_int32_ptr) {
+func zjDecodeFallback_L_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_int32_ptr) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -15360,11 +15860,16 @@ func zjDecodeFallbackL_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_
 		switch string(key) {
 		case "f":
 			if v.F == nil {
-				a.f0 = int32(l.ReadInt32())
-				v.F = &a.f0
-			} else {
-				*v.F = int32(l.ReadInt32())
+				if a.published0 {
+					v.F = new(int32)
+				} else {
+					var zjZero int32
+					a.f0 = zjZero
+					v.F = &a.f0
+					a.published0 = true
+				}
 			}
+			*v.F = int32(l.ReadInt32())
 		default:
 			l.Skip()
 		}
@@ -15378,12 +15883,15 @@ func zjDecodeFallbackL_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_
 	}
 }
 
-// zjArenaL_int_oe backs every pointer field of a decoded L_int_oe with a single
+// zjArenaL_int_oe holds first-use pointer cells for a decoded L_int_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_int_oe struct {
+}
+
+func (a *zjArenaL_int_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -15420,7 +15928,7 @@ func (v *L_int_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_int_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_int_oe{}
-	zjDecodeL_int_oe(&l, v, a)
+	zjDecode_L_int_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -15430,20 +15938,20 @@ func (v *L_int_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_int_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_int_oe{}
-	zjDecodeL_int_oe(l, v, a)
+	zjDecode_L_int_oe(l, v, a)
 }
 
-// zjDecodeL_int_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_int_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe) {
+func zjDecode_L_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_int_oe(l, v, a) {
+	if zjDecodeOrdered_L_int_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -15454,17 +15962,17 @@ func zjDecodeL_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_int_oe(l, v, a)
+	zjDecodeFallback_L_int_oe(l, v, a)
 }
 
-// zjDecodeOrderedL_int_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_int_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_int_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_int_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe) bool {
+func zjDecodeOrdered_L_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -15528,7 +16036,7 @@ func zjDecodeOrderedL_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe)
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_int_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_int_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -15550,7 +16058,7 @@ func zjDecodeOrderedL_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe)
 	}
 }
 
-func zjDecodeOrderedFieldL_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe, k int) bool {
+func zjDecodeOrderedField_L_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_int_oe[k])
@@ -15603,10 +16111,10 @@ func zjIsDeclaredKeyL_int_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_int_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_int_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe) {
+func zjDecodeFallback_L_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -15642,13 +16150,18 @@ func zjDecodeFallbackL_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe
 	}
 }
 
-// zjArenaL_int_ptr backs every pointer field of a decoded L_int_ptr with a single
+// zjArenaL_int_ptr holds first-use pointer cells for a decoded L_int_ptr in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_int_ptr struct {
-	f0 int
+	published0 bool
+	f0         int
+}
+
+func (a *zjArenaL_int_ptr) beginDecode() {
+	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -15689,7 +16202,7 @@ func (v *L_int_ptr) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_int_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_int_ptr{}
-	zjDecodeL_int_ptr(&l, v, a)
+	zjDecode_L_int_ptr(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -15699,20 +16212,20 @@ func (v *L_int_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_int_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_int_ptr{}
-	zjDecodeL_int_ptr(l, v, a)
+	zjDecode_L_int_ptr(l, v, a)
 }
 
-// zjDecodeL_int_ptr tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_int_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_ptr) {
+func zjDecode_L_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_ptr) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_int_ptr(l, v, a) {
+	if zjDecodeOrdered_L_int_ptr(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -15723,17 +16236,17 @@ func zjDecodeL_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_ptr) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_int_ptr(l, v, a)
+	zjDecodeFallback_L_int_ptr(l, v, a)
 }
 
-// zjDecodeOrderedL_int_ptr speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_int_ptr speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_int_ptr;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_int_ptr;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_ptr) bool {
+func zjDecodeOrdered_L_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_ptr) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.F != nil {
@@ -15801,7 +16314,7 @@ func zjDecodeOrderedL_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_p
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_int_ptr(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_int_ptr(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -15823,7 +16336,7 @@ func zjDecodeOrderedL_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_p
 	}
 }
 
-func zjDecodeOrderedFieldL_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_ptr, k int) bool {
+func zjDecodeOrderedField_L_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_ptr, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -15838,11 +16351,16 @@ func zjDecodeOrderedFieldL_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_
 	switch k {
 	case 0:
 		if v.F == nil {
-			a.f0 = int(l.ReadInt())
-			v.F = &a.f0
-		} else {
-			*v.F = int(l.ReadInt())
+			if a.published0 {
+				v.F = new(int)
+			} else {
+				var zjZero int
+				a.f0 = zjZero
+				v.F = &a.f0
+				a.published0 = true
+			}
 		}
+		*v.F = int(l.ReadInt())
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesL_int_ptr[k])
@@ -15885,10 +16403,10 @@ func zjIsDeclaredKeyL_int_ptr(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_int_ptr is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_int_ptr is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_ptr) {
+func zjDecodeFallback_L_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_ptr) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -15915,11 +16433,16 @@ func zjDecodeFallbackL_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_
 		switch string(key) {
 		case "f":
 			if v.F == nil {
-				a.f0 = int(l.ReadInt())
-				v.F = &a.f0
-			} else {
-				*v.F = int(l.ReadInt())
+				if a.published0 {
+					v.F = new(int)
+				} else {
+					var zjZero int
+					a.f0 = zjZero
+					v.F = &a.f0
+					a.published0 = true
+				}
 			}
+			*v.F = int(l.ReadInt())
 		default:
 			l.Skip()
 		}
@@ -15933,12 +16456,15 @@ func zjDecodeFallbackL_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_
 	}
 }
 
-// zjArenaL_marshaler backs every pointer field of a decoded L_marshaler with a single
+// zjArenaL_marshaler holds first-use pointer cells for a decoded L_marshaler in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_marshaler struct {
+}
+
+func (a *zjArenaL_marshaler) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -15982,7 +16508,7 @@ func (v *L_marshaler) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_marshaler) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_marshaler{}
-	zjDecodeL_marshaler(&l, v, a)
+	zjDecode_L_marshaler(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -15992,25 +16518,25 @@ func (v *L_marshaler) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_marshaler) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_marshaler{}
-	zjDecodeL_marshaler(l, v, a)
+	zjDecode_L_marshaler(l, v, a)
 }
 
-// zjDecodeL_marshaler tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_marshaler tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_marshaler(l *zerojson.Lexer, v *L_marshaler, a *zjArenaL_marshaler) {
+func zjDecode_L_marshaler(l *zerojson.Lexer, v *L_marshaler, a *zjArenaL_marshaler) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	zjDecodeFallbackL_marshaler(l, v, a)
+	zjDecodeFallback_L_marshaler(l, v, a)
 }
 
-// zjDecodeFallbackL_marshaler is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_marshaler is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_marshaler(l *zerojson.Lexer, v *L_marshaler, a *zjArenaL_marshaler) {
+func zjDecodeFallback_L_marshaler(l *zerojson.Lexer, v *L_marshaler, a *zjArenaL_marshaler) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -16056,12 +16582,15 @@ func zjDecodeFallbackL_marshaler(l *zerojson.Lexer, v *L_marshaler, a *zjArenaL_
 	}
 }
 
-// zjArenaL_marshaler_oe backs every pointer field of a decoded L_marshaler_oe with a single
+// zjArenaL_marshaler_oe holds first-use pointer cells for a decoded L_marshaler_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_marshaler_oe struct {
+}
+
+func (a *zjArenaL_marshaler_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -16105,7 +16634,7 @@ func (v *L_marshaler_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_marshaler_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_marshaler_oe{}
-	zjDecodeL_marshaler_oe(&l, v, a)
+	zjDecode_L_marshaler_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -16115,25 +16644,25 @@ func (v *L_marshaler_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_marshaler_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_marshaler_oe{}
-	zjDecodeL_marshaler_oe(l, v, a)
+	zjDecode_L_marshaler_oe(l, v, a)
 }
 
-// zjDecodeL_marshaler_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_marshaler_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_marshaler_oe(l *zerojson.Lexer, v *L_marshaler_oe, a *zjArenaL_marshaler_oe) {
+func zjDecode_L_marshaler_oe(l *zerojson.Lexer, v *L_marshaler_oe, a *zjArenaL_marshaler_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	zjDecodeFallbackL_marshaler_oe(l, v, a)
+	zjDecodeFallback_L_marshaler_oe(l, v, a)
 }
 
-// zjDecodeFallbackL_marshaler_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_marshaler_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_marshaler_oe(l *zerojson.Lexer, v *L_marshaler_oe, a *zjArenaL_marshaler_oe) {
+func zjDecodeFallback_L_marshaler_oe(l *zerojson.Lexer, v *L_marshaler_oe, a *zjArenaL_marshaler_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -16179,13 +16708,18 @@ func zjDecodeFallbackL_marshaler_oe(l *zerojson.Lexer, v *L_marshaler_oe, a *zjA
 	}
 }
 
-// zjArenaL_marshaler_ptr backs every pointer field of a decoded L_marshaler_ptr with a single
+// zjArenaL_marshaler_ptr holds first-use pointer cells for a decoded L_marshaler_ptr in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_marshaler_ptr struct {
-	f0 Tags
+	published0 bool
+	f0         Tags
+}
+
+func (a *zjArenaL_marshaler_ptr) beginDecode() {
+	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -16233,7 +16767,7 @@ func (v *L_marshaler_ptr) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_marshaler_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_marshaler_ptr{}
-	zjDecodeL_marshaler_ptr(&l, v, a)
+	zjDecode_L_marshaler_ptr(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -16243,25 +16777,25 @@ func (v *L_marshaler_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_marshaler_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_marshaler_ptr{}
-	zjDecodeL_marshaler_ptr(l, v, a)
+	zjDecode_L_marshaler_ptr(l, v, a)
 }
 
-// zjDecodeL_marshaler_ptr tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_marshaler_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_marshaler_ptr(l *zerojson.Lexer, v *L_marshaler_ptr, a *zjArenaL_marshaler_ptr) {
+func zjDecode_L_marshaler_ptr(l *zerojson.Lexer, v *L_marshaler_ptr, a *zjArenaL_marshaler_ptr) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	zjDecodeFallbackL_marshaler_ptr(l, v, a)
+	zjDecodeFallback_L_marshaler_ptr(l, v, a)
 }
 
-// zjDecodeFallbackL_marshaler_ptr is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_marshaler_ptr is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_marshaler_ptr(l *zerojson.Lexer, v *L_marshaler_ptr, a *zjArenaL_marshaler_ptr) {
+func zjDecodeFallback_L_marshaler_ptr(l *zerojson.Lexer, v *L_marshaler_ptr, a *zjArenaL_marshaler_ptr) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -16288,9 +16822,14 @@ func zjDecodeFallbackL_marshaler_ptr(l *zerojson.Lexer, v *L_marshaler_ptr, a *z
 		switch string(key) {
 		case "f":
 			if v.F == nil {
-				var zjZero Tags
-				a.f0 = zjZero
-				v.F = &a.f0
+				if a.published0 {
+					v.F = new(Tags)
+				} else {
+					var zjZero Tags
+					a.f0 = zjZero
+					v.F = &a.f0
+					a.published0 = true
+				}
 			}
 			if raw := l.RawValue(); l.Err() == nil {
 				if err := v.F.UnmarshalJSON(raw); err != nil {
@@ -16310,12 +16849,15 @@ func zjDecodeFallbackL_marshaler_ptr(l *zerojson.Lexer, v *L_marshaler_ptr, a *z
 	}
 }
 
-// zjArenaL_quotedint backs every pointer field of a decoded L_quotedint with a single
+// zjArenaL_quotedint holds first-use pointer cells for a decoded L_quotedint in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_quotedint struct {
+}
+
+func (a *zjArenaL_quotedint) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -16352,7 +16894,7 @@ func (v *L_quotedint) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_quotedint) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_quotedint{}
-	zjDecodeL_quotedint(&l, v, a)
+	zjDecode_L_quotedint(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -16362,20 +16904,20 @@ func (v *L_quotedint) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_quotedint) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_quotedint{}
-	zjDecodeL_quotedint(l, v, a)
+	zjDecode_L_quotedint(l, v, a)
 }
 
-// zjDecodeL_quotedint tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_quotedint tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_quotedint) {
+func zjDecode_L_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_quotedint) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_quotedint(l, v, a) {
+	if zjDecodeOrdered_L_quotedint(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -16386,17 +16928,17 @@ func zjDecodeL_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_quotedin
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_quotedint(l, v, a)
+	zjDecodeFallback_L_quotedint(l, v, a)
 }
 
-// zjDecodeOrderedL_quotedint speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_quotedint speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_quotedint;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_quotedint;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_quotedint) bool {
+func zjDecodeOrdered_L_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_quotedint) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -16460,7 +17002,7 @@ func zjDecodeOrderedL_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_q
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_quotedint(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_quotedint(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -16482,7 +17024,7 @@ func zjDecodeOrderedL_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_q
 	}
 }
 
-func zjDecodeOrderedFieldL_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_quotedint, k int) bool {
+func zjDecodeOrderedField_L_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_quotedint, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_quotedint[k])
@@ -16535,10 +17077,10 @@ func zjIsDeclaredKeyL_quotedint(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_quotedint is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_quotedint is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_quotedint) {
+func zjDecodeFallback_L_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_quotedint) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -16574,12 +17116,15 @@ func zjDecodeFallbackL_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_
 	}
 }
 
-// zjArenaL_quotedint_oe backs every pointer field of a decoded L_quotedint_oe with a single
+// zjArenaL_quotedint_oe holds first-use pointer cells for a decoded L_quotedint_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_quotedint_oe struct {
+}
+
+func (a *zjArenaL_quotedint_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -16616,7 +17161,7 @@ func (v *L_quotedint_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_quotedint_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_quotedint_oe{}
-	zjDecodeL_quotedint_oe(&l, v, a)
+	zjDecode_L_quotedint_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -16626,20 +17171,20 @@ func (v *L_quotedint_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_quotedint_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_quotedint_oe{}
-	zjDecodeL_quotedint_oe(l, v, a)
+	zjDecode_L_quotedint_oe(l, v, a)
 }
 
-// zjDecodeL_quotedint_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_quotedint_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjArenaL_quotedint_oe) {
+func zjDecode_L_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjArenaL_quotedint_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_quotedint_oe(l, v, a) {
+	if zjDecodeOrdered_L_quotedint_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -16650,17 +17195,17 @@ func zjDecodeL_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjArenaL_qu
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_quotedint_oe(l, v, a)
+	zjDecodeFallback_L_quotedint_oe(l, v, a)
 }
 
-// zjDecodeOrderedL_quotedint_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_quotedint_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_quotedint_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_quotedint_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjArenaL_quotedint_oe) bool {
+func zjDecodeOrdered_L_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjArenaL_quotedint_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -16724,7 +17269,7 @@ func zjDecodeOrderedL_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjAr
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_quotedint_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_quotedint_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -16746,7 +17291,7 @@ func zjDecodeOrderedL_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjAr
 	}
 }
 
-func zjDecodeOrderedFieldL_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjArenaL_quotedint_oe, k int) bool {
+func zjDecodeOrderedField_L_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjArenaL_quotedint_oe, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_quotedint_oe[k])
@@ -16799,10 +17344,10 @@ func zjIsDeclaredKeyL_quotedint_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_quotedint_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_quotedint_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjArenaL_quotedint_oe) {
+func zjDecodeFallback_L_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjArenaL_quotedint_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -16838,13 +17383,18 @@ func zjDecodeFallbackL_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjA
 	}
 }
 
-// zjArenaL_quotedint_ptr backs every pointer field of a decoded L_quotedint_ptr with a single
+// zjArenaL_quotedint_ptr holds first-use pointer cells for a decoded L_quotedint_ptr in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_quotedint_ptr struct {
-	f0 StrInt64
+	published0 bool
+	f0         StrInt64
+}
+
+func (a *zjArenaL_quotedint_ptr) beginDecode() {
+	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -16885,7 +17435,7 @@ func (v *L_quotedint_ptr) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_quotedint_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_quotedint_ptr{}
-	zjDecodeL_quotedint_ptr(&l, v, a)
+	zjDecode_L_quotedint_ptr(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -16895,20 +17445,20 @@ func (v *L_quotedint_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_quotedint_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_quotedint_ptr{}
-	zjDecodeL_quotedint_ptr(l, v, a)
+	zjDecode_L_quotedint_ptr(l, v, a)
 }
 
-// zjDecodeL_quotedint_ptr tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_quotedint_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *zjArenaL_quotedint_ptr) {
+func zjDecode_L_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *zjArenaL_quotedint_ptr) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_quotedint_ptr(l, v, a) {
+	if zjDecodeOrdered_L_quotedint_ptr(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -16919,17 +17469,17 @@ func zjDecodeL_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *zjArenaL_
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_quotedint_ptr(l, v, a)
+	zjDecodeFallback_L_quotedint_ptr(l, v, a)
 }
 
-// zjDecodeOrderedL_quotedint_ptr speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_quotedint_ptr speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_quotedint_ptr;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_quotedint_ptr;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *zjArenaL_quotedint_ptr) bool {
+func zjDecodeOrdered_L_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *zjArenaL_quotedint_ptr) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.F != nil {
@@ -16997,7 +17547,7 @@ func zjDecodeOrderedL_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *zj
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_quotedint_ptr(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_quotedint_ptr(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -17019,7 +17569,7 @@ func zjDecodeOrderedL_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *zj
 	}
 }
 
-func zjDecodeOrderedFieldL_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *zjArenaL_quotedint_ptr, k int) bool {
+func zjDecodeOrderedField_L_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *zjArenaL_quotedint_ptr, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -17034,11 +17584,16 @@ func zjDecodeOrderedFieldL_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, 
 	switch k {
 	case 0:
 		if v.F == nil {
-			a.f0 = StrInt64(l.ReadQuotedOrBareInt64())
-			v.F = &a.f0
-		} else {
-			*v.F = StrInt64(l.ReadQuotedOrBareInt64())
+			if a.published0 {
+				v.F = new(StrInt64)
+			} else {
+				var zjZero StrInt64
+				a.f0 = zjZero
+				v.F = &a.f0
+				a.published0 = true
+			}
 		}
+		*v.F = StrInt64(l.ReadQuotedOrBareInt64())
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesL_quotedint_ptr[k])
@@ -17081,10 +17636,10 @@ func zjIsDeclaredKeyL_quotedint_ptr(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_quotedint_ptr is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_quotedint_ptr is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *zjArenaL_quotedint_ptr) {
+func zjDecodeFallback_L_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *zjArenaL_quotedint_ptr) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -17111,11 +17666,16 @@ func zjDecodeFallbackL_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *z
 		switch string(key) {
 		case "f":
 			if v.F == nil {
-				a.f0 = StrInt64(l.ReadQuotedOrBareInt64())
-				v.F = &a.f0
-			} else {
-				*v.F = StrInt64(l.ReadQuotedOrBareInt64())
+				if a.published0 {
+					v.F = new(StrInt64)
+				} else {
+					var zjZero StrInt64
+					a.f0 = zjZero
+					v.F = &a.f0
+					a.published0 = true
+				}
 			}
+			*v.F = StrInt64(l.ReadQuotedOrBareInt64())
 		default:
 			l.Skip()
 		}
@@ -17129,12 +17689,15 @@ func zjDecodeFallbackL_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *z
 	}
 }
 
-// zjArenaL_string backs every pointer field of a decoded L_string with a single
+// zjArenaL_string holds first-use pointer cells for a decoded L_string in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_string struct {
+}
+
+func (a *zjArenaL_string) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -17171,7 +17734,7 @@ func (v *L_string) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_string) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_string{}
-	zjDecodeL_string(&l, v, a)
+	zjDecode_L_string(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -17181,20 +17744,20 @@ func (v *L_string) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_string) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_string{}
-	zjDecodeL_string(l, v, a)
+	zjDecode_L_string(l, v, a)
 }
 
-// zjDecodeL_string tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_string tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string) {
+func zjDecode_L_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_string(l, v, a) {
+	if zjDecodeOrdered_L_string(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -17205,17 +17768,17 @@ func zjDecodeL_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_string(l, v, a)
+	zjDecodeFallback_L_string(l, v, a)
 }
 
-// zjDecodeOrderedL_string speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_string speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_string;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_string;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string) bool {
+func zjDecodeOrdered_L_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -17279,7 +17842,7 @@ func zjDecodeOrderedL_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string)
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_string(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_string(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -17301,7 +17864,7 @@ func zjDecodeOrderedL_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string)
 	}
 }
 
-func zjDecodeOrderedFieldL_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string, k int) bool {
+func zjDecodeOrderedField_L_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_string[k])
@@ -17354,10 +17917,10 @@ func zjIsDeclaredKeyL_string(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_string is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_string is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string) {
+func zjDecodeFallback_L_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -17393,12 +17956,15 @@ func zjDecodeFallbackL_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string
 	}
 }
 
-// zjArenaL_string_oe backs every pointer field of a decoded L_string_oe with a single
+// zjArenaL_string_oe holds first-use pointer cells for a decoded L_string_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_string_oe struct {
+}
+
+func (a *zjArenaL_string_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -17435,7 +18001,7 @@ func (v *L_string_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_string_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_string_oe{}
-	zjDecodeL_string_oe(&l, v, a)
+	zjDecode_L_string_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -17445,20 +18011,20 @@ func (v *L_string_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_string_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_string_oe{}
-	zjDecodeL_string_oe(l, v, a)
+	zjDecode_L_string_oe(l, v, a)
 }
 
-// zjDecodeL_string_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_string_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_string_oe) {
+func zjDecode_L_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_string_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_string_oe(l, v, a) {
+	if zjDecodeOrdered_L_string_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -17469,17 +18035,17 @@ func zjDecodeL_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_string_o
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_string_oe(l, v, a)
+	zjDecodeFallback_L_string_oe(l, v, a)
 }
 
-// zjDecodeOrderedL_string_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_string_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_string_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_string_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_string_oe) bool {
+func zjDecodeOrdered_L_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_string_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -17543,7 +18109,7 @@ func zjDecodeOrderedL_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_s
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_string_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_string_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -17565,7 +18131,7 @@ func zjDecodeOrderedL_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_s
 	}
 }
 
-func zjDecodeOrderedFieldL_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_string_oe, k int) bool {
+func zjDecodeOrderedField_L_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_string_oe, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_string_oe[k])
@@ -17618,10 +18184,10 @@ func zjIsDeclaredKeyL_string_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_string_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_string_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_string_oe) {
+func zjDecodeFallback_L_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_string_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -17657,13 +18223,18 @@ func zjDecodeFallbackL_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_
 	}
 }
 
-// zjArenaL_string_ptr backs every pointer field of a decoded L_string_ptr with a single
+// zjArenaL_string_ptr holds first-use pointer cells for a decoded L_string_ptr in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_string_ptr struct {
-	f0 string
+	published0 bool
+	f0         string
+}
+
+func (a *zjArenaL_string_ptr) beginDecode() {
+	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -17704,7 +18275,7 @@ func (v *L_string_ptr) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_string_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_string_ptr{}
-	zjDecodeL_string_ptr(&l, v, a)
+	zjDecode_L_string_ptr(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -17714,20 +18285,20 @@ func (v *L_string_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_string_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_string_ptr{}
-	zjDecodeL_string_ptr(l, v, a)
+	zjDecode_L_string_ptr(l, v, a)
 }
 
-// zjDecodeL_string_ptr tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_string_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArenaL_string_ptr) {
+func zjDecode_L_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArenaL_string_ptr) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_string_ptr(l, v, a) {
+	if zjDecodeOrdered_L_string_ptr(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -17738,17 +18309,17 @@ func zjDecodeL_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArenaL_string
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_string_ptr(l, v, a)
+	zjDecodeFallback_L_string_ptr(l, v, a)
 }
 
-// zjDecodeOrderedL_string_ptr speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_string_ptr speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_string_ptr;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_string_ptr;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArenaL_string_ptr) bool {
+func zjDecodeOrdered_L_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArenaL_string_ptr) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.F != nil {
@@ -17816,7 +18387,7 @@ func zjDecodeOrderedL_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArenaL
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_string_ptr(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_string_ptr(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -17838,7 +18409,7 @@ func zjDecodeOrderedL_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArenaL
 	}
 }
 
-func zjDecodeOrderedFieldL_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArenaL_string_ptr, k int) bool {
+func zjDecodeOrderedField_L_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArenaL_string_ptr, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -17853,11 +18424,16 @@ func zjDecodeOrderedFieldL_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjA
 	switch k {
 	case 0:
 		if v.F == nil {
-			a.f0 = l.ReadString()
-			v.F = &a.f0
-		} else {
-			*v.F = l.ReadString()
+			if a.published0 {
+				v.F = new(string)
+			} else {
+				var zjZero string
+				a.f0 = zjZero
+				v.F = &a.f0
+				a.published0 = true
+			}
 		}
+		*v.F = l.ReadString()
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesL_string_ptr[k])
@@ -17900,10 +18476,10 @@ func zjIsDeclaredKeyL_string_ptr(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_string_ptr is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_string_ptr is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArenaL_string_ptr) {
+func zjDecodeFallback_L_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArenaL_string_ptr) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -17930,11 +18506,16 @@ func zjDecodeFallbackL_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArena
 		switch string(key) {
 		case "f":
 			if v.F == nil {
-				a.f0 = l.ReadString()
-				v.F = &a.f0
-			} else {
-				*v.F = l.ReadString()
+				if a.published0 {
+					v.F = new(string)
+				} else {
+					var zjZero string
+					a.f0 = zjZero
+					v.F = &a.f0
+					a.published0 = true
+				}
 			}
+			*v.F = l.ReadString()
 		default:
 			l.Skip()
 		}
@@ -17948,12 +18529,15 @@ func zjDecodeFallbackL_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArena
 	}
 }
 
-// zjArenaL_text backs every pointer field of a decoded L_text with a single
+// zjArenaL_text holds first-use pointer cells for a decoded L_text in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_text struct {
+}
+
+func (a *zjArenaL_text) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -17994,7 +18578,7 @@ func (v *L_text) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_text) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_text{}
-	zjDecodeL_text(&l, v, a)
+	zjDecode_L_text(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -18004,25 +18588,25 @@ func (v *L_text) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_text) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_text{}
-	zjDecodeL_text(l, v, a)
+	zjDecode_L_text(l, v, a)
 }
 
-// zjDecodeL_text tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_text tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_text(l *zerojson.Lexer, v *L_text, a *zjArenaL_text) {
+func zjDecode_L_text(l *zerojson.Lexer, v *L_text, a *zjArenaL_text) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	zjDecodeFallbackL_text(l, v, a)
+	zjDecodeFallback_L_text(l, v, a)
 }
 
-// zjDecodeFallbackL_text is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_text is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_text(l *zerojson.Lexer, v *L_text, a *zjArenaL_text) {
+func zjDecodeFallback_L_text(l *zerojson.Lexer, v *L_text, a *zjArenaL_text) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -18062,12 +18646,15 @@ func zjDecodeFallbackL_text(l *zerojson.Lexer, v *L_text, a *zjArenaL_text) {
 	}
 }
 
-// zjArenaL_text_oe backs every pointer field of a decoded L_text_oe with a single
+// zjArenaL_text_oe holds first-use pointer cells for a decoded L_text_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_text_oe struct {
+}
+
+func (a *zjArenaL_text_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -18108,7 +18695,7 @@ func (v *L_text_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_text_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_text_oe{}
-	zjDecodeL_text_oe(&l, v, a)
+	zjDecode_L_text_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -18118,25 +18705,25 @@ func (v *L_text_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_text_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_text_oe{}
-	zjDecodeL_text_oe(l, v, a)
+	zjDecode_L_text_oe(l, v, a)
 }
 
-// zjDecodeL_text_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_text_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_text_oe(l *zerojson.Lexer, v *L_text_oe, a *zjArenaL_text_oe) {
+func zjDecode_L_text_oe(l *zerojson.Lexer, v *L_text_oe, a *zjArenaL_text_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	zjDecodeFallbackL_text_oe(l, v, a)
+	zjDecodeFallback_L_text_oe(l, v, a)
 }
 
-// zjDecodeFallbackL_text_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_text_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_text_oe(l *zerojson.Lexer, v *L_text_oe, a *zjArenaL_text_oe) {
+func zjDecodeFallback_L_text_oe(l *zerojson.Lexer, v *L_text_oe, a *zjArenaL_text_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -18176,13 +18763,18 @@ func zjDecodeFallbackL_text_oe(l *zerojson.Lexer, v *L_text_oe, a *zjArenaL_text
 	}
 }
 
-// zjArenaL_text_ptr backs every pointer field of a decoded L_text_ptr with a single
+// zjArenaL_text_ptr holds first-use pointer cells for a decoded L_text_ptr in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_text_ptr struct {
-	f0 YMD
+	published0 bool
+	f0         YMD
+}
+
+func (a *zjArenaL_text_ptr) beginDecode() {
+	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -18227,7 +18819,7 @@ func (v *L_text_ptr) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_text_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_text_ptr{}
-	zjDecodeL_text_ptr(&l, v, a)
+	zjDecode_L_text_ptr(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -18237,25 +18829,25 @@ func (v *L_text_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_text_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_text_ptr{}
-	zjDecodeL_text_ptr(l, v, a)
+	zjDecode_L_text_ptr(l, v, a)
 }
 
-// zjDecodeL_text_ptr tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_text_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_text_ptr(l *zerojson.Lexer, v *L_text_ptr, a *zjArenaL_text_ptr) {
+func zjDecode_L_text_ptr(l *zerojson.Lexer, v *L_text_ptr, a *zjArenaL_text_ptr) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	zjDecodeFallbackL_text_ptr(l, v, a)
+	zjDecodeFallback_L_text_ptr(l, v, a)
 }
 
-// zjDecodeFallbackL_text_ptr is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_text_ptr is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_text_ptr(l *zerojson.Lexer, v *L_text_ptr, a *zjArenaL_text_ptr) {
+func zjDecodeFallback_L_text_ptr(l *zerojson.Lexer, v *L_text_ptr, a *zjArenaL_text_ptr) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -18282,9 +18874,14 @@ func zjDecodeFallbackL_text_ptr(l *zerojson.Lexer, v *L_text_ptr, a *zjArenaL_te
 		switch string(key) {
 		case "f":
 			if v.F == nil {
-				var zjZero YMD
-				a.f0 = zjZero
-				v.F = &a.f0
+				if a.published0 {
+					v.F = new(YMD)
+				} else {
+					var zjZero YMD
+					a.f0 = zjZero
+					v.F = &a.f0
+					a.published0 = true
+				}
 			}
 			if txt := l.ReadTextBytes(); l.Err() == nil {
 				if err := v.F.UnmarshalText(txt); err != nil {
@@ -18304,12 +18901,15 @@ func zjDecodeFallbackL_text_ptr(l *zerojson.Lexer, v *L_text_ptr, a *zjArenaL_te
 	}
 }
 
-// zjArenaL_time backs every pointer field of a decoded L_time with a single
+// zjArenaL_time holds first-use pointer cells for a decoded L_time in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_time struct {
+}
+
+func (a *zjArenaL_time) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -18350,7 +18950,7 @@ func (v *L_time) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_time) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_time{}
-	zjDecodeL_time(&l, v, a)
+	zjDecode_L_time(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -18360,20 +18960,20 @@ func (v *L_time) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_time) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_time{}
-	zjDecodeL_time(l, v, a)
+	zjDecode_L_time(l, v, a)
 }
 
-// zjDecodeL_time tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_time tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) {
+func zjDecode_L_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_time(l, v, a) {
+	if zjDecodeOrdered_L_time(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -18384,17 +18984,17 @@ func zjDecodeL_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_time(l, v, a)
+	zjDecodeFallback_L_time(l, v, a)
 }
 
-// zjDecodeOrderedL_time speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_time speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_time;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_time;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) bool {
+func zjDecodeOrdered_L_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -18458,7 +19058,7 @@ func zjDecodeOrderedL_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) bool 
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_time(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_time(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -18480,7 +19080,7 @@ func zjDecodeOrderedL_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) bool 
 	}
 }
 
-func zjDecodeOrderedFieldL_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time, k int) bool {
+func zjDecodeOrderedField_L_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_time[k])
@@ -18533,10 +19133,10 @@ func zjIsDeclaredKeyL_time(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_time is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_time is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) {
+func zjDecodeFallback_L_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -18572,12 +19172,15 @@ func zjDecodeFallbackL_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) {
 	}
 }
 
-// zjArenaL_time_oe backs every pointer field of a decoded L_time_oe with a single
+// zjArenaL_time_oe holds first-use pointer cells for a decoded L_time_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_time_oe struct {
+}
+
+func (a *zjArenaL_time_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -18618,7 +19221,7 @@ func (v *L_time_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_time_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_time_oe{}
-	zjDecodeL_time_oe(&l, v, a)
+	zjDecode_L_time_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -18628,20 +19231,20 @@ func (v *L_time_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_time_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_time_oe{}
-	zjDecodeL_time_oe(l, v, a)
+	zjDecode_L_time_oe(l, v, a)
 }
 
-// zjDecodeL_time_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_time_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time_oe) {
+func zjDecode_L_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_time_oe(l, v, a) {
+	if zjDecodeOrdered_L_time_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -18652,17 +19255,17 @@ func zjDecodeL_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time_oe) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_time_oe(l, v, a)
+	zjDecodeFallback_L_time_oe(l, v, a)
 }
 
-// zjDecodeOrderedL_time_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_time_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_time_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_time_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time_oe) bool {
+func zjDecodeOrdered_L_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -18726,7 +19329,7 @@ func zjDecodeOrderedL_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time_
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_time_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_time_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -18748,7 +19351,7 @@ func zjDecodeOrderedL_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time_
 	}
 }
 
-func zjDecodeOrderedFieldL_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time_oe, k int) bool {
+func zjDecodeOrderedField_L_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time_oe, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_time_oe[k])
@@ -18801,10 +19404,10 @@ func zjIsDeclaredKeyL_time_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_time_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_time_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time_oe) {
+func zjDecodeFallback_L_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -18840,13 +19443,18 @@ func zjDecodeFallbackL_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time
 	}
 }
 
-// zjArenaL_time_ptr backs every pointer field of a decoded L_time_ptr with a single
+// zjArenaL_time_ptr holds first-use pointer cells for a decoded L_time_ptr in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_time_ptr struct {
-	f0 time.Time
+	published0 bool
+	f0         time.Time
+}
+
+func (a *zjArenaL_time_ptr) beginDecode() {
+	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -18891,7 +19499,7 @@ func (v *L_time_ptr) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_time_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_time_ptr{}
-	zjDecodeL_time_ptr(&l, v, a)
+	zjDecode_L_time_ptr(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -18901,20 +19509,20 @@ func (v *L_time_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_time_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_time_ptr{}
-	zjDecodeL_time_ptr(l, v, a)
+	zjDecode_L_time_ptr(l, v, a)
 }
 
-// zjDecodeL_time_ptr tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_time_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_time_ptr) {
+func zjDecode_L_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_time_ptr) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_time_ptr(l, v, a) {
+	if zjDecodeOrdered_L_time_ptr(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -18925,17 +19533,17 @@ func zjDecodeL_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_time_ptr) 
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_time_ptr(l, v, a)
+	zjDecodeFallback_L_time_ptr(l, v, a)
 }
 
-// zjDecodeOrderedL_time_ptr speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_time_ptr speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_time_ptr;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_time_ptr;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_time_ptr) bool {
+func zjDecodeOrdered_L_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_time_ptr) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.F != nil {
@@ -19003,7 +19611,7 @@ func zjDecodeOrderedL_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_tim
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_time_ptr(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_time_ptr(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -19025,7 +19633,7 @@ func zjDecodeOrderedL_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_tim
 	}
 }
 
-func zjDecodeOrderedFieldL_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_time_ptr, k int) bool {
+func zjDecodeOrderedField_L_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_time_ptr, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -19040,11 +19648,16 @@ func zjDecodeOrderedFieldL_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArena
 	switch k {
 	case 0:
 		if v.F == nil {
-			a.f0 = l.ReadTime()
-			v.F = &a.f0
-		} else {
-			*v.F = l.ReadTime()
+			if a.published0 {
+				v.F = new(time.Time)
+			} else {
+				var zjZero time.Time
+				a.f0 = zjZero
+				v.F = &a.f0
+				a.published0 = true
+			}
 		}
+		*v.F = l.ReadTime()
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesL_time_ptr[k])
@@ -19087,10 +19700,10 @@ func zjIsDeclaredKeyL_time_ptr(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_time_ptr is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_time_ptr is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_time_ptr) {
+func zjDecodeFallback_L_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_time_ptr) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -19117,11 +19730,16 @@ func zjDecodeFallbackL_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_ti
 		switch string(key) {
 		case "f":
 			if v.F == nil {
-				a.f0 = l.ReadTime()
-				v.F = &a.f0
-			} else {
-				*v.F = l.ReadTime()
+				if a.published0 {
+					v.F = new(time.Time)
+				} else {
+					var zjZero time.Time
+					a.f0 = zjZero
+					v.F = &a.f0
+					a.published0 = true
+				}
 			}
+			*v.F = l.ReadTime()
 		default:
 			l.Skip()
 		}
@@ -19135,12 +19753,15 @@ func zjDecodeFallbackL_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_ti
 	}
 }
 
-// zjArenaL_uint16 backs every pointer field of a decoded L_uint16 with a single
+// zjArenaL_uint16 holds first-use pointer cells for a decoded L_uint16 in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_uint16 struct {
+}
+
+func (a *zjArenaL_uint16) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -19177,7 +19798,7 @@ func (v *L_uint16) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_uint16) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_uint16{}
-	zjDecodeL_uint16(&l, v, a)
+	zjDecode_L_uint16(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -19187,20 +19808,20 @@ func (v *L_uint16) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_uint16) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_uint16{}
-	zjDecodeL_uint16(l, v, a)
+	zjDecode_L_uint16(l, v, a)
 }
 
-// zjDecodeL_uint16 tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_uint16 tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16) {
+func zjDecode_L_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_uint16(l, v, a) {
+	if zjDecodeOrdered_L_uint16(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -19211,17 +19832,17 @@ func zjDecodeL_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_uint16(l, v, a)
+	zjDecodeFallback_L_uint16(l, v, a)
 }
 
-// zjDecodeOrderedL_uint16 speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_uint16 speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_uint16;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_uint16;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16) bool {
+func zjDecodeOrdered_L_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -19285,7 +19906,7 @@ func zjDecodeOrderedL_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16)
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_uint16(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_uint16(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -19307,7 +19928,7 @@ func zjDecodeOrderedL_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16)
 	}
 }
 
-func zjDecodeOrderedFieldL_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16, k int) bool {
+func zjDecodeOrderedField_L_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_uint16[k])
@@ -19360,10 +19981,10 @@ func zjIsDeclaredKeyL_uint16(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_uint16 is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_uint16 is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16) {
+func zjDecodeFallback_L_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -19399,12 +20020,15 @@ func zjDecodeFallbackL_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16
 	}
 }
 
-// zjArenaL_uint16_oe backs every pointer field of a decoded L_uint16_oe with a single
+// zjArenaL_uint16_oe holds first-use pointer cells for a decoded L_uint16_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_uint16_oe struct {
+}
+
+func (a *zjArenaL_uint16_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -19441,7 +20065,7 @@ func (v *L_uint16_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_uint16_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_uint16_oe{}
-	zjDecodeL_uint16_oe(&l, v, a)
+	zjDecode_L_uint16_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -19451,20 +20075,20 @@ func (v *L_uint16_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_uint16_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_uint16_oe{}
-	zjDecodeL_uint16_oe(l, v, a)
+	zjDecode_L_uint16_oe(l, v, a)
 }
 
-// zjDecodeL_uint16_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_uint16_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_uint16_oe) {
+func zjDecode_L_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_uint16_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_uint16_oe(l, v, a) {
+	if zjDecodeOrdered_L_uint16_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -19475,17 +20099,17 @@ func zjDecodeL_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_uint16_o
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_uint16_oe(l, v, a)
+	zjDecodeFallback_L_uint16_oe(l, v, a)
 }
 
-// zjDecodeOrderedL_uint16_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_uint16_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_uint16_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_uint16_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_uint16_oe) bool {
+func zjDecodeOrdered_L_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_uint16_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -19549,7 +20173,7 @@ func zjDecodeOrderedL_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_u
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_uint16_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_uint16_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -19571,7 +20195,7 @@ func zjDecodeOrderedL_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_u
 	}
 }
 
-func zjDecodeOrderedFieldL_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_uint16_oe, k int) bool {
+func zjDecodeOrderedField_L_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_uint16_oe, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_uint16_oe[k])
@@ -19624,10 +20248,10 @@ func zjIsDeclaredKeyL_uint16_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_uint16_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_uint16_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_uint16_oe) {
+func zjDecodeFallback_L_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_uint16_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -19663,13 +20287,18 @@ func zjDecodeFallbackL_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_
 	}
 }
 
-// zjArenaL_uint16_ptr backs every pointer field of a decoded L_uint16_ptr with a single
+// zjArenaL_uint16_ptr holds first-use pointer cells for a decoded L_uint16_ptr in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_uint16_ptr struct {
-	f0 uint16
+	published0 bool
+	f0         uint16
+}
+
+func (a *zjArenaL_uint16_ptr) beginDecode() {
+	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -19710,7 +20339,7 @@ func (v *L_uint16_ptr) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_uint16_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_uint16_ptr{}
-	zjDecodeL_uint16_ptr(&l, v, a)
+	zjDecode_L_uint16_ptr(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -19720,20 +20349,20 @@ func (v *L_uint16_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_uint16_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_uint16_ptr{}
-	zjDecodeL_uint16_ptr(l, v, a)
+	zjDecode_L_uint16_ptr(l, v, a)
 }
 
-// zjDecodeL_uint16_ptr tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_uint16_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArenaL_uint16_ptr) {
+func zjDecode_L_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArenaL_uint16_ptr) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_uint16_ptr(l, v, a) {
+	if zjDecodeOrdered_L_uint16_ptr(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -19744,17 +20373,17 @@ func zjDecodeL_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArenaL_uint16
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_uint16_ptr(l, v, a)
+	zjDecodeFallback_L_uint16_ptr(l, v, a)
 }
 
-// zjDecodeOrderedL_uint16_ptr speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_uint16_ptr speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_uint16_ptr;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_uint16_ptr;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArenaL_uint16_ptr) bool {
+func zjDecodeOrdered_L_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArenaL_uint16_ptr) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.F != nil {
@@ -19822,7 +20451,7 @@ func zjDecodeOrderedL_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArenaL
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_uint16_ptr(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_uint16_ptr(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -19844,7 +20473,7 @@ func zjDecodeOrderedL_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArenaL
 	}
 }
 
-func zjDecodeOrderedFieldL_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArenaL_uint16_ptr, k int) bool {
+func zjDecodeOrderedField_L_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArenaL_uint16_ptr, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -19859,11 +20488,16 @@ func zjDecodeOrderedFieldL_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjA
 	switch k {
 	case 0:
 		if v.F == nil {
-			a.f0 = uint16(l.ReadUint16())
-			v.F = &a.f0
-		} else {
-			*v.F = uint16(l.ReadUint16())
+			if a.published0 {
+				v.F = new(uint16)
+			} else {
+				var zjZero uint16
+				a.f0 = zjZero
+				v.F = &a.f0
+				a.published0 = true
+			}
 		}
+		*v.F = uint16(l.ReadUint16())
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesL_uint16_ptr[k])
@@ -19906,10 +20540,10 @@ func zjIsDeclaredKeyL_uint16_ptr(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_uint16_ptr is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_uint16_ptr is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArenaL_uint16_ptr) {
+func zjDecodeFallback_L_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArenaL_uint16_ptr) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -19936,11 +20570,16 @@ func zjDecodeFallbackL_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArena
 		switch string(key) {
 		case "f":
 			if v.F == nil {
-				a.f0 = uint16(l.ReadUint16())
-				v.F = &a.f0
-			} else {
-				*v.F = uint16(l.ReadUint16())
+				if a.published0 {
+					v.F = new(uint16)
+				} else {
+					var zjZero uint16
+					a.f0 = zjZero
+					v.F = &a.f0
+					a.published0 = true
+				}
 			}
+			*v.F = uint16(l.ReadUint16())
 		default:
 			l.Skip()
 		}
@@ -19954,12 +20593,15 @@ func zjDecodeFallbackL_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArena
 	}
 }
 
-// zjArenaL_uuid backs every pointer field of a decoded L_uuid with a single
+// zjArenaL_uuid holds first-use pointer cells for a decoded L_uuid in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_uuid struct {
+}
+
+func (a *zjArenaL_uuid) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -19996,7 +20638,7 @@ func (v *L_uuid) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_uuid) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_uuid{}
-	zjDecodeL_uuid(&l, v, a)
+	zjDecode_L_uuid(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -20006,20 +20648,20 @@ func (v *L_uuid) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_uuid) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_uuid{}
-	zjDecodeL_uuid(l, v, a)
+	zjDecode_L_uuid(l, v, a)
 }
 
-// zjDecodeL_uuid tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_uuid tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) {
+func zjDecode_L_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_uuid(l, v, a) {
+	if zjDecodeOrdered_L_uuid(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -20030,17 +20672,17 @@ func zjDecodeL_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_uuid(l, v, a)
+	zjDecodeFallback_L_uuid(l, v, a)
 }
 
-// zjDecodeOrderedL_uuid speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_uuid speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_uuid;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_uuid;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) bool {
+func zjDecodeOrdered_L_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -20104,7 +20746,7 @@ func zjDecodeOrderedL_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) bool 
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_uuid(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_uuid(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -20126,7 +20768,7 @@ func zjDecodeOrderedL_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) bool 
 	}
 }
 
-func zjDecodeOrderedFieldL_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid, k int) bool {
+func zjDecodeOrderedField_L_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_uuid[k])
@@ -20179,10 +20821,10 @@ func zjIsDeclaredKeyL_uuid(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_uuid is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_uuid is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) {
+func zjDecodeFallback_L_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -20218,12 +20860,15 @@ func zjDecodeFallbackL_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) {
 	}
 }
 
-// zjArenaL_uuid_oe backs every pointer field of a decoded L_uuid_oe with a single
+// zjArenaL_uuid_oe holds first-use pointer cells for a decoded L_uuid_oe in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_uuid_oe struct {
+}
+
+func (a *zjArenaL_uuid_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -20260,7 +20905,7 @@ func (v *L_uuid_oe) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_uuid_oe) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_uuid_oe{}
-	zjDecodeL_uuid_oe(&l, v, a)
+	zjDecode_L_uuid_oe(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -20270,20 +20915,20 @@ func (v *L_uuid_oe) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_uuid_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_uuid_oe{}
-	zjDecodeL_uuid_oe(l, v, a)
+	zjDecode_L_uuid_oe(l, v, a)
 }
 
-// zjDecodeL_uuid_oe tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_uuid_oe tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid_oe) {
+func zjDecode_L_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid_oe) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_uuid_oe(l, v, a) {
+	if zjDecodeOrdered_L_uuid_oe(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -20294,17 +20939,17 @@ func zjDecodeL_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid_oe) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_uuid_oe(l, v, a)
+	zjDecodeFallback_L_uuid_oe(l, v, a)
 }
 
-// zjDecodeOrderedL_uuid_oe speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_uuid_oe speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_uuid_oe;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_uuid_oe;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid_oe) bool {
+func zjDecodeOrdered_L_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid_oe) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -20368,7 +21013,7 @@ func zjDecodeOrderedL_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid_
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_uuid_oe(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_uuid_oe(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -20390,7 +21035,7 @@ func zjDecodeOrderedL_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid_
 	}
 }
 
-func zjDecodeOrderedFieldL_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid_oe, k int) bool {
+func zjDecodeOrderedField_L_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid_oe, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesL_uuid_oe[k])
@@ -20443,10 +21088,10 @@ func zjIsDeclaredKeyL_uuid_oe(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_uuid_oe is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_uuid_oe is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid_oe) {
+func zjDecodeFallback_L_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid_oe) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -20482,13 +21127,18 @@ func zjDecodeFallbackL_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid
 	}
 }
 
-// zjArenaL_uuid_ptr backs every pointer field of a decoded L_uuid_ptr with a single
+// zjArenaL_uuid_ptr holds first-use pointer cells for a decoded L_uuid_ptr in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaL_uuid_ptr struct {
-	f0 uuid.UUID
+	published0 bool
+	f0         uuid.UUID
+}
+
+func (a *zjArenaL_uuid_ptr) beginDecode() {
+	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -20529,7 +21179,7 @@ func (v *L_uuid_ptr) UnmarshalZJSONBorrow(data []byte) error {
 func (v *L_uuid_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_uuid_ptr{}
-	zjDecodeL_uuid_ptr(&l, v, a)
+	zjDecode_L_uuid_ptr(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -20539,20 +21189,20 @@ func (v *L_uuid_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *L_uuid_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_uuid_ptr{}
-	zjDecodeL_uuid_ptr(l, v, a)
+	zjDecode_L_uuid_ptr(l, v, a)
 }
 
-// zjDecodeL_uuid_ptr tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_L_uuid_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeL_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uuid_ptr) {
+func zjDecode_L_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uuid_ptr) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedL_uuid_ptr(l, v, a) {
+	if zjDecodeOrdered_L_uuid_ptr(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -20563,17 +21213,17 @@ func zjDecodeL_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uuid_ptr) 
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackL_uuid_ptr(l, v, a)
+	zjDecodeFallback_L_uuid_ptr(l, v, a)
 }
 
-// zjDecodeOrderedL_uuid_ptr speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_L_uuid_ptr speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackL_uuid_ptr;
+// non-compact syntax. The caller retries those through zjDecodeFallback_L_uuid_ptr;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedL_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uuid_ptr) bool {
+func zjDecodeOrdered_L_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uuid_ptr) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.F != nil {
@@ -20641,7 +21291,7 @@ func zjDecodeOrderedL_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uui
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldL_uuid_ptr(l, v, a, matched) {
+			if !zjDecodeOrderedField_L_uuid_ptr(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -20663,7 +21313,7 @@ func zjDecodeOrderedL_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uui
 	}
 }
 
-func zjDecodeOrderedFieldL_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uuid_ptr, k int) bool {
+func zjDecodeOrderedField_L_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uuid_ptr, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -20678,11 +21328,16 @@ func zjDecodeOrderedFieldL_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArena
 	switch k {
 	case 0:
 		if v.F == nil {
-			a.f0 = uuid.UUID(l.ReadUUIDBytes())
-			v.F = &a.f0
-		} else {
-			*v.F = uuid.UUID(l.ReadUUIDBytes())
+			if a.published0 {
+				v.F = new(uuid.UUID)
+			} else {
+				var zjZero uuid.UUID
+				a.f0 = zjZero
+				v.F = &a.f0
+				a.published0 = true
+			}
 		}
+		*v.F = uuid.UUID(l.ReadUUIDBytes())
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesL_uuid_ptr[k])
@@ -20725,10 +21380,10 @@ func zjIsDeclaredKeyL_uuid_ptr(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackL_uuid_ptr is the general keyed decoder: every member is read via
+// zjDecodeFallback_L_uuid_ptr is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackL_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uuid_ptr) {
+func zjDecodeFallback_L_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uuid_ptr) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -20755,11 +21410,16 @@ func zjDecodeFallbackL_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uu
 		switch string(key) {
 		case "f":
 			if v.F == nil {
-				a.f0 = uuid.UUID(l.ReadUUIDBytes())
-				v.F = &a.f0
-			} else {
-				*v.F = uuid.UUID(l.ReadUUIDBytes())
+				if a.published0 {
+					v.F = new(uuid.UUID)
+				} else {
+					var zjZero uuid.UUID
+					a.f0 = zjZero
+					v.F = &a.f0
+					a.published0 = true
+				}
 			}
+			*v.F = uuid.UUID(l.ReadUUIDBytes())
 		default:
 			l.Skip()
 		}
@@ -20773,12 +21433,15 @@ func zjDecodeFallbackL_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uu
 	}
 }
 
-// zjArenaN_any backs every pointer field of a decoded N_any with a single
+// zjArenaN_any holds first-use pointer cells for a decoded N_any in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaN_any struct {
+}
+
+func (a *zjArenaN_any) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -20819,7 +21482,7 @@ func (v *N_any) UnmarshalZJSONBorrow(data []byte) error {
 func (v *N_any) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaN_any{}
-	zjDecodeN_any(&l, v, a)
+	zjDecode_N_any(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -20829,20 +21492,20 @@ func (v *N_any) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *N_any) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaN_any{}
-	zjDecodeN_any(l, v, a)
+	zjDecode_N_any(l, v, a)
 }
 
-// zjDecodeN_any tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_N_any tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeN_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) {
+func zjDecode_N_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedN_any(l, v, a) {
+	if zjDecodeOrdered_N_any(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -20853,17 +21516,17 @@ func zjDecodeN_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackN_any(l, v, a)
+	zjDecodeFallback_N_any(l, v, a)
 }
 
-// zjDecodeOrderedN_any speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_N_any speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackN_any;
+// non-compact syntax. The caller retries those through zjDecodeFallback_N_any;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedN_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) bool {
+func zjDecodeOrdered_N_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.F != nil {
@@ -20931,7 +21594,7 @@ func zjDecodeOrderedN_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) bool {
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldN_any(l, v, a, matched) {
+			if !zjDecodeOrderedField_N_any(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -20953,7 +21616,7 @@ func zjDecodeOrderedN_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) bool {
 	}
 }
 
-func zjDecodeOrderedFieldN_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any, k int) bool {
+func zjDecodeOrderedField_N_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -21020,10 +21683,10 @@ func zjIsDeclaredKeyN_any(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackN_any is the general keyed decoder: every member is read via
+// zjDecodeFallback_N_any is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackN_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) {
+func zjDecodeFallback_N_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -21073,12 +21736,15 @@ func zjDecodeFallbackN_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) {
 	}
 }
 
-// zjArenaN_rawmsg backs every pointer field of a decoded N_rawmsg with a single
+// zjArenaN_rawmsg holds first-use pointer cells for a decoded N_rawmsg in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaN_rawmsg struct {
+}
+
+func (a *zjArenaN_rawmsg) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -21122,7 +21788,7 @@ func (v *N_rawmsg) UnmarshalZJSONBorrow(data []byte) error {
 func (v *N_rawmsg) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaN_rawmsg{}
-	zjDecodeN_rawmsg(&l, v, a)
+	zjDecode_N_rawmsg(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -21132,25 +21798,25 @@ func (v *N_rawmsg) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *N_rawmsg) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaN_rawmsg{}
-	zjDecodeN_rawmsg(l, v, a)
+	zjDecode_N_rawmsg(l, v, a)
 }
 
-// zjDecodeN_rawmsg tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_N_rawmsg tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeN_rawmsg(l *zerojson.Lexer, v *N_rawmsg, a *zjArenaN_rawmsg) {
+func zjDecode_N_rawmsg(l *zerojson.Lexer, v *N_rawmsg, a *zjArenaN_rawmsg) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
-	zjDecodeFallbackN_rawmsg(l, v, a)
+	zjDecodeFallback_N_rawmsg(l, v, a)
 }
 
-// zjDecodeFallbackN_rawmsg is the general keyed decoder: every member is read via
+// zjDecodeFallback_N_rawmsg is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackN_rawmsg(l *zerojson.Lexer, v *N_rawmsg, a *zjArenaN_rawmsg) {
+func zjDecodeFallback_N_rawmsg(l *zerojson.Lexer, v *N_rawmsg, a *zjArenaN_rawmsg) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -21196,13 +21862,17 @@ func zjDecodeFallbackN_rawmsg(l *zerojson.Lexer, v *N_rawmsg, a *zjArenaN_rawmsg
 	}
 }
 
-// zjArenaN_struct backs every pointer field of a decoded N_struct with a single
+// zjArenaN_struct holds first-use pointer cells for a decoded N_struct in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaN_struct struct {
 	a0 zjArenaInner
+}
+
+func (a *zjArenaN_struct) beginDecode() {
+	a.a0.beginDecode()
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -21243,7 +21913,7 @@ func (v *N_struct) UnmarshalZJSONBorrow(data []byte) error {
 func (v *N_struct) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaN_struct{}
-	zjDecodeN_struct(&l, v, a)
+	zjDecode_N_struct(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -21253,20 +21923,20 @@ func (v *N_struct) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *N_struct) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaN_struct{}
-	zjDecodeN_struct(l, v, a)
+	zjDecode_N_struct(l, v, a)
 }
 
-// zjDecodeN_struct tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_N_struct tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct) {
+func zjDecode_N_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedN_struct(l, v, a) {
+	if zjDecodeOrdered_N_struct(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -21277,17 +21947,17 @@ func zjDecodeN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackN_struct(l, v, a)
+	zjDecodeFallback_N_struct(l, v, a)
 }
 
-// zjDecodeOrderedN_struct speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_N_struct speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackN_struct;
+// non-compact syntax. The caller retries those through zjDecodeFallback_N_struct;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct) bool {
+func zjDecodeOrdered_N_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -21351,7 +22021,7 @@ func zjDecodeOrderedN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct)
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldN_struct(l, v, a, matched) {
+			if !zjDecodeOrderedField_N_struct(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -21373,7 +22043,7 @@ func zjDecodeOrderedN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct)
 	}
 }
 
-func zjDecodeOrderedFieldN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct, k int) bool {
+func zjDecodeOrderedField_N_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesN_struct[k])
@@ -21383,7 +22053,7 @@ func zjDecodeOrderedFieldN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_st
 	}
 	switch k {
 	case 0:
-		if !zjDecodeOrderedInner(l, &v.F, &a.a0) {
+		if !zjDecodeOrdered_Inner(l, &v.F, &a.a0) {
 			l.AnnotateFieldString("f")
 			return false
 		}
@@ -21429,10 +22099,10 @@ func zjIsDeclaredKeyN_struct(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackN_struct is the general keyed decoder: every member is read via
+// zjDecodeFallback_N_struct is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct) {
+func zjDecodeFallback_N_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -21454,7 +22124,7 @@ func zjDecodeFallbackN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct
 		}
 		switch string(key) {
 		case "f":
-			zjDecodeInner(l, &v.F, &a.a0)
+			zjDecode_Inner(l, &v.F, &a.a0)
 		default:
 			l.Skip()
 		}
@@ -21468,14 +22138,20 @@ func zjDecodeFallbackN_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct
 	}
 }
 
-// zjArenaN_struct_ptr backs every pointer field of a decoded N_struct_ptr with a single
+// zjArenaN_struct_ptr holds first-use pointer cells for a decoded N_struct_ptr in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaN_struct_ptr struct {
-	v0 Inner
-	a0 zjArenaInner
+	published0 bool
+	v0         Inner
+	a0         zjArenaInner
+}
+
+func (a *zjArenaN_struct_ptr) beginDecode() {
+	a.published0 = false
+	a.a0.beginDecode()
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -21520,7 +22196,7 @@ func (v *N_struct_ptr) UnmarshalZJSONBorrow(data []byte) error {
 func (v *N_struct_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaN_struct_ptr{}
-	zjDecodeN_struct_ptr(&l, v, a)
+	zjDecode_N_struct_ptr(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -21530,20 +22206,20 @@ func (v *N_struct_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *N_struct_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaN_struct_ptr{}
-	zjDecodeN_struct_ptr(l, v, a)
+	zjDecode_N_struct_ptr(l, v, a)
 }
 
-// zjDecodeN_struct_ptr tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_N_struct_ptr tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeN_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArenaN_struct_ptr) {
+func zjDecode_N_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArenaN_struct_ptr) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedN_struct_ptr(l, v, a) {
+	if zjDecodeOrdered_N_struct_ptr(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -21554,17 +22230,17 @@ func zjDecodeN_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArenaN_struct
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackN_struct_ptr(l, v, a)
+	zjDecodeFallback_N_struct_ptr(l, v, a)
 }
 
-// zjDecodeOrderedN_struct_ptr speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_N_struct_ptr speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackN_struct_ptr;
+// non-compact syntax. The caller retries those through zjDecodeFallback_N_struct_ptr;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedN_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArenaN_struct_ptr) bool {
+func zjDecodeOrdered_N_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArenaN_struct_ptr) bool {
 	_ = a
 	// Caller-owned pointers and dynamic receivers must not be replayed.
 	if v.F != nil {
@@ -21632,7 +22308,7 @@ func zjDecodeOrderedN_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArenaN
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldN_struct_ptr(l, v, a, matched) {
+			if !zjDecodeOrderedField_N_struct_ptr(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -21654,7 +22330,7 @@ func zjDecodeOrderedN_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArenaN
 	}
 }
 
-func zjDecodeOrderedFieldN_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArenaN_struct_ptr, k int) bool {
+func zjDecodeOrderedField_N_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArenaN_struct_ptr, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 0:
@@ -21669,11 +22345,16 @@ func zjDecodeOrderedFieldN_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjA
 	switch k {
 	case 0:
 		if v.F == nil {
-			var zjZero Inner
-			a.v0 = zjZero
-			v.F = &a.v0
+			if a.published0 {
+				v.F = new(Inner)
+			} else {
+				var zjZero Inner
+				a.v0 = zjZero
+				v.F = &a.v0
+				a.published0 = true
+			}
 		}
-		if !zjDecodeOrderedInner(l, v.F, &a.a0) {
+		if !zjDecodeOrdered_Inner(l, v.F, &a.a0) {
 			l.AnnotateFieldString("f")
 			return false
 		}
@@ -21719,10 +22400,10 @@ func zjIsDeclaredKeyN_struct_ptr(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackN_struct_ptr is the general keyed decoder: every member is read via
+// zjDecodeFallback_N_struct_ptr is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackN_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArenaN_struct_ptr) {
+func zjDecodeFallback_N_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArenaN_struct_ptr) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -21749,11 +22430,16 @@ func zjDecodeFallbackN_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArena
 		switch string(key) {
 		case "f":
 			if v.F == nil {
-				var zjZero Inner
-				a.v0 = zjZero
-				v.F = &a.v0
+				if a.published0 {
+					v.F = new(Inner)
+				} else {
+					var zjZero Inner
+					a.v0 = zjZero
+					v.F = &a.v0
+					a.published0 = true
+				}
 			}
-			zjDecodeInner(l, v.F, &a.a0)
+			zjDecode_Inner(l, v.F, &a.a0)
 		default:
 			l.Skip()
 		}
@@ -21767,12 +22453,15 @@ func zjDecodeFallbackN_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArena
 	}
 }
 
-// zjArenaT_invalid_tagname backs every pointer field of a decoded T_invalid_tagname with a single
+// zjArenaT_invalid_tagname holds first-use pointer cells for a decoded T_invalid_tagname in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaT_invalid_tagname struct {
+}
+
+func (a *zjArenaT_invalid_tagname) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -21816,7 +22505,7 @@ func (v *T_invalid_tagname) UnmarshalZJSONBorrow(data []byte) error {
 func (v *T_invalid_tagname) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaT_invalid_tagname{}
-	zjDecodeT_invalid_tagname(&l, v, a)
+	zjDecode_T_invalid_tagname(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -21826,20 +22515,20 @@ func (v *T_invalid_tagname) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *T_invalid_tagname) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaT_invalid_tagname{}
-	zjDecodeT_invalid_tagname(l, v, a)
+	zjDecode_T_invalid_tagname(l, v, a)
 }
 
-// zjDecodeT_invalid_tagname tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_T_invalid_tagname tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeT_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, a *zjArenaT_invalid_tagname) {
+func zjDecode_T_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, a *zjArenaT_invalid_tagname) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedT_invalid_tagname(l, v, a) {
+	if zjDecodeOrdered_T_invalid_tagname(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -21850,17 +22539,17 @@ func zjDecodeT_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, a *zjAre
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackT_invalid_tagname(l, v, a)
+	zjDecodeFallback_T_invalid_tagname(l, v, a)
 }
 
-// zjDecodeOrderedT_invalid_tagname speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_T_invalid_tagname speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackT_invalid_tagname;
+// non-compact syntax. The caller retries those through zjDecodeFallback_T_invalid_tagname;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedT_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, a *zjArenaT_invalid_tagname) bool {
+func zjDecodeOrdered_T_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, a *zjArenaT_invalid_tagname) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -21924,7 +22613,7 @@ func zjDecodeOrderedT_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, a
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldT_invalid_tagname(l, v, a, matched) {
+			if !zjDecodeOrderedField_T_invalid_tagname(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -21946,7 +22635,7 @@ func zjDecodeOrderedT_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, a
 	}
 }
 
-func zjDecodeOrderedFieldT_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, a *zjArenaT_invalid_tagname, k int) bool {
+func zjDecodeOrderedField_T_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, a *zjArenaT_invalid_tagname, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesT_invalid_tagname[k])
@@ -22011,10 +22700,10 @@ func zjIsDeclaredKeyT_invalid_tagname(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackT_invalid_tagname is the general keyed decoder: every member is read via
+// zjDecodeFallback_T_invalid_tagname is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackT_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, a *zjArenaT_invalid_tagname) {
+func zjDecodeFallback_T_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, a *zjArenaT_invalid_tagname) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -22052,12 +22741,15 @@ func zjDecodeFallbackT_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, 
 	}
 }
 
-// zjArenaT_string_opt backs every pointer field of a decoded T_string_opt with a single
+// zjArenaT_string_opt holds first-use pointer cells for a decoded T_string_opt in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaT_string_opt struct {
+}
+
+func (a *zjArenaT_string_opt) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -22101,7 +22793,7 @@ func (v *T_string_opt) UnmarshalZJSONBorrow(data []byte) error {
 func (v *T_string_opt) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaT_string_opt{}
-	zjDecodeT_string_opt(&l, v, a)
+	zjDecode_T_string_opt(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -22111,20 +22803,20 @@ func (v *T_string_opt) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *T_string_opt) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaT_string_opt{}
-	zjDecodeT_string_opt(l, v, a)
+	zjDecode_T_string_opt(l, v, a)
 }
 
-// zjDecodeT_string_opt tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_T_string_opt tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeT_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArenaT_string_opt) {
+func zjDecode_T_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArenaT_string_opt) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedT_string_opt(l, v, a) {
+	if zjDecodeOrdered_T_string_opt(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -22135,17 +22827,17 @@ func zjDecodeT_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArenaT_string
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackT_string_opt(l, v, a)
+	zjDecodeFallback_T_string_opt(l, v, a)
 }
 
-// zjDecodeOrderedT_string_opt speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_T_string_opt speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackT_string_opt;
+// non-compact syntax. The caller retries those through zjDecodeFallback_T_string_opt;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedT_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArenaT_string_opt) bool {
+func zjDecodeOrdered_T_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArenaT_string_opt) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -22209,7 +22901,7 @@ func zjDecodeOrderedT_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArenaT
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldT_string_opt(l, v, a, matched) {
+			if !zjDecodeOrderedField_T_string_opt(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -22231,7 +22923,7 @@ func zjDecodeOrderedT_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArenaT
 	}
 }
 
-func zjDecodeOrderedFieldT_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArenaT_string_opt, k int) bool {
+func zjDecodeOrderedField_T_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArenaT_string_opt, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesT_string_opt[k])
@@ -22302,10 +22994,10 @@ func zjIsDeclaredKeyT_string_opt(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackT_string_opt is the general keyed decoder: every member is read via
+// zjDecodeFallback_T_string_opt is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackT_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArenaT_string_opt) {
+func zjDecodeFallback_T_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArenaT_string_opt) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -22349,13 +23041,19 @@ func zjDecodeFallbackT_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArena
 	}
 }
 
-// zjArenaZ_omitzero backs every pointer field of a decoded Z_omitzero with a single
+// zjArenaZ_omitzero holds first-use pointer cells for a decoded Z_omitzero in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaZ_omitzero struct {
-	c1 []string
+	slicePublished1 bool
+	sliceBorrowed1  bool // adopted storage must not be recycled on the next pooled call
+	c1              []string
+}
+
+func (a *zjArenaZ_omitzero) beginDecode() {
+	a.slicePublished1 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -22421,7 +23119,7 @@ func (v *Z_omitzero) UnmarshalZJSONBorrow(data []byte) error {
 func (v *Z_omitzero) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaZ_omitzero{}
-	zjDecodeZ_omitzero(&l, v, a)
+	zjDecode_Z_omitzero(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -22431,20 +23129,20 @@ func (v *Z_omitzero) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *Z_omitzero) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaZ_omitzero{}
-	zjDecodeZ_omitzero(l, v, a)
+	zjDecode_Z_omitzero(l, v, a)
 }
 
-// zjDecodeZ_omitzero tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_Z_omitzero tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_omitzero) {
+func zjDecode_Z_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_omitzero) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedZ_omitzero(l, v, a) {
+	if zjDecodeOrdered_Z_omitzero(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -22455,17 +23153,17 @@ func zjDecodeZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_omitzero) 
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackZ_omitzero(l, v, a)
+	zjDecodeFallback_Z_omitzero(l, v, a)
 }
 
-// zjDecodeOrderedZ_omitzero speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_Z_omitzero speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackZ_omitzero;
+// non-compact syntax. The caller retries those through zjDecodeFallback_Z_omitzero;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_omitzero) bool {
+func zjDecodeOrdered_Z_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_omitzero) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -22529,7 +23227,7 @@ func zjDecodeOrderedZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_omi
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldZ_omitzero(l, v, a, matched) {
+			if !zjDecodeOrderedField_Z_omitzero(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -22551,7 +23249,7 @@ func zjDecodeOrderedZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_omi
 	}
 }
 
-func zjDecodeOrderedFieldZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_omitzero, k int) bool {
+func zjDecodeOrderedField_Z_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_omitzero, k int) bool {
 	if l.IsNull() {
 		switch k {
 		case 1:
@@ -22567,6 +23265,14 @@ func zjDecodeOrderedFieldZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArena
 	case 0:
 		v.W = l.ReadTime()
 	case 1:
+		if v.ES != nil {
+			a.c1 = v.ES
+			a.sliceBorrowed1 = true
+		} else if a.slicePublished1 || a.sliceBorrowed1 {
+			a.c1 = nil
+			a.sliceBorrowed1 = false
+		}
+		a.slicePublished1 = true
 		a.c1 = a.c1[:0]
 		if l.EnterArray() {
 			for {
@@ -22658,10 +23364,10 @@ func zjIsDeclaredKeyZ_omitzero(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackZ_omitzero is the general keyed decoder: every member is read via
+// zjDecodeFallback_Z_omitzero is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_omitzero) {
+func zjDecodeFallback_Z_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_omitzero) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -22689,6 +23395,14 @@ func zjDecodeFallbackZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_om
 		case "w":
 			v.W = l.ReadTime()
 		case "es":
+			if v.ES != nil {
+				a.c1 = v.ES
+				a.sliceBorrowed1 = true
+			} else if a.slicePublished1 || a.sliceBorrowed1 {
+				a.c1 = nil
+				a.sliceBorrowed1 = false
+			}
+			a.slicePublished1 = true
 			a.c1 = a.c1[:0]
 			if l.EnterArray() {
 				for {
@@ -22731,12 +23445,15 @@ func zjDecodeFallbackZ_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_om
 	}
 }
 
-// zjArenaInner backs every pointer field of a decoded Inner with a single
+// zjArenaInner holds first-use pointer cells for a decoded Inner in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaInner struct {
+}
+
+func (a *zjArenaInner) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -22780,7 +23497,7 @@ func (v *Inner) UnmarshalZJSONBorrow(data []byte) error {
 func (v *Inner) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaInner{}
-	zjDecodeInner(&l, v, a)
+	zjDecode_Inner(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -22790,20 +23507,20 @@ func (v *Inner) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *Inner) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaInner{}
-	zjDecodeInner(l, v, a)
+	zjDecode_Inner(l, v, a)
 }
 
-// zjDecodeInner tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_Inner tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodeInner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) {
+func zjDecode_Inner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedInner(l, v, a) {
+	if zjDecodeOrdered_Inner(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -22814,17 +23531,17 @@ func zjDecodeInner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackInner(l, v, a)
+	zjDecodeFallback_Inner(l, v, a)
 }
 
-// zjDecodeOrderedInner speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_Inner speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackInner;
+// non-compact syntax. The caller retries those through zjDecodeFallback_Inner;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedInner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) bool {
+func zjDecodeOrdered_Inner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -22888,7 +23605,7 @@ func zjDecodeOrderedInner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) bool {
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldInner(l, v, a, matched) {
+			if !zjDecodeOrderedField_Inner(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -22910,7 +23627,7 @@ func zjDecodeOrderedInner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) bool {
 	}
 }
 
-func zjDecodeOrderedFieldInner(l *zerojson.Lexer, v *Inner, a *zjArenaInner, k int) bool {
+func zjDecodeOrderedField_Inner(l *zerojson.Lexer, v *Inner, a *zjArenaInner, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesInner[k])
@@ -22975,10 +23692,10 @@ func zjIsDeclaredKeyInner(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackInner is the general keyed decoder: every member is read via
+// zjDecodeFallback_Inner is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackInner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) {
+func zjDecodeFallback_Inner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) {
 	_ = a
 	if !l.EnterObject() {
 		return

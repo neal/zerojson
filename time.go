@@ -139,7 +139,7 @@ func daysSinceUnixEpoch(year, month, day int) int64 {
 }
 
 // ReadTime parses a quoted RFC3339 timestamp. UTC ("Z") timestamps — the
-// only kind zerojson emits — parse at fixed digit positions; offsets and
+// common fast path — parse at fixed digit positions; offsets and
 // edge cases fall back to time.Parse.
 func (l *Lexer) ReadTime() time.Time {
 	b, plain, _ := l.readStringBytes()
@@ -153,7 +153,9 @@ func (l *Lexer) ReadTime() time.Time {
 	}
 	t, err := time.Parse(time.RFC3339, bytesToString(b))
 	if err != nil {
-		l.setErr("time: %v", err)
+		// ParseError embeds the entire token (sometimes twice). Keep only a
+		// bounded excerpt in the diagnostic, as the numeric readers do.
+		l.setErr("time: invalid RFC3339 timestamp %s", errToken(b))
 	}
 	return t
 }

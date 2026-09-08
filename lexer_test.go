@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -38,6 +39,28 @@ func TestReadStringMatchesStdlib(t *testing.T) {
 		if got != want {
 			t.Errorf("%s: want %q got %q", c, want, got)
 		}
+	}
+}
+
+func TestLeafErrorExcerptsAreBounded(t *testing.T) {
+	data := []byte(`"` + strings.Repeat("x", 1<<20) + `"`)
+	for _, read := range []struct {
+		name string
+		fn   func(*Lexer)
+	}{
+		{"time", func(l *Lexer) { l.ReadTime() }},
+		{"uuid", func(l *Lexer) { l.ReadUUIDBytes() }},
+	} {
+		t.Run(read.name, func(t *testing.T) {
+			l := NewLexer(data, false)
+			read.fn(&l)
+			if l.Err() == nil {
+				t.Fatal("expected invalid leaf error")
+			}
+			if text := l.Err().Error(); len(text) > 256 || !strings.Contains(text, "1048576 bytes") {
+				t.Fatalf("unbounded or uninformative error: %d bytes", len(text))
+			}
+		})
 	}
 }
 

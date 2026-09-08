@@ -8,7 +8,7 @@ import (
 	"github.com/neal/zerojson"
 )
 
-// decodeFallbackOnly decodes data via zjDecodeFallbackEvent directly,
+// decodeFallbackOnly decodes data via zjDecodeFallback_Event directly,
 // bypassing the public UnmarshalZJSON entry point (and therefore the
 // speculative ordered fast path entirely). Comparing this against the
 // public path is the differential check for the ordered decoder: by
@@ -16,12 +16,12 @@ import (
 //
 // It calls Lexer.Finish itself, mirroring exactly what the public
 // entry point's wrapper does (see decode.go's unmarshalZJSON) — Finish
-// lives in the wrapper, deliberately not in zjDecodeFallback<T>/
-// zjDecodeOrdered<T> themselves (a nested/recursive decode must not
-// trailing-check), so a bare zjDecodeFallbackEvent call has no opinion
+// lives in the wrapper, deliberately not in zjDecodeFallback_<T>/
+// zjDecodeOrdered_<T> themselves (a nested/recursive decode must not
+// trailing-check), so a bare zjDecodeFallback_Event call has no opinion
 // on trailing data at all. Without this, "{}0" would (correctly)
 // diverge: the public path rejects the trailing "0", a bare
-// zjDecodeFallbackEvent call ignores it — not a decode bug, just this
+// zjDecodeFallback_Event call ignores it — not a decode bug, just this
 // helper not applying the same entry-point contract the comparison
 // needs to be meaningful.
 func decodeFallbackOnly(data []byte, borrow bool) (Event, error) {
@@ -30,14 +30,14 @@ func decodeFallbackOnly(data []byte, borrow bool) (Event, error) {
 	// Mirror the entry-point wrapper's top-level null handling too: null is
 	// a stdlib-style no-op success, checked before the object decode, so the
 	// raw fallback function never sees a top-level null. IsNull consumes the
-	// token when it matches (the generated zjDecode<T> relies on the same),
+	// token when it matches (the generated zjDecode_<T> relies on the same),
 	// so Finish alone follows it — no extra Skip.
 	if l.IsNull() {
 		l.Finish()
 		return v, l.Err()
 	}
 	a := &zjArenaEvent{}
-	zjDecodeFallbackEvent(&l, &v, a)
+	zjDecodeFallback_Event(&l, &v, a)
 	l.Finish()
 	return v, l.Err()
 }

@@ -104,15 +104,19 @@ func (g *generator) emitEnumHelpers() {
 
 func (g *generator) genArena(ti typeInfo) {
 	g.p("")
-	g.p("// %s backs every pointer field of a decoded %s with a single", arenaName(ti.name), ti.name)
+	g.p("// %s holds first-use pointer cells for a decoded %s in one", arenaName(ti.name), ti.name)
 	g.p("// allocation, and (for -pool Decoders, which reuse an arena across")
 	g.p("// decodes instead of allocating one per call) holds a persistent")
 	g.p("// cell per slice/map field so repeated decodes reuse their backing")
-	g.p("// storage instead of reallocating it every time.")
+	g.p("// storage. Detached storage is not reused within the same decode.")
 	g.p("type %s struct {", arenaName(ti.name))
 	for _, f := range ti.fields {
-		if needsSeenState(f) {
-			g.p("\ts%s bool", f.cellName)
+		if f.ptr {
+			g.p("\tpublished%s bool", f.cellName)
+		}
+		if f.kind == kSlice || f.kind == kLeafSlice {
+			g.p("\tslicePublished%s bool", f.cellName)
+			g.p("\tsliceBorrowed%s bool // adopted storage must not be recycled on the next pooled call", f.cellName)
 		}
 		if f.kind == kStruct {
 			if f.ptr {
@@ -131,6 +135,24 @@ func (g *generator) genArena(ti typeInfo) {
 			g.p("\tc%s %s", f.cellName, sliceCellType(f.valInfo.typeStr, f.elemPtr))
 		case kMap:
 			g.p("\tm%s %s", f.cellName, f.typeStr)
+			g.p("\towned%s bool // only arena-owned maps may be cleared for reuse", f.cellName)
+			g.p("\tmapPublished%s bool", f.cellName)
+		}
+	}
+	g.p("}")
+	g.p("func (a *%s) beginDecode() {", arenaName(ti.name))
+	for _, f := range ti.fields {
+		if f.ptr {
+			g.p("\ta.published%s = false", f.cellName)
+		}
+		if f.kind == kMap {
+			g.p("\ta.mapPublished%s = false", f.cellName)
+		}
+		if f.kind == kSlice || f.kind == kLeafSlice {
+			g.p("\ta.slicePublished%s = false", f.cellName)
+		}
+		if f.kind == kStruct {
+			g.p("\ta.a%s.beginDecode()", f.cellName)
 		}
 	}
 	g.p("}")
@@ -143,42 +165,41 @@ func sliceCellType(elemType string, elemPtr bool) string {
 	return "[]" + elemType
 }
 
-func needsSeenState(f fieldInfo) bool {
-	return f.kind == kMap
-}
-
-func (g *generator) emitSeenReset(ti typeInfo) {
-	for _, f := range ti.fields {
-		if needsSeenState(f) {
-			g.p("\ta.s%s = false", f.cellName)
-		}
-	}
-}
-
-func (g *generator) emitNestedSeenReset(typeName, arenaExpr, ind string) {
-	for _, ti := range g.types {
-		if ti.name != typeName {
-			continue
-		}
-		base := strings.TrimPrefix(arenaExpr, "&")
-		for _, f := range ti.fields {
-			if needsSeenState(f) {
-				g.p("%s%s.s%s = false", ind, base, f.cellName)
-			}
-		}
-		return
-	}
-}
-
 // Preserve an existing receiver, including aliases held elsewhere in the
-// caller's object graph. Only nil pointers need arena storage. Pooled targets
-// are reset before decoding, so clearing that cell prevents stale state.
+// caller's object graph. An arena cell can be published only once per public
+// decode: null may detach it after a callback has retained its address. Only
+// the next pooled call permits reuse, never a nested call or ordered bail.
 func (g *generator) emitPointerCellInit(f fieldInfo, target, cell, ind string) {
 	g.p("%sif %s == nil {", ind, target)
+	g.p("%s\tif a.published%s {", ind, f.cellName)
+	g.p("%s\t\t%s = new(%s)", ind, target, f.typeStr)
+	g.p("%s\t} else {", ind)
 	g.p("%s\tvar zjZero %s", ind, f.typeStr)
 	g.p("%s\t%s = zjZero", ind, cell)
 	g.p("%s\t%s = &%s", ind, target, cell)
+	g.p("%s\ta.published%s = true", ind, f.cellName)
+	g.p("%s\t}", ind)
 	g.p("%s}", ind)
+}
+
+// The target is authoritative even on first use: a callback or another wire
+// representation may replace its slice header, even without an intervening
+// null. Never recycle the detached array in place of the current target.
+func (g *generator) emitSlicePublication(f fieldInfo, target, cell, ind string) {
+	source := target
+	present := target + " != nil"
+	if f.ptr {
+		source = "*" + target
+		present += " && " + source + " != nil"
+	}
+	g.p("%sif %s {", ind, present)
+	g.p("%s\t%s = %s", ind, cell, source)
+	g.p("%s\ta.sliceBorrowed%s = true", ind, f.cellName)
+	g.p("%s} else if a.slicePublished%s || a.sliceBorrowed%s {", ind, f.cellName, f.cellName)
+	g.p("%s\t%s = nil", ind, cell)
+	g.p("%s\ta.sliceBorrowed%s = false", ind, f.cellName)
+	g.p("%s}", ind)
+	g.p("%sa.slicePublished%s = true", ind, f.cellName)
 }
 
 // emitNonNilEmptySlice ensures cell is non-nil after a slice/leaf-slice
@@ -234,7 +255,6 @@ func (g *generator) genDecode(ti typeInfo) {
 	g.p("\t\t// still calls Finish to reject trailing data.")
 	g.p("\t\treturn")
 	g.p("\t}")
-	g.emitSeenReset(ti)
 	if orderedOK {
 		g.p("\tstart := l.Mark()")
 		g.p("\tif %s(l, v, a) {", orderedDecodeName(ti.name))
@@ -305,7 +325,7 @@ func (g *generator) genDecode(ti typeInfo) {
 // a hand-written leaf. (Slices and maps of Appender-only types have no
 // codec yet; a type that also has MarshalJSON/UnmarshalJSON is delegated
 // to those in such positions.) Same-package fields never go
-// through this method — they call the zjDecode<T> dispatcher directly with
+// through this method — they call the zjDecode_<T> dispatcher directly with
 // the parent's arena — so it costs nothing on the in-package fast path.
 func (g *generator) genReadZJSON(name string) {
 	g.p("")
@@ -386,9 +406,6 @@ func (g *generator) emitNullSwitch(ti typeInfo) {
 			continue
 		}
 		g.p("\t\t\t\tv.%s = nil", f.access)
-		if needsSeenState(f) {
-			g.p("\t\t\t\ta.s%s = false", f.cellName)
-		}
 	}
 	g.p("\t\t\t}")
 }
@@ -415,12 +432,8 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 	// Existing pointers are caller-owned; fresh pointers use arena cells.
 	assign := func(readExpr string) {
 		if f.ptr {
-			g.p("%sif %s == nil {", ind, target)
-			g.p("%s\t%s = %s", ind, cell, readExpr)
-			g.p("%s\t%s = &%s", ind, target, cell)
-			g.p("%s} else {", ind)
-			g.p("%s\t*%s = %s", ind, target, readExpr)
-			g.p("%s}", ind)
+			g.emitPointerCellInit(f, target, cell, ind)
+			g.p("%s*%s = %s", ind, target, readExpr)
 		} else {
 			g.p("%s%s = %s", ind, target, readExpr)
 		}
@@ -537,7 +550,6 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 	case kStruct:
 		nestedCall := func(targetExpr, arenaExpr string) {
 			if ordered {
-				g.emitNestedSeenReset(f.elem, arenaExpr, ind)
 				// Direct call to the nested type's pure ordered decoder:
 				// its bail propagates as ours, so the whole top-level
 				// object restarts on ITS fallback (see ordered.go).
@@ -582,6 +594,7 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		g.p("%s}", ind)
 	case kSlice:
 		cell := "a.c" + f.cellName
+		g.emitSlicePublication(f, target, cell, ind)
 		// Reslice-or-append onto the arena's persistent cell instead of
 		// appending directly to target: a -pool Decoder's arena survives
 		// across decodes, so this reuses the backing array instead of
@@ -629,6 +642,14 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		finishCollection(cell)
 	case kLeafSlice:
 		cell := "a.c" + f.cellName
+		g.emitSlicePublication(f, target, cell, ind)
+		// A byte-kind slice's string representation bypasses element
+		// methods in encoding/json; array elements still invoke them.
+		if f.byteElem != "" {
+			g.p("%sif l.IsDelim('\"') {", ind)
+			assign(byteSliceReadExpr(f))
+			g.p("%s} else {", ind)
+		}
 		if f.elemPtr {
 			// Rare (only Marshaler/TextMarshaler elements can be
 			// pointers): pool the outer slice-of-pointers only, same
@@ -687,6 +708,9 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		g.p("%s}", ind)
 		g.emitNonNilEmptySlice(cell, sliceCellType(f.valInfo.typeStr, f.elemPtr), ind)
 		finishCollection(cell)
+		if f.byteElem != "" {
+			g.p("%s}", ind)
+		}
 	case kMap:
 		cell := "a.m" + f.cellName
 		// Reuse the arena's persistent map cell across -pool decodes
@@ -701,16 +725,20 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		if f.ptr {
 			seedCond += " && " + derefTarget + " != nil"
 		}
-		g.p("%sif !a.s%s {", ind, f.cellName)
-		g.p("%s\ta.s%s = true", ind, f.cellName)
+		// A sibling pointer or callback may have replaced the target's map
+		// header since this field last appeared. Re-adopt it on every member.
+		g.p("%s{", ind)
 		g.p("%s\tif %s {", ind, seedCond)
 		g.p("%s\t\t%s = %s", ind, cell, derefTarget)
-		g.p("%s\t} else if %s == nil {", ind, cell)
+		g.p("%s\t\ta.owned%s = false", ind, f.cellName)
+		g.p("%s\t} else if %s == nil || !a.owned%s || a.mapPublished%s {", ind, cell, f.cellName, f.cellName)
 		g.p("%s\t\t%s = make(%s)", ind, cell, f.typeStr)
+		g.p("%s\t\ta.owned%s = true", ind, f.cellName)
 		g.p("%s\t} else {", ind)
 		g.p("%s\t\tclear(%s)", ind, cell)
 		g.p("%s\t}", ind)
 		g.p("%s}", ind)
+		g.p("%sa.mapPublished%s = true", ind, f.cellName)
 		g.p("%sif l.EnterObject() {", ind)
 		g.p("%sfor {", ind)
 		if f.intern {

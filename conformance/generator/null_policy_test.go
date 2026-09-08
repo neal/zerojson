@@ -104,7 +104,7 @@ import (
 				tests.WriteString("_ = i\n")
 			}
 			tests.WriteString("var err error\nswitch mode { case \"copy\": err=zj.UnmarshalZJSON([]byte(doc)); case \"borrow\": err=zj.UnmarshalZJSONBorrow([]byte(doc)); case \"pool\": err=pool.Decode([]byte(doc),&zj); case \"pool-borrow\": err=pool.DecodeBorrow([]byte(doc),&zj); case \"fallback\": l:=zerojson.NewLexer([]byte(doc),false); ")
-			fmt.Fprintf(&tests, "zjDecodeFallback%s(&l,&zj,&zjArena%s{}); l.Finish(); err=l.Err() }\n", root, root)
+			fmt.Fprintf(&tests, "zjDecodeFallback_%s(&l,&zj,&zjArena%s{}); l.Finish(); err=l.Err() }\n", root, root)
 			tests.WriteString("if err!=nil { t.Fatal(err) }; if !reflect.DeepEqual(zj,std) { t.Errorf(\"zj=%#v std=%#v\",zj,std) }; if calls!=wantCalls { t.Errorf(\"callbacks=%d want %d\",calls,wantCalls) }\n}) } } }\n")
 		}
 	}

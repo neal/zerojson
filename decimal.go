@@ -77,7 +77,7 @@ func AppendDecimalParts(dst []byte, coeff int64, exp int32) []byte {
 // ParseDecimalParts parses a plain decimal value (optional leading '-', an
 // integer part, and an optional '.'-prefixed fractional part — no
 // exponent notation) into coeff * 10^exp, preserving fractional scale:
-// "185.50" returns coeff=18550, exp=-2. It never allocates and never
+// "185.50" returns coeff=18550, exp=-2. It is allocation-free on success and never
 // panics — malformed input or an out-of-range coefficient/exponent
 // returns ErrMalformedDecimal/ErrDecimalRange, matching the Lexer's
 // contract of reporting errors rather than panicking on untrusted input.

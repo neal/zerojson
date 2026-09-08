@@ -267,11 +267,23 @@ func pruneUnusedImports(f *ast.File) {
 // living in replaceable generated files (the previous output, easyjson
 // output) are exactly what this run supersedes and do not count.
 func (g *generator) guardGeneratedNames(src, outPath string) {
-	f, err := parser.ParseFile(token.NewFileSet(), outPath, src, parser.SkipObjectResolution)
+	f, err := parser.ParseFile(token.NewFileSet(), outPath, src, 0)
 	if err != nil {
 		return // gofmt reports the syntax problem with a better message
 	}
 	scope := g.pkg.Types.Scope()
+	if g.generatedNames == nil {
+		g.generatedNames = map[string]bool{}
+	}
+	for name := range declarationNames(f) {
+		if pos, ok := g.testNames[name]; ok {
+			log.Fatalf("generated declaration %s collides with test declaration at %s", name, pos)
+		}
+		if g.generatedNames[name] {
+			log.Fatalf("duplicate generated declaration %s — generated outputs cannot share this name", name)
+		}
+		g.generatedNames[name] = true
+	}
 	handWritten := func(obj types.Object) bool {
 		if obj == nil || obj.Pkg() != g.pkg.Types {
 			return false
@@ -281,6 +293,19 @@ func (g *generator) guardGeneratedNames(src, outPath string) {
 	refuse := func(what string, obj types.Object) {
 		log.Fatalf("%s is already declared by hand at %s — rename it, or drop the flag that generates it (the generated %s cannot coexist with it)",
 			what, g.pkg.Fset.Position(obj.Pos()), filepath.Base(outPath))
+	}
+	// Unresolved identifiers exclude locals and selector names. A package
+	// declaration can shadow a predeclared name used by the generated code,
+	// even when none of our own declarations collide with it.
+	for _, id := range f.Unresolved {
+		if types.Universe.Lookup(id.Name) != nil {
+			if pos, ok := g.testNames[id.Name]; ok {
+				log.Fatalf("predeclared name %s is shadowed by test declaration at %s", id.Name, pos)
+			}
+			if obj := scope.Lookup(id.Name); handWritten(obj) {
+				refuse("predeclared name "+id.Name, obj)
+			}
+		}
 	}
 	for _, d := range f.Decls {
 		switch d := d.(type) {
@@ -307,10 +332,13 @@ func (g *generator) guardGeneratedNames(src, outPath string) {
 			if !ok {
 				continue
 			}
-			if m, _, _ := types.LookupFieldOrMethod(types.NewPointer(named), true, g.pkg.Types, d.Name.Name); handWritten(m) {
-				if _, isFn := m.(*types.Func); isFn {
-					refuse("method "+id.Name+"."+d.Name.Name, m)
+			if m, index, _ := types.LookupFieldOrMethod(types.NewPointer(named), true, g.pkg.Types, d.Name.Name); handWritten(m) {
+				// A declared method may legally shadow a promoted field; the
+				// generated selector still reaches it via its embedding path.
+				if _, field := m.(*types.Var); field && len(index) > 1 {
+					continue
 				}
+				refuse("method "+id.Name+"."+d.Name.Name, m)
 			}
 		case *ast.GenDecl:
 			for _, sp := range d.Specs {
@@ -329,4 +357,83 @@ func (g *generator) guardGeneratedNames(src, outPath string) {
 			}
 		}
 	}
+}
+
+// Ask go list for the active test files so build tags and external test
+// packages are respected, without requiring stale generated tests to compile.
+func loadTestNames(dir, packageName string) map[string]token.Position {
+	pkgs, err := packages.Load(&packages.Config{Dir: dir, Mode: packages.NeedName | packages.NeedFiles, Tests: true}, ".")
+	if err != nil {
+		log.Fatalf("list test files: %v", err)
+	}
+	names := map[string]token.Position{}
+	seen := map[string]bool{}
+	for _, pkg := range pkgs {
+		if pkg.Name != packageName {
+			continue
+		}
+		for _, path := range pkg.GoFiles {
+			if !strings.HasSuffix(path, "_test.go") || seen[path] {
+				continue
+			}
+			seen[path] = true
+			fset := token.NewFileSet()
+			f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+			if err != nil {
+				log.Fatalf("parse test declarations: %v", err)
+			}
+			if hasZeroJSONHeader(f) {
+				continue
+			}
+			for name, pos := range declarationNames(f) {
+				names[name] = fset.Position(pos)
+			}
+		}
+	}
+	return names
+}
+
+// Methods use receiver-qualified keys; top-level declarations share one
+// namespace. The same inventory checks both test and generated declarations.
+func declarationNames(f *ast.File) map[string]token.Pos {
+	names := map[string]token.Pos{}
+	add := func(name string, pos token.Pos) {
+		if name == "_" || name == "init" {
+			return
+		}
+		if _, exists := names[name]; exists {
+			log.Fatalf("duplicate generated declaration %s", name)
+		}
+		names[name] = pos
+	}
+	for _, decl := range f.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			name := d.Name.Name
+			if d.Recv != nil {
+				r := d.Recv.List[0].Type
+				if p, ok := r.(*ast.StarExpr); ok {
+					r = p.X
+				}
+				if id, ok := r.(*ast.Ident); ok {
+					name = id.Name + "." + name
+				} else {
+					continue
+				}
+			}
+			add(name, d.Pos())
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				switch s := spec.(type) {
+				case *ast.TypeSpec:
+					add(s.Name.Name, s.Pos())
+				case *ast.ValueSpec:
+					for _, n := range s.Names {
+						add(n.Name, n.Pos())
+					}
+				}
+			}
+		}
+	}
+	return names
 }

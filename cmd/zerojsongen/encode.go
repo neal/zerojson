@@ -30,10 +30,45 @@ func qualDot(q string) string {
 }
 
 func (g *generator) genEncode(ti typeInfo) {
+	g.genEncodeContext(ti, true)
+	if g.needsValueEncode(ti.name) {
+		g.genEncodeContext(ti, false)
+	}
+}
+
+// Only value fields inherit their parent's addressability. Pointer pointees
+// and slice elements remain addressable even inside a non-addressable map value.
+func (g *generator) needsValueEncode(name string) bool {
+	if g.compat {
+		return false
+	} // generated value-receiver MarshalJSON is authoritative
+	for _, ti := range g.types {
+		if ti.name != name {
+			continue
+		}
+		for _, f := range ti.fields {
+			if f.ptr {
+				continue
+			}
+			if (f.kind == kMarshaler && !f.marshalOnValue) || (f.kind == kTextMarshaler && !f.textOnValue) ||
+				(f.kind == kStruct && g.needsValueEncode(f.elem)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (g *generator) genEncodeContext(ti typeInfo, addressable bool) {
 	g.p("")
-	g.p("// AppendZJSON appends the JSON encoding of v to dst. On error the")
-	g.p("// returned buffer contains a partial encoding and must be discarded.")
-	g.p("func (v *%s) AppendZJSON(dst []byte) ([]byte, error) {", ti.name)
+	if addressable {
+		g.p("// AppendZJSON appends the JSON encoding of v to dst. On error the")
+		g.p("// returned buffer contains a partial encoding and must be discarded.")
+		g.p("func (v *%s) AppendZJSON(dst []byte) ([]byte, error) {", ti.name)
+	} else {
+		g.p("// zjAppendValue_%s preserves map-value method addressability.", ti.name)
+		g.p("func zjAppendValue_%s(dst []byte, v *%s) ([]byte, error) {", ti.name, ti.name)
+	}
 	g.p("\tdst = append(dst, '{')")
 	g.p("\tn := len(dst)")
 	g.p("\t_ = n")
@@ -63,10 +98,10 @@ func (g *generator) genEncode(ti typeInfo) {
 			g.p("\t\tif v.%s == nil {", f.access)
 			g.p("\t\t\tdst = append(dst, \"null\"...)")
 			g.p("\t\t} else {")
-			g.emitValue(f, "\t\t\t")
+			g.emitValue(f, "\t\t\t", addressable)
 			g.p("\t\t}")
 		} else {
-			g.emitValue(f, "\t\t")
+			g.emitValue(f, "\t\t", addressable)
 		}
 		g.p("\t}")
 	}
@@ -226,7 +261,7 @@ func (g *generator) zeroGate(f fieldInfo) string {
 }
 
 // emitValue writes the value-encoding statement.
-func (g *generator) emitValue(f fieldInfo, ind string) {
+func (g *generator) emitValue(f fieldInfo, ind string, addressable bool) {
 	deref := func(expr string) string {
 		if f.ptr {
 			return "*" + expr
@@ -234,6 +269,18 @@ func (g *generator) emitValue(f fieldInfo, ind string) {
 		return expr
 	}
 	e := "v." + f.access
+	if !addressable && !f.ptr {
+		if (f.kind == kMarshaler && !f.marshalOnValue) || (f.kind == kTextMarshaler && !f.textOnValue) {
+			g.p("%svar err error", ind)
+			g.p("%sdst, err = zerojson.AppendInterface(dst, %s)", ind, e)
+			g.p("%sif err != nil { return dst, err }", ind)
+			return
+		}
+		if f.kind == kStruct && g.needsValueEncode(f.elem) {
+			g.emitValueStructAppend(f.elem, e, ind)
+			return
+		}
+	}
 	// ce is the collection value for slice/map kinds: the field itself,
 	// or, for a pointer-to-slice/map field, the pointee (parenthesized so
 	// indexing and ranging apply to the collection, not the pointer).
@@ -382,9 +429,7 @@ func (g *generator) emitValue(f fieldInfo, ind string) {
 		g.p("%s\t\tdst = append(dst, ':')", ind)
 		switch f.valInfo.kind {
 		case kStruct:
-			g.p("%s\t\tvar err error", ind)
-			g.p("%s\t\tdst, err = mv.AppendZJSON(dst)", ind)
-			g.p("%s\t\tif err != nil { return dst, err }", ind)
+			g.emitValueStructAppend(f.valInfo.elem, "mv", ind+"\t\t")
 		case kMarshaler:
 			if f.valInfo.marshalOnValue {
 				g.p("%s\t\traw, err := mv.MarshalJSON()", ind)
@@ -425,6 +470,16 @@ func (g *generator) emitValue(f fieldInfo, ind string) {
 		g.p("%s\tdst = append(dst, '}')", ind)
 		g.p("%s}", ind)
 	}
+}
+
+func (g *generator) emitValueStructAppend(name, expr, ind string) {
+	g.p("%svar err error", ind)
+	if g.needsValueEncode(name) {
+		g.p("%sdst, err = zjAppendValue_%s(dst, &%s)", ind, name, expr)
+	} else {
+		g.p("%sdst, err = %s.AppendZJSON(dst)", ind, expr)
+	}
+	g.p("%sif err != nil { return dst, err }", ind)
 }
 
 // emitLeafAppend emits an encode statement for a leaf-kind value expr.

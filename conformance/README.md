@@ -44,6 +44,38 @@ divergences, the normal value and byte-identity comparisons still apply.
 
 Coverage and its oracles (extended campaigns run only when requested):
 
+`TestIndependentChallenge` uses separate typed observations, without the schema
+campaign's graph cloners or allowlists. It covers overlapping slices, root
+collection aliases, nested callback replacement, and pooled error/panic recovery.
+Set `ZEROJSON_CHALLENGE_CANDIDATE` to a frozen checkout to build both generator
+and runtime from that candidate while running the current challenge suite.
+`ZEROJSON_CHALLENGE_RACE=1` enables race/checkptr instrumentation;
+`ZEROJSON_CHALLENGE_NOUNSAFE=1` checks the safe implementation.
+
+Byte fuzzing varies documents, not Go method sets or object graphs. The
+generator families complement it with executable source fixtures:
+
+- `publication_test.go` captures references during decoding, then exercises
+  duplicate/null/replacement sequences. It compares retained values and
+  pointer identity before the next pooled call, across copy/borrow modes.
+- `method_set_test.go` enumerates JSON/Text method-presence combinations on
+  byte-backed fields and slices, checking both array and base64 inputs.
+- `package_layout_test.go` compiles dependencies named after every Go
+  predeclared identifier and checks stable regeneration.
+
+These enforce separate rules: published storage survives within a decode;
+representation shortcuts preserve method dispatch; import qualifiers cannot
+shadow generated code's identifiers. Curated mutants check the tests'
+sensitivity. Passing a family establishes coverage of its modeled dimensions,
+not of every possible callback or schema.
+
+Generated fuzzers compare the original input's zerojson result with a
+schema-aware stdlib projection: only case-fold-only struct members are removed
+for the oracle. Exact duplicate members stay in order, dictionaries and opaque
+codecs are untouched, and unrelated value errors remain checked. Negative
+tests inject a wrong-kind decoder to verify that this normalization cannot
+grant an unrelated failure an exemption.
+
 | Property | Oracle(s) | Where |
 |---|---|---|
 | Encode byte-identity | easyjson (real generated code) | `codec/event_codec_test.go` (`TestByteIdenticalToStdlib`* against stdlib too, since the two agree for the fixture), `codec/value_fuzz_test.go`'s `FuzzEventValueSpaceEncode` (value-space, not JSON-text-space — reaches NaN/Inf, invalid UTF-8, extreme decimals) |
@@ -54,10 +86,12 @@ Coverage and its oracles (extended campaigns run only when requested):
 | Pool safety and callback/error behavior | retained caller memory, panic recovery, and stdlib parity | `codec/pool_safety_test.go`, `callback_test.go`, `error_path_test.go`, and `generator/error_path_test.go` |
 | Named-container null semantics | `encoding/json`, with the v1-on-v2 TextUnmarshaler drift pinned | `generator/null_policy_test.go`; 700 cases crossing underlying kinds, method sets, pointers, duplicate keys, reused targets, and copy/borrow/pooled modes |
 | Raw fuzz-oracle sensitivity | deliberately wrong generated decoders must fail with the expected diagnostic | `generator/raw_oracle_test.go`; 15 mutants across struct, slice, map, and nested Raw graphs, checking values and both error directions |
+| Encode value preservation | `encoding/json`, normalizing map order, escaping and equivalent number spellings without float64 rounding | generated per-type fuzzers; `generator/encode_oracle_test.go` proves constant-value and dropped-field mutants fail |
 | Generated-method provenance | generator-specific source headers plus stdlib byte identity | `cmd/zerojsongen`'s `TestReplaceableCodecOutputIsGeneratorSpecific` and `generator/typeshape`'s `L_text*` cells |
 | Generated schema reachability | `encoding/json` acceptance plus the per-type differential properties | `codec/zerojson_gen_fuzz_test.go`; every declared field receives a correctly-shaped seed, containers are non-empty, and escaped-string, invalid-UTF-8, and both `[]byte` forms are seeded |
 | Multi-feature schema interactions | `encoding/json` over reproducible generated temporary packages | `generator/schema_campaign_test.go`; random multi-field schemas plus 32 type/container combinations, both generation modes; controlled by `ZEROJSON_SCHEMA_SEED` / `ZEROJSON_SCHEMA_COUNT` |
-| Stateful caller-owned alias graphs | `encoding/json`, pointer topology, callback counts, and retained input bytes | schema campaign's `testdata/schema_campaign` fixture; 512 operation pairs plus opt-in `ZEROJSON_SCHEMA_FUZZTIME` sequence fuzzing; failed packages/corpora retained under `testdata/schema-failures` |
+| Stateful caller-owned alias graphs | `encoding/json`, pointer/map topology, retained maps, callback counts, and retained input bytes | schema campaign's `testdata/schema_campaign` fixture; 512 operation pairs plus opt-in `ZEROJSON_SCHEMA_FUZZTIME` sequence fuzzing; failed packages/corpora retained under `testdata/schema-failures` |
+| References acquired during decode | `encoding/json`, retained references, alias topology, and callback event order | six seeded publication layouts with plain/JSON/Text leaves; direct/nested payloads, callback replacement/aliasing, and operation-pair enumeration; `FuzzPublicationCampaign` varies action sequences and copy/borrow/pooled modes |
 | Decode semantics, 3rd opinion | `encoding/json/v2` (via `go-json-experiment/json`) | `codec/jsonv2_test.go`'s `FuzzDecodeAgainstJSONV2` and the three divergence-pinning tests below |
 | Ordered-vs-fallback decode agreement | zerojson's own two internal paths | `codec/ordered_test.go`'s `FuzzOrderedVsFallback` |
 | Truncation safety | none needed (error-not-panic is enumerable) | `codec/truncation_test.go` |
@@ -158,7 +192,7 @@ types with direct/pointer/slice/map positions. Seeds also vary aliases, named
 containers, hidden embeds, and omission tags.
 
 A stateful fixture exercises 512 operation pairs across copy/borrow modes.
-It checks values, retained pointers, alias topology, callback counts, borrowed
+It checks values, retained pointers, map-header aliases, alias topology, callback counts, borrowed
 input integrity, and decoder reuse after errors. Failed targets need not match
 stdlib's partial state: a detached, alias-preserving copy of zerojson's
 post-error graph initializes the next operation's oracle. Successful results
@@ -169,15 +203,18 @@ From the repository root:
 ```sh
 GOMAXPROCS=2 ZEROJSON_SCHEMA_SEED=1 ZEROJSON_SCHEMA_COUNT=128 \
   ZEROJSON_SCHEMA_FUZZTIME=100000x \
-  go test ./conformance/generator -run '^TestGeneratedSchemaCampaign$' -count=1 -v
+  go test ./conformance/generator -run '^TestGeneratedSchemaCampaign$' -count=1 -v -timeout=30m
 ```
 
 - `ZEROJSON_SCHEMA_SEED` reproduces the package.
 - `ZEROJSON_SCHEMA_COUNT` selects 1–500 random schemas, in addition to the matrix.
-- `ZEROJSON_SCHEMA_FUZZTIME` enables sequence fuzzing with one worker per
-  generation mode. Execution counts avoid the Go fuzz wall-clock deadline race.
+- `ZEROJSON_SCHEMA_FUZZTIME` budgets each of the two sequence targets separately
+  in each generation mode (four sequential runs, one worker each). Execution
+  counts avoid the Go fuzz wall-clock deadline race.
 - `ZEROJSON_SCHEMA_RACE=1` and `ZEROJSON_CHECKPTR=1` instrument generated
-  tests and the optional sequence fuzzing.
+  tests and the optional sequence fuzzing. Start with `1000x` when combining
+  them: instrumented execution can be substantially slower. The outer
+  `go test -timeout` must cover all four runs, compilation, and seed tests.
 
 Failed source packages and minimized fuzz corpora are retained under
 `conformance/testdata/schema-failures/`, with replay instructions. This directory

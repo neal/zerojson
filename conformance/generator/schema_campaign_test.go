@@ -415,12 +415,15 @@ func TestGeneratedSchemaCampaign(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "schema_test.go"), []byte(schemaBehaviorSource(seed, schemas)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for name, data := range map[string]string{"state.go": schemaStateTypes, "state_test.go": schemaStateTests} {
+	publicationTypes, publicationRunners, publicationNames := publicationCampaignSource(seed)
+	for name, data := range map[string]string{"state.go": schemaStateTypes, "state_test.go": schemaStateTests,
+		"publication.go": publicationTypes, "publication_runners_test.go": publicationRunners, "publication_test.go": publicationCampaignTests} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	typeNames = append(typeNames, "CampaignState")
+	typeNames = append(typeNames, publicationNames...)
 
 	for _, mode := range []string{"ordered", "fallback"} {
 		// Do not overwrite the first failed codec before it is preserved.
@@ -449,13 +452,16 @@ func TestGeneratedSchemaCampaign(t *testing.T) {
 				t.Fatalf("schema seed=%#x count=%d: %v\n%s", seed, count, err, out)
 			}
 			if budget := os.Getenv("ZEROJSON_SCHEMA_FUZZTIME"); budget != "" {
-				fuzzArgs := append([]string{"test", "-run=^$", "-fuzz=^FuzzCampaignState$", "-fuzztime=" + budget, "-fuzzminimizetime=5s", "-parallel=1", "-timeout=30m"}, instrumentation...)
-				cmd = exec.Command("go", append(fuzzArgs, ".")...)
-				cmd.Dir = dir
-				if out, err := cmd.CombinedOutput(); err != nil {
-					t.Fatalf("state campaign fuzz: %v\n%s", err, out)
-				} else {
-					t.Logf("state campaign fuzz:\n%s", out)
+				for _, target := range []string{"FuzzCampaignState", "FuzzPublicationCampaign"} {
+					t.Logf("starting fuzz target=%s budget=%s", target, budget)
+					fuzzArgs := append([]string{"test", "-run=^$", "-fuzz=^" + target + "$", "-fuzztime=" + budget, "-fuzzminimizetime=5s", "-parallel=1", "-timeout=30m"}, instrumentation...)
+					cmd = exec.Command("go", append(fuzzArgs, ".")...)
+					cmd.Dir = dir
+					if out, err := cmd.CombinedOutput(); err != nil {
+						t.Fatalf("state campaign fuzz %s: %v\n%s", target, err, out)
+					} else {
+						t.Logf("state campaign fuzz %s:\n%s", target, out)
+					}
 				}
 			}
 		}) {

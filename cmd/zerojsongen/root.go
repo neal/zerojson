@@ -119,9 +119,7 @@ func (g *generator) emitElemAppend(rf *fieldInfo, expr, ind string) {
 func (g *generator) emitMapValueAppend(vi *fieldInfo, expr, ind string) {
 	switch vi.kind {
 	case kStruct:
-		g.p("%svar err error", ind)
-		g.p("%sdst, err = %s.AppendZJSON(dst)", ind, expr)
-		g.p("%sif err != nil { return dst, err }", ind)
+		g.emitValueStructAppend(vi.elem, expr, ind)
 	case kMarshaler:
 		if vi.marshalOnValue {
 			g.p("%sraw, err := %s.MarshalJSON()", ind, expr)
@@ -160,7 +158,7 @@ func (g *generator) emitMapValueAppend(vi *fieldInfo, expr, ind string) {
 	}
 }
 
-// genRootDecode emits UnmarshalZJSON/Borrow wrappers and zjDecode<T> for a
+// genRootDecode emits UnmarshalZJSON/Borrow wrappers and zjDecode_<T> for a
 // slice/map root. There is a single decode path (no ordered/fallback split
 // at the root level; element structs keep their own ordered fast path).
 func (g *generator) genRootDecode(ti typeInfo) {
@@ -219,6 +217,16 @@ func (g *generator) emitRootSliceDecode(ti typeInfo) {
 	// Reset the reusable cell's length (keeping capacity) before repopulating
 	// — the same reset-first discipline slice fields use, so a reused arena
 	// (pooled decode) or a duplicate decode never doubles up elements.
+	if rf.byteElem != "" {
+		g.p("%sif l.IsDelim('\"') {", ind)
+		g.p("%s\t*v = %s", ind, byteSliceReadExpr(*rf))
+		g.p("%s\treturn", ind)
+		g.p("%s}", ind)
+	}
+	// Root decoding enters once per public call. Non-pooled callers retain
+	// their existing slice aliases; pooled wrappers zero *v before entry,
+	// so their persistent cell never adopts pre-existing caller storage.
+	g.p("%sif *v != nil { %s = *v }", ind, cell)
 	g.p("%s%s = %s[:0]", ind, cell, cell)
 	g.p("%sif l.EnterArray() {", ind)
 	g.p("%sfor {", ind)

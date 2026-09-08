@@ -146,26 +146,14 @@ func fuzzSequenceSeeds(ti typeInfo) []string {
 	return seeds
 }
 
-func fuzzFieldArgs(fields []fieldInfo) string {
-	declared := make([]string, 0, len(fields))
-	for _, f := range fields {
-		declared = append(declared, fmt.Sprintf("%q", f.jsonName))
-	}
-	if len(declared) == 0 {
-		return ""
-	}
-	return ", " + strings.Join(declared, ", ")
-}
-
 // emitStdlibRejectClassify emits the decode-arm handling of a stdlib
 // json.Unmarshal that REJECTS data: a value-class rejection (see
 // zjStdlibValueError) requires zerojson to reject the same bytes too, while
 // a grammar-level rejection is skipped as an allowed divergence. n is the
 // type being fuzzed. Assumes `data []byte` and `t *testing.T` are in scope.
-func emitStdlibRejectClassify(b *strings.Builder, n string, fields []fieldInfo) {
-	fieldArgs := fuzzFieldArgs(fields)
-	fmt.Fprintf(b, "\t\tif serr := json.Unmarshal(data, &seed); serr != nil {\n")
-	fmt.Fprintf(b, "\t\t\tif zjStdlibValueError(data, serr%s) {\n", fieldArgs)
+func emitStdlibRejectClassify(b *strings.Builder, n string) {
+	fmt.Fprintf(b, "\t\tif serr := json.Unmarshal(oracleData, &seed); serr != nil {\n")
+	fmt.Fprintf(b, "\t\t\tif zjStdlibValueError(serr) {\n")
 	fmt.Fprintf(b, "\t\t\t\tvar zj %s\n", n)
 	fmt.Fprintf(b, "\t\t\t\tif zj.UnmarshalZJSON(data) == nil {\n")
 	fmt.Fprintf(b, "\t\t\t\t\tt.Fatalf(\"stdlib rejected value in %%q (%%v) but zerojson accepted it\", data, serr)\n")
@@ -177,8 +165,8 @@ func emitStdlibRejectClassify(b *strings.Builder, n string, fields []fieldInfo) 
 
 // emitRawValueComparison compares successful decodes as Go values before any
 // canonical re-encode can erase distinctions such as invalid UTF-8 or nil
-// versus empty containers. Opaque custom-codec fields and case-fold-only keys
-// are excluded because neither has a meaningful raw-representation oracle.
+// versus empty containers. Opaque custom-codec fields are excluded; case-fold
+// differences are normalized only on the stdlib side using the schema.
 func (g *generator) emitRawValueComparison(b *strings.Builder, n string, fields []fieldInfo, root bool) {
 	var differences []string
 	if root {
@@ -195,9 +183,9 @@ func (g *generator) emitRawValueComparison(b *strings.Builder, n string, fields 
 	}
 	fmt.Fprintf(b, "\t\t{\n")
 	fmt.Fprintf(b, "\t\t\tvar stdRaw, zjRaw %s\n", n)
-	fmt.Fprintf(b, "\t\t\tstdErr := json.Unmarshal(data, &stdRaw)\n")
+	fmt.Fprintf(b, "\t\t\tstdErr := json.Unmarshal(oracleData, &stdRaw)\n")
 	fmt.Fprintf(b, "\t\t\tzjErr := zjRaw.UnmarshalZJSON(data)\n")
-	fmt.Fprintf(b, "\t\t\tif stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{%s}) && (%s) {\n", strings.TrimPrefix(fuzzFieldArgs(fields), ", "), strings.Join(differences, " || "))
+	fmt.Fprintf(b, "\t\t\tif stdErr == nil && zjErr == nil && (%s) {\n", strings.Join(differences, " || "))
 	fmt.Fprintf(b, "\t\t\t\tt.Fatalf(\"raw decode value divergence\\ninput: %%q\\nstdlib: %%#v\\nzerojson: %%#v\", data, &stdRaw, &zjRaw)\n")
 	fmt.Fprintf(b, "\t\t\t}\n")
 	fmt.Fprintf(b, "\t\t}\n")
@@ -329,7 +317,7 @@ func emitDecodeErrorDirection(b *strings.Builder, n string) {
 	fmt.Fprintf(b, "\t\t\tvar zjRaw %s\n", n)
 	fmt.Fprintf(b, "\t\t\tif zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowed%s(data) {\n", n)
 	fmt.Fprintf(b, "\t\t\t\tvar stdRaw %s\n", n)
-	fmt.Fprintf(b, "\t\t\t\tif json.Unmarshal(data, &stdRaw) == nil {\n")
+	fmt.Fprintf(b, "\t\t\t\tif json.Unmarshal(oracleData, &stdRaw) == nil {\n")
 	fmt.Fprintf(b, "\t\t\t\t\tt.Fatalf(\"zerojson rejected %%q that encoding/json accepted: %%v\", data, zjErr)\n")
 	fmt.Fprintf(b, "\t\t\t\t}\n")
 	fmt.Fprintf(b, "\t\t\t}\n")
@@ -377,6 +365,9 @@ func (g *generator) emitNoOracleFuzz(b *strings.Builder, ti typeInfo) {
 	fmt.Fprintf(b, "\tif err := reZJ.UnmarshalZJSON(enc); err != nil {\n")
 	fmt.Fprintf(b, "\t\tt.Fatalf(\"zerojson could not re-decode its own output %%q: %%v\", enc, err)\n")
 	fmt.Fprintf(b, "\t}\n")
+	fmt.Fprintf(b, "\tbefore, beforeErr := json.Marshal(&viaZJ)\n")
+	fmt.Fprintf(b, "\tafter, afterErr := json.Marshal(&reZJ)\n")
+	fmt.Fprintf(b, "\tif beforeErr == nil && afterErr == nil { zjAssertJSONEqual(t, before, after) }\n")
 	if ti.rootField != nil {
 		// Slice/map roots have a single decode path: no ordered/fallback
 		// split to compare (mirrors emitRootFuzz).
@@ -420,7 +411,7 @@ func (g *generator) generateTests() string {
 			needsReflect = true
 		}
 	}
-	fmt.Fprintf(&b, "import (\n\t\"bytes\"\n\t\"encoding/json\"\n\t\"errors\"\n")
+	fmt.Fprintf(&b, "import (\n\t\"bytes\"\n\t\"encoding/json\"\n\t\"errors\"\n\t\"math/big\"\n")
 	if needsReflect {
 		fmt.Fprintf(&b, "\t\"reflect\"\n")
 	}
@@ -429,6 +420,8 @@ func (g *generator) generateTests() string {
 		fmt.Fprintf(&b, "\n\t%q\n", runtimePath)
 	}
 	fmt.Fprintf(&b, ")\n\n")
+	b.WriteString(jsonValueOracleSource)
+	g.emitOracleShapes(&b)
 	if needsReflect {
 		// Access raw fields through reflection rather than emitted selector
 		// expressions: a promoted field may sit behind a nil embedded pointer,
@@ -452,48 +445,16 @@ func (g *generator) generateTests() string {
 	// zjStdlibValueError classifies a stdlib json.Unmarshal failure: a
 	// grammar-level SyntaxError is an allowed divergence (zerojson's trusted
 	// path is deliberately lenient about leading zeros, raw control bytes in
-	// values, etc.), but a VALUE-class failure — a number that does not fit
-	// or isn't valid for its target type (UnmarshalTypeError whose value
-	// reads "number ...", or an invalid bare json:",string" value) — is one
+	// values, etc.), but a VALUE-class failure — any UnmarshalTypeError
+	// or an invalid bare json:",string" value — is one
 	// zerojson has NO leniency for and must reject too. A string-into-number
 	// or bare-into-,string mismatch must be rejected by both decoders.
-	fmt.Fprintf(&b, "func zjStdlibValueError(data []byte, err error, fields ...string) bool {\n")
-	fmt.Fprintf(&b, "\tif zjHasCaseFoldOnlyKey(data, fields) { return false }\n")
+	fmt.Fprintf(&b, "func zjStdlibValueError(err error) bool {\n")
 	fmt.Fprintf(&b, "\tvar ute *json.UnmarshalTypeError\n")
 	fmt.Fprintf(&b, "\tif errors.As(err, &ute) {\n")
-	fmt.Fprintf(&b, "\t\treturn strings.HasPrefix(ute.Value, \"number\")\n")
+	fmt.Fprintf(&b, "\t\treturn true\n")
 	fmt.Fprintf(&b, "\t}\n")
 	fmt.Fprintf(&b, "\treturn strings.Contains(err.Error(), \"invalid use of ,string struct tag\")\n")
-	fmt.Fprintf(&b, "}\n\n")
-	// encoding/json matches struct keys case-insensitively while zerojson's
-	// documented contract is exact-key matching. If stdlib reports a value
-	// error beneath a key that exists only as a case-folded spelling, zerojson
-	// correctly treats that member as unknown and may accept it. Walk an
-	// interface decode solely in the fuzz oracle to recognize that narrow
-	// condition; production decoding remains allocation-free.
-	fmt.Fprintf(&b, "func zjHasCaseFoldOnlyKey(data []byte, fields []string) bool {\n")
-	fmt.Fprintf(&b, "\tif len(fields) == 0 { return false }\n")
-	fmt.Fprintf(&b, "\tvar v any\n")
-	// UseNumber keeps syntactically valid, very large JSON numbers as text.
-	// Decoding into any with json.Unmarshal would first coerce them to float64
-	// and fail before the oracle could inspect the surrounding key spelling.
-	fmt.Fprintf(&b, "\tdec := json.NewDecoder(bytes.NewReader(data))\n")
-	fmt.Fprintf(&b, "\tdec.UseNumber()\n")
-	fmt.Fprintf(&b, "\tif dec.Decode(&v) != nil { return false }\n")
-	fmt.Fprintf(&b, "\tfor _, field := range fields { exact, folded := zjFindKeySpellings(v, field); if folded && !exact { return true } }\n")
-	fmt.Fprintf(&b, "\treturn false\n")
-	fmt.Fprintf(&b, "}\n\n")
-	fmt.Fprintf(&b, "func zjFindKeySpellings(v any, field string) (exact, folded bool) {\n")
-	fmt.Fprintf(&b, "\tswitch x := v.(type) {\n")
-	fmt.Fprintf(&b, "\tcase map[string]any:\n")
-	fmt.Fprintf(&b, "\t\tfor k, child := range x {\n")
-	fmt.Fprintf(&b, "\t\t\tif k == field { exact = true } else if strings.EqualFold(k, field) { folded = true }\n")
-	fmt.Fprintf(&b, "\t\t\te, f := zjFindKeySpellings(child, field); exact = exact || e; folded = folded || f\n")
-	fmt.Fprintf(&b, "\t\t}\n")
-	fmt.Fprintf(&b, "\tcase []any:\n")
-	fmt.Fprintf(&b, "\t\tfor _, child := range x { e, f := zjFindKeySpellings(child, field); exact = exact || e; folded = folded || f }\n")
-	fmt.Fprintf(&b, "\t}\n")
-	fmt.Fprintf(&b, "\treturn exact, folded\n")
 	fmt.Fprintf(&b, "}\n\n")
 	// Decimal libraries (shopspring-style) parse huge exponents compactly
 	// but expand them to millions of digits when re-encoding — a property
@@ -622,6 +583,7 @@ func (g *generator) generateTests() string {
 		fmt.Fprintf(&b, "\tf.Fuzz(func(t *testing.T, data []byte) {\n")
 		fmt.Fprintf(&b, "\t\tif zjFuzzHugeExponent(data) { return }\n")
 		emitNoOracleCall(&b, n, g.typeHasInvalidTag(n, map[string]bool{}))
+		fmt.Fprintf(&b, "\t\toracleData := zjOracleData(data, zjOracleShape%s)\n", n)
 		g.emitRawValueComparison(&b, n, ti.fields, false)
 		emitDecodeErrorDirection(&b, n)
 		if g.typeContainsRaw(ti.name, map[string]bool{}) {
@@ -632,7 +594,7 @@ func (g *generator) generateTests() string {
 		// zjStdlibValueError) additionally requires zerojson to reject it too
 		// — grammar leniency stays an allowed divergence.
 		fmt.Fprintf(&b, "\t\tvar seed %s\n", n)
-		emitStdlibRejectClassify(&b, n, ti.fields)
+		emitStdlibRejectClassify(&b, n)
 		fmt.Fprintf(&b, "\t\tcanon, err := json.Marshal(&seed)\n")
 		fmt.Fprintf(&b, "\t\tif err != nil { return }\n")
 		fmt.Fprintf(&b, "\t\tif zjNullOnValueUnmarshaler%s(canon) { return }\n", n)
@@ -650,13 +612,13 @@ func (g *generator) generateTests() string {
 		// Ordered-vs-fallback arm: the speculative ordered fast path
 		// (exercised via the public UnmarshalZJSON call above) must
 		// produce results identical to the fallback decoder called
-		// directly — both are in this package, so zjDecodeFallback<T>
+		// directly — both are in this package, so zjDecodeFallback_<T>
 		// and zjArena<T> (always generated, regardless of whether this
 		// type is ordered-eligible) are reachable here.
 		fmt.Fprintf(&b, "\t\tvar viaFallback %s\n", n)
 		fmt.Fprintf(&b, "\t\tlFallback := zerojson.NewLexer(canon, false)\n")
 		fmt.Fprintf(&b, "\t\t%s(&lFallback, &viaFallback, &%s{})\n", fallbackDecodeName(n), arenaName(n))
-		// Finish() lives in the public wrapper, not in zjDecodeFallback<T>
+		// Finish() lives in the public wrapper, not in zjDecodeFallback_<T>
 		// itself — applied here too so this fallback-only comparison uses
 		// the same entry-point contract the public path does (canon never
 		// has trailing content in practice, so this is a no-op today, but
@@ -671,6 +633,8 @@ func (g *generator) generateTests() string {
 		// Encode arm: zerojson output must re-decode and be stdlib-parseable.
 		fmt.Fprintf(&b, "\t\tenc, err := viaZJ.AppendZJSON(nil)\n")
 		fmt.Fprintf(&b, "\t\tif err != nil { return }\n")
+		fmt.Fprintf(&b, "\t\texpected, err := json.Marshal(&viaZJ)\n")
+		fmt.Fprintf(&b, "\t\tif err == nil { zjAssertJSONEqual(t, expected, enc) }\n")
 		fmt.Fprintf(&b, "\t\tvar reZJ %s\n", n)
 		fmt.Fprintf(&b, "\t\tif err := reZJ.UnmarshalZJSON(enc); err != nil {\n")
 		fmt.Fprintf(&b, "\t\t\tt.Fatalf(\"zerojson could not re-decode its own output %%q: %%v\", enc, err)\n")
@@ -682,7 +646,7 @@ func (g *generator) generateTests() string {
 		fmt.Fprintf(&b, "\t})\n}\n\n")
 		g.emitPoolSequenceFuzz(&b, ti)
 	}
-	return g.aliasTestImports(b.String())
+	return g.aliasGeneratedImports(b.String())
 }
 
 // emitPoolSequenceFuzz generates the stateful complement to each stateless
@@ -756,6 +720,7 @@ func (g *generator) emitRootFuzz(b *strings.Builder, ti typeInfo) {
 	fmt.Fprintf(b, "\tf.Fuzz(func(t *testing.T, data []byte) {\n")
 	fmt.Fprintf(b, "\t\tif zjFuzzHugeExponent(data) { return }\n")
 	emitNoOracleCall(b, n, g.typeHasInvalidTag(n, map[string]bool{}))
+	fmt.Fprintf(b, "\t\toracleData := zjOracleData(data, zjOracleShape%s)\n", n)
 	if g.fieldRawComparable(*ti.rootField, map[string]bool{}) {
 		g.emitRawValueComparison(b, n, nil, true)
 	}
@@ -764,7 +729,7 @@ func (g *generator) emitRootFuzz(b *strings.Builder, ti typeInfo) {
 		emitRawGraphRoundTrip(b, n)
 	}
 	fmt.Fprintf(b, "\t\tvar seed %s\n", n)
-	emitStdlibRejectClassify(b, n, nil)
+	emitStdlibRejectClassify(b, n)
 	fmt.Fprintf(b, "\t\tcanon, err := json.Marshal(&seed)\n")
 	fmt.Fprintf(b, "\t\tif err != nil { return }\n")
 	fmt.Fprintf(b, "\t\tif zjNullOnValueUnmarshaler%s(canon) { return }\n", n)
@@ -781,6 +746,8 @@ func (g *generator) emitRootFuzz(b *strings.Builder, ti typeInfo) {
 	fmt.Fprintf(b, "\t\t}\n")
 	fmt.Fprintf(b, "\t\tenc, err := viaZJ.AppendZJSON(nil)\n")
 	fmt.Fprintf(b, "\t\tif err != nil { return }\n")
+	fmt.Fprintf(b, "\t\texpected, err := json.Marshal(&viaZJ)\n")
+	fmt.Fprintf(b, "\t\tif err == nil { zjAssertJSONEqual(t, expected, enc) }\n")
 	fmt.Fprintf(b, "\t\tvar reZJ %s\n", n)
 	fmt.Fprintf(b, "\t\tif err := reZJ.UnmarshalZJSON(enc); err != nil {\n")
 	fmt.Fprintf(b, "\t\t\tt.Fatalf(\"zerojson could not re-decode its own output %%q: %%v\", enc, err)\n")

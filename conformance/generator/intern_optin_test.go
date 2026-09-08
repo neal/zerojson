@@ -53,8 +53,8 @@ func TestMapKeyInterningOptIn(t *testing.T) {
 	// Associate each behavior with its type. Global occurrence counts would
 	// miss an inverted condition because one copied and one interned path would
 	// still exist.
-	taggedMap := generatedFunction(t, code, "zjDecodeFallbackTagged")
-	untaggedMap := generatedFunction(t, code, "zjDecodeFallbackUntagged")
+	taggedMap := generatedFunction(t, code, "zjDecodeFallback_Tagged")
+	untaggedMap := generatedFunction(t, code, "zjDecodeFallback_Untagged")
 	if !strings.Contains(taggedMap, "zerojson.Intern(l.ReadKey())") {
 		t.Error("tagged map key is not interned")
 	}
@@ -70,8 +70,8 @@ func TestMapKeyInterningOptIn(t *testing.T) {
 
 	// Known enum values always use declared constants. Unknown values are
 	// arbitrary input and are copied unless the field explicitly opts in.
-	taggedEnum := generatedFunction(t, code, "zjDecodeFallbackTaggedEnum")
-	untaggedEnum := generatedFunction(t, code, "zjDecodeFallbackUntaggedEnum")
+	taggedEnum := generatedFunction(t, code, "zjDecodeFallback_TaggedEnum")
+	untaggedEnum := generatedFunction(t, code, "zjDecodeFallback_UntaggedEnum")
 	if !strings.Contains(taggedEnum, "Mode(zerojson.Intern(b))") {
 		t.Error("tagged enum unknown-value fallback is not interned")
 	}

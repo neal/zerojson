@@ -29,12 +29,15 @@ type CampaignNested struct {
 	P *int `json:"p"`
 }
 type CampaignState struct {
-	A      *int             `json:"a"`
-	B      *int             `json:"b"`
-	C      *CampaignCounter `json:"c"`
-	D      *CampaignCounter `json:"d"`
-	Any    any              `json:"any"`
-	S      *string          `json:"s"`
-	R      zerojson.Raw     `json:"r"`
-	Nested CampaignNested   `json:"nested"`
+	Map        map[string]int   `json:"map"`
+	OtherMap   map[string]int   `json:"other_map"`
+	MapPointer *map[string]int  `json:"map_pointer"`
+	A          *int             `json:"a"`
+	B          *int             `json:"b"`
+	C          *CampaignCounter `json:"c"`
+	D          *CampaignCounter `json:"d"`
+	Any        any              `json:"any"`
+	S          *string          `json:"s"`
+	R          zerojson.Raw     `json:"r"`
+	Nested     CampaignNested   `json:"nested"`
 }

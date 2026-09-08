@@ -1,8 +1,19 @@
 package main
 
 import (
+	"go/types"
 	"testing"
 )
+
+func TestImportAliasesAvoidPredeclaredNames(t *testing.T) {
+	g := &generator{imports: map[string]string{}, aliasOwner: map[string]string{}}
+	for _, name := range types.Universe.Names() {
+		alias := g.importAlias("example.com/"+name, name)
+		if types.Universe.Lookup(alias) != nil {
+			t.Errorf("predeclared import qualifier: %s", alias)
+		}
+	}
+}
 
 // TestImportAliasIsCollisionFree pins that packages whose names collide
 // with generated identifiers, with each other, or with an already-aliased

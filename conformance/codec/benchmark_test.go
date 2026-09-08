@@ -319,8 +319,8 @@ func BenchmarkDecodeEvent_Stdlib(b *testing.B) {
 // EventLeg is callback-free and therefore eligible for speculation. Both
 // benchmarks decode the same compact, declaration-ordered bytes into a fresh
 // arena; the only difference is that the ordered path (the public
-// dispatcher zjDecodeEventLeg) speculatively tries the ordered decoder first,
-// while the fallback path calls zjDecodeFallbackEventLeg directly. Both are
+// dispatcher zjDecode_EventLeg) speculatively tries the ordered decoder first,
+// while the fallback path calls zjDecodeFallback_EventLeg directly. Both are
 // in-package (the generated fallback decoder and arena type are callable
 // here), so this isolates the fast-path win without a -no-ordered build.
 // The two produce reflect.DeepEqual results by construction (pinned by
@@ -338,7 +338,7 @@ func BenchmarkDecodeEventLeg_OrderedPath(b *testing.B) {
 	for range b.N {
 		var a zjArenaEventLeg
 		l := zerojson.NewLexer(data, false)
-		zjDecodeEventLeg(&l, &e, &a)
+		zjDecode_EventLeg(&l, &e, &a)
 		l.Finish()
 		if err := l.Err(); err != nil {
 			b.Fatal(err)
@@ -359,7 +359,7 @@ func BenchmarkDecodeEventLeg_FallbackPath(b *testing.B) {
 	for range b.N {
 		var a zjArenaEventLeg
 		l := zerojson.NewLexer(data, false)
-		zjDecodeFallbackEventLeg(&l, &e, &a)
+		zjDecodeFallback_EventLeg(&l, &e, &a)
 		l.Finish()
 		if err := l.Err(); err != nil {
 			b.Fatal(err)

@@ -4,17 +4,20 @@ package compat
 
 import (
 	"encoding/binary"
-	"github.com/mailru/easyjson/jlexer"
-	"github.com/mailru/easyjson/jwriter"
+	jlexer_ "github.com/mailru/easyjson/jlexer"
+	jwriter_ "github.com/mailru/easyjson/jwriter"
 	zerojson "github.com/neal/zerojson"
 )
 
-// zjArenaPoint backs every pointer field of a decoded Point with a single
+// zjArenaPoint holds first-use pointer cells for a decoded Point in one
 // allocation, and (for -pool Decoders, which reuse an arena across
 // decodes instead of allocating one per call) holds a persistent
 // cell per slice/map field so repeated decodes reuse their backing
-// storage instead of reallocating it every time.
+// storage. Detached storage is not reused within the same decode.
 type zjArenaPoint struct {
+}
+
+func (a *zjArenaPoint) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -65,7 +68,7 @@ func (v *Point) UnmarshalZJSONBorrow(data []byte) error {
 func (v *Point) unmarshalZJSON(data []byte, borrow bool) error {
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaPoint{}
-	zjDecodePoint(&l, v, a)
+	zjDecode_Point(&l, v, a)
 	l.Finish()
 	return l.Err()
 }
@@ -75,20 +78,20 @@ func (v *Point) unmarshalZJSON(data []byte, borrow bool) error {
 // another package. Errors are reported through l, per the Reader contract.
 func (v *Point) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaPoint{}
-	zjDecodePoint(l, v, a)
+	zjDecode_Point(l, v, a)
 }
 
-// zjDecodePoint tries the speculative ordered fast path first (see ordered.go),
+// zjDecode_Point tries the speculative ordered fast path first (see ordered.go),
 // falling back to the general keyed decoder on any deviation from the
 // compact, declaration-ordered shape zerojson's own encoder emits.
-func zjDecodePoint(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
+func zjDecode_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
 	if l.IsNull() {
 		// Null leaves a value-typed struct unchanged. The public wrapper
 		// still calls Finish to reject trailing data.
 		return
 	}
 	start := l.Mark()
-	if zjDecodeOrderedPoint(l, v, a) {
+	if zjDecodeOrdered_Point(l, v, a) {
 		return
 	}
 	if l.Err() != nil {
@@ -99,17 +102,17 @@ func zjDecodePoint(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
 		return
 	}
 	l.OrderedBail(start)
-	zjDecodeFallbackPoint(l, v, a)
+	zjDecodeFallback_Point(l, v, a)
 }
 
-// zjDecodeOrderedPoint speculatively decodes a compact, declaration-ordered object
+// zjDecodeOrdered_Point speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
 // the general keyed loop. It returns false with zero observable
 // effect (once the caller rewinds via Lexer.OrderedBail) on any
 // structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallbackPoint;
+// non-compact syntax. The caller retries those through zjDecodeFallback_Point;
 // real value/grammar errors are preserved without a redundant retry.
-func zjDecodeOrderedPoint(l *zerojson.Lexer, v *Point, a *zjArenaPoint) bool {
+func zjDecodeOrdered_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) bool {
 	_ = a
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
@@ -173,7 +176,7 @@ func zjDecodeOrderedPoint(l *zerojson.Lexer, v *Point, a *zjArenaPoint) bool {
 				return false
 			}
 		} else {
-			if !zjDecodeOrderedFieldPoint(l, v, a, matched) {
+			if !zjDecodeOrderedField_Point(l, v, a, matched) {
 				return false
 			}
 			expected = matched + 1
@@ -195,7 +198,7 @@ func zjDecodeOrderedPoint(l *zerojson.Lexer, v *Point, a *zjArenaPoint) bool {
 	}
 }
 
-func zjDecodeOrderedFieldPoint(l *zerojson.Lexer, v *Point, a *zjArenaPoint, k int) bool {
+func zjDecodeOrderedField_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint, k int) bool {
 	if l.IsNull() {
 		if l.Err() != nil {
 			l.AnnotateFieldString(zjFieldNamesPoint[k])
@@ -272,10 +275,10 @@ func zjIsDeclaredKeyPoint(name string) bool {
 	return false
 }
 
-// zjDecodeFallbackPoint is the general keyed decoder: every member is read via
+// zjDecodeFallback_Point is the general keyed decoder: every member is read via
 // ReadKey and dispatched by a string switch. It handles arbitrary
 // field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallbackPoint(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
+func zjDecodeFallback_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
 	_ = a
 	if !l.EnterObject() {
 		return
@@ -322,7 +325,7 @@ func (v Point) MarshalJSON() ([]byte, error) { return v.AppendZJSON(nil) }
 func (v *Point) UnmarshalJSON(data []byte) error { return v.UnmarshalZJSON(data) }
 
 // MarshalEasyJSON implements easyjson.Marshaler via zerojson.
-func (v Point) MarshalEasyJSON(w *jwriter.Writer) {
+func (v Point) MarshalEasyJSON(w *jwriter_.Writer) {
 	b, err := v.AppendZJSON(nil)
 	if err != nil {
 		w.Error = err
@@ -338,7 +341,7 @@ func (v Point) MarshalEasyJSON(w *jwriter.Writer) {
 // trailing content in the outer document only when this call is the
 // genuine top-level entry point (easyjson.Unmarshal), not when the
 // method runs recursively as an ordinary field decode.
-func (v *Point) UnmarshalEasyJSON(l *jlexer.Lexer) {
+func (v *Point) UnmarshalEasyJSON(l *jlexer_.Lexer) {
 	isTopLevel := l.IsStart()
 	if data := l.Raw(); l.Ok() {
 		if err := v.UnmarshalZJSON(data); err != nil {

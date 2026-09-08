@@ -6,12 +6,342 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/neal/zerojson"
 )
+
+func zjAssertJSONEqual(t *testing.T, expected, actual []byte) {
+	t.Helper()
+	decode := func(b []byte) any {
+		d := json.NewDecoder(bytes.NewReader(b))
+		d.UseNumber()
+		var v any
+		if err := d.Decode(&v); err != nil {
+			t.Fatalf("encode semantic oracle: invalid JSON %q: %v", b, err)
+		}
+		if !json.Valid(b) {
+			t.Fatalf("encode semantic oracle: invalid JSON %q", b)
+		}
+		return v
+	}
+	if !zjJSONValueEqual(decode(expected), decode(actual)) {
+		t.Fatalf("encode value divergence\nexpected: %s\nactual: %s", expected, actual)
+	}
+}
+
+func zjJSONValueEqual(a, b any) bool {
+	switch x := a.(type) {
+	case nil:
+		return b == nil
+	case bool:
+		y, ok := b.(bool)
+		return ok && x == y
+	case string:
+		y, ok := b.(string)
+		return ok && x == y
+	case json.Number:
+		y, ok := b.(json.Number)
+		if !ok {
+			return false
+		}
+		xc, xe := zjJSONNumberParts(string(x))
+		yc, ye := zjJSONNumberParts(string(y))
+		return xc == yc && xe.Cmp(ye) == 0
+	case []any:
+		y, ok := b.([]any)
+		if !ok || len(x) != len(y) {
+			return false
+		}
+		for i := range x {
+			if !zjJSONValueEqual(x[i], y[i]) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		y, ok := b.(map[string]any)
+		if !ok || len(x) != len(y) {
+			return false
+		}
+		for k, v := range x {
+			w, ok := y[k]
+			if !ok || !zjJSONValueEqual(v, w) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func zjJSONNumberParts(s string) (string, *big.Int) {
+	exponent := new(big.Int)
+	if i := strings.IndexAny(s, "eE"); i >= 0 {
+		exponent.SetString(s[i+1:], 10)
+		s = s[:i]
+	}
+	negative := strings.HasPrefix(s, "-")
+	s = strings.TrimPrefix(s, "-")
+	if i := strings.IndexByte(s, '.'); i >= 0 {
+		exponent.Sub(exponent, big.NewInt(int64(len(s)-i-1)))
+		s = s[:i] + s[i+1:]
+	}
+	s = strings.TrimLeft(s, "0")
+	if s == "" {
+		return "0", new(big.Int)
+	}
+	trimmed := strings.TrimRight(s, "0")
+	exponent.Add(exponent, big.NewInt(int64(len(s)-len(trimmed))))
+	if negative {
+		trimmed = "-" + trimmed
+	}
+	return trimmed, exponent
+}
+
+// Only struct members that stdlib would match by case folding are removed.
+// Exact members (including duplicates), unknown values, dictionary keys and
+// custom codecs retain their semantics. This is not a blanket exemption:
+// unrelated value errors and all comparable exact fields remain checked.
+type zjOracleShape struct {
+	object bool
+	fields map[string]*zjOracleShape
+	elem   *zjOracleShape
+}
+
+func zjOracleData(data []byte, shape *zjOracleShape) []byte {
+	if !json.Valid(data) {
+		return data
+	}
+	projected, err := zjProjectOracle(data, shape)
+	if err != nil {
+		return data
+	}
+	return projected
+}
+
+func zjProjectOracle(data []byte, shape *zjOracleShape) ([]byte, error) {
+	if shape == nil {
+		return data, nil
+	}
+	trimmed := bytes.TrimSpace(data)
+	open, close := byte('['), byte(']')
+	if shape.object {
+		open, close = '{', '}'
+	}
+	if len(trimmed) == 0 || trimmed[0] != open {
+		return data, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	if _, err := dec.Token(); err != nil {
+		return nil, err
+	}
+	out := []byte{open}
+	first := true
+	for dec.More() {
+		var key string
+		child := shape.elem
+		drop := false
+		if shape.object {
+			token, err := dec.Token()
+			if err != nil {
+				return nil, err
+			}
+			key = token.(string)
+			if shape.fields != nil {
+				var exact bool
+				child, exact = shape.fields[key]
+				if !exact {
+					for name := range shape.fields {
+						if strings.EqualFold(name, key) {
+							drop = true
+							break
+						}
+					}
+				}
+			}
+		}
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return nil, err
+		}
+		if drop {
+			continue
+		}
+		value, err := zjProjectOracle(raw, child)
+		if err != nil {
+			return nil, err
+		}
+		if !first {
+			out = append(out, ',')
+		}
+		first = false
+		if shape.object {
+			name, err := json.Marshal(key)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, name...)
+			out = append(out, ':')
+		}
+		out = append(out, value...)
+	}
+	if _, err := dec.Token(); err != nil {
+		return nil, err
+	}
+	return append(out, close), nil
+}
+
+var zjOracleShapeEvent = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"created_at":   nil,
+	"closed_at":    nil,
+	"amount":       nil,
+	"size":         nil,
+	"total":        nil,
+	"origin":       nil,
+	"location":     nil,
+	"comment":      nil,
+	"mode":         nil,
+	"phase":        nil,
+	"seq":          nil,
+	"recv_ns":      nil,
+	"tags":         nil,
+	"parents":      nil,
+	"meta":         zjOracleShapeEventMeta,
+	"meta_ptr":     zjOracleShapeEventMeta,
+	"items":        &zjOracleShape{elem: zjOracleShapeEventLeg},
+	"ptr_items":    &zjOracleShape{elem: zjOracleShapeEventLeg},
+	"names":        &zjOracleShape{object: false, elem: nil},
+	"count":        nil,
+	"shard":        nil,
+	"flags":        nil,
+	"weight":       nil,
+	"ratio32":      nil,
+	"timeout":      nil,
+	"primary_date": nil,
+	"second_date":  nil,
+	"amounts":      &zjOracleShape{object: true, elem: nil},
+	"extra":        nil,
+	"bag":          &zjOracleShape{object: true, elem: nil},
+	"any_list":     &zjOracleShape{object: false, elem: nil},
+	"id":           nil,
+	"active":       nil,
+	"created_by":   nil,
+	"version":      nil,
+}}
+var zjOracleShapeRawHolder = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"table": nil,
+	"set":   nil,
+	"where": nil,
+}}
+var zjOracleShapeOmitZeroCases = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"when":        nil,
+	"amount":      nil,
+	"id":          nil,
+	"count":       nil,
+	"name":        nil,
+	"ptr":         nil,
+	"nil_slice":   &zjOracleShape{object: false, elem: nil},
+	"empty_slice": &zjOracleShape{object: false, elem: nil},
+}}
+var zjOracleShapeStringOptCases = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"count":  nil,
+	"amount": nil,
+}}
+var zjOracleShapeAppenderCases = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"amount": nil,
+	"cost":   nil,
+}}
+var zjOracleShapeMapFieldsLike = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"op":    nil,
+	"set":   nil,
+	"where": nil,
+}}
+var zjOracleShapeEventLeg = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"ratio": nil,
+	"label": nil,
+	"mode":  nil,
+}}
+var zjOracleShapeEmbedMid = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"first":      nil,
+	"created_by": nil,
+	"version":    nil,
+	"last":       nil,
+}}
+var zjOracleShapeEventProjection = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"origin": nil,
+	"active": nil,
+}}
+var zjOracleShapeInteractionOmitZero = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"when":  nil,
+	"both":  nil,
+	"odd":   nil,
+	"items": &zjOracleShape{object: false, elem: nil},
+}}
+var zjOracleShapeMapPointerMethods = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"values":  &zjOracleShape{object: true, elem: nil},
+	"numbers": &zjOracleShape{object: true, elem: nil},
+}}
+var zjOracleShapeReuseSemantics = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"values": &zjOracleShape{object: true, elem: nil},
+	"inner":  zjOracleShapeReuseInner,
+	"accum":  nil,
+}}
+var zjOracleShapeOrderedSideEffects = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"first": nil,
+	"last":  nil,
+}}
+var zjOracleShapePoolAppenderHolder = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"value": nil,
+}}
+var zjOracleShapeBytesCases = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"data":  nil,
+	"ptr":   nil,
+	"lists": &zjOracleShape{object: false, elem: nil},
+	"index": &zjOracleShape{object: true, elem: nil},
+}}
+var zjOracleShapeEventList = &zjOracleShape{elem: zjOracleShapeEvent}
+var zjOracleShapeLegPtrList = &zjOracleShape{elem: zjOracleShapeEventLeg}
+var zjOracleShapeLegIndex = &zjOracleShape{object: true, elem: zjOracleShapeEventLeg}
+var zjOracleShapePointerMethodIndex = &zjOracleShape{object: true, elem: nil}
+var zjOracleShapePointerQuotedIndex = &zjOracleShape{object: true, elem: nil}
+var zjOracleShapeRawList = &zjOracleShape{object: false, elem: nil}
+var zjOracleShapeRawIndex = &zjOracleShape{object: true, elem: nil}
+var zjOracleShapeRawHolderList = &zjOracleShape{elem: zjOracleShapeRawHolder}
+var zjOracleShapeDecimalList = &zjOracleShape{object: false, elem: nil}
+var zjOracleShapePointerCollections = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"names": &zjOracleShape{object: false, elem: nil},
+	"index": &zjOracleShape{object: true, elem: nil},
+	"legs":  &zjOracleShape{elem: zjOracleShapeEventLeg},
+	"tags":  &zjOracleShape{object: true, elem: nil},
+}}
+var zjOracleShapeNumberCases = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"n":     nil,
+	"no":    nil,
+	"np":    nil,
+	"ns":    &zjOracleShape{object: false, elem: nil},
+	"nm":    &zjOracleShape{object: true, elem: nil},
+	"cnt_s": nil,
+	"ptr_s": nil,
+}}
+var zjOracleShapeNullCases = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"one":   nil,
+	"many":  &zjOracleShape{object: false, elem: nil},
+	"index": &zjOracleShape{object: true, elem: nil},
+	"ptr":   nil,
+}}
+var zjOracleShapeEventMeta = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"note":     nil,
+	"cost":     nil,
+	"internal": nil,
+}}
+var zjOracleShapeReuseInner = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
+	"a": nil,
+	"b": nil,
+}}
 
 func zjRawFieldEqual(a, other any, path string) bool {
 	av, aok := zjRawFieldValue(reflect.ValueOf(a), strings.Split(path, "."))
@@ -38,57 +368,12 @@ func zjRawFieldValue(v reflect.Value, path []string) (any, bool) {
 	return v.Interface(), true
 }
 
-func zjStdlibValueError(data []byte, err error, fields ...string) bool {
-	if zjHasCaseFoldOnlyKey(data, fields) {
-		return false
-	}
+func zjStdlibValueError(err error) bool {
 	var ute *json.UnmarshalTypeError
 	if errors.As(err, &ute) {
-		return strings.HasPrefix(ute.Value, "number")
+		return true
 	}
 	return strings.Contains(err.Error(), "invalid use of ,string struct tag")
-}
-
-func zjHasCaseFoldOnlyKey(data []byte, fields []string) bool {
-	if len(fields) == 0 {
-		return false
-	}
-	var v any
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
-	if dec.Decode(&v) != nil {
-		return false
-	}
-	for _, field := range fields {
-		exact, folded := zjFindKeySpellings(v, field)
-		if folded && !exact {
-			return true
-		}
-	}
-	return false
-}
-
-func zjFindKeySpellings(v any, field string) (exact, folded bool) {
-	switch x := v.(type) {
-	case map[string]any:
-		for k, child := range x {
-			if k == field {
-				exact = true
-			} else if strings.EqualFold(k, field) {
-				folded = true
-			}
-			e, f := zjFindKeySpellings(child, field)
-			exact = exact || e
-			folded = folded || f
-		}
-	case []any:
-		for _, child := range x {
-			e, f := zjFindKeySpellings(child, field)
-			exact = exact || e
-			folded = folded || f
-		}
-	}
-	return exact, folded
 }
 
 // zjStdlibJSONV2 reports whether encoding/json is the Go 1.27+ v2-backed
@@ -1347,11 +1632,12 @@ func FuzzEventZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeEvent)
 		{
 			var stdRaw, zjRaw Event
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"created_at", "closed_at", "amount", "size", "total", "origin", "location", "comment", "mode", "phase", "seq", "recv_ns", "tags", "parents", "meta", "meta_ptr", "items", "ptr_items", "names", "count", "shard", "flags", "weight", "ratio32", "timeout", "primary_date", "second_date", "amounts", "extra", "bag", "any_list", "id", "active", "created_by", "version"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "CreatedAt") || !zjRawFieldEqual(&stdRaw, &zjRaw, "ClosedAt") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Origin") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Location") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Comment") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Mode") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Phase") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Seq") || !zjRawFieldEqual(&stdRaw, &zjRaw, "RecvNs") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Names") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Count") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Shard") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Flags") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Weight") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Ratio32") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Timeout") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Extra") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Bag") || !zjRawFieldEqual(&stdRaw, &zjRaw, "AnyList") || !zjRawFieldEqual(&stdRaw, &zjRaw, "ID") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Active") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Audit.CreatedBy") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Audit.Version")) {
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "CreatedAt") || !zjRawFieldEqual(&stdRaw, &zjRaw, "ClosedAt") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Origin") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Location") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Comment") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Mode") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Phase") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Seq") || !zjRawFieldEqual(&stdRaw, &zjRaw, "RecvNs") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Names") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Count") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Shard") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Flags") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Weight") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Ratio32") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Timeout") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Extra") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Bag") || !zjRawFieldEqual(&stdRaw, &zjRaw, "AnyList") || !zjRawFieldEqual(&stdRaw, &zjRaw, "ID") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Active") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Audit.CreatedBy") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Audit.Version")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -1359,14 +1645,14 @@ func FuzzEventZJSON(f *testing.F) {
 			var zjRaw Event
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedEvent(data) {
 				var stdRaw Event
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed Event
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "created_at", "closed_at", "amount", "size", "total", "origin", "location", "comment", "mode", "phase", "seq", "recv_ns", "tags", "parents", "meta", "meta_ptr", "items", "ptr_items", "names", "count", "shard", "flags", "weight", "ratio32", "timeout", "primary_date", "second_date", "amounts", "extra", "bag", "any_list", "id", "active", "created_by", "version") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj Event
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -1396,7 +1682,7 @@ func FuzzEventZJSON(f *testing.F) {
 		}
 		var viaFallback Event
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackEvent(&lFallback, &viaFallback, &zjArenaEvent{})
+		zjDecodeFallback_Event(&lFallback, &viaFallback, &zjArenaEvent{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -1407,6 +1693,10 @@ func FuzzEventZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ Event
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -1614,11 +1904,12 @@ func FuzzRawHolderZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeRawHolder)
 		{
 			var stdRaw, zjRaw RawHolder
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"table", "set", "where"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Table") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Set") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Where")) {
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Table") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Set") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Where")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -1626,7 +1917,7 @@ func FuzzRawHolderZJSON(f *testing.F) {
 			var zjRaw RawHolder
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedRawHolder(data) {
 				var stdRaw RawHolder
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
@@ -1658,8 +1949,8 @@ func FuzzRawHolderZJSON(f *testing.F) {
 			}
 		}
 		var seed RawHolder
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "table", "set", "where") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj RawHolder
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -1689,7 +1980,7 @@ func FuzzRawHolderZJSON(f *testing.F) {
 		}
 		var viaFallback RawHolder
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackRawHolder(&lFallback, &viaFallback, &zjArenaRawHolder{})
+		zjDecodeFallback_RawHolder(&lFallback, &viaFallback, &zjArenaRawHolder{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -1700,6 +1991,10 @@ func FuzzRawHolderZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ RawHolder
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -1790,11 +2085,12 @@ func FuzzOmitZeroCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeOmitZeroCases)
 		{
 			var stdRaw, zjRaw OmitZeroCases
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"when", "amount", "id", "count", "name", "ptr", "nil_slice", "empty_slice"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "When") || !zjRawFieldEqual(&stdRaw, &zjRaw, "ID") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Count") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Name") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Ptr") || !zjRawFieldEqual(&stdRaw, &zjRaw, "NilSlice") || !zjRawFieldEqual(&stdRaw, &zjRaw, "EmptySlice")) {
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "When") || !zjRawFieldEqual(&stdRaw, &zjRaw, "ID") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Count") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Name") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Ptr") || !zjRawFieldEqual(&stdRaw, &zjRaw, "NilSlice") || !zjRawFieldEqual(&stdRaw, &zjRaw, "EmptySlice")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -1802,14 +2098,14 @@ func FuzzOmitZeroCasesZJSON(f *testing.F) {
 			var zjRaw OmitZeroCases
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedOmitZeroCases(data) {
 				var stdRaw OmitZeroCases
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed OmitZeroCases
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "when", "amount", "id", "count", "name", "ptr", "nil_slice", "empty_slice") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj OmitZeroCases
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -1839,7 +2135,7 @@ func FuzzOmitZeroCasesZJSON(f *testing.F) {
 		}
 		var viaFallback OmitZeroCases
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackOmitZeroCases(&lFallback, &viaFallback, &zjArenaOmitZeroCases{})
+		zjDecodeFallback_OmitZeroCases(&lFallback, &viaFallback, &zjArenaOmitZeroCases{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -1850,6 +2146,10 @@ func FuzzOmitZeroCasesZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ OmitZeroCases
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -1948,11 +2248,12 @@ func FuzzStringOptCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeStringOptCases)
 		{
 			var stdRaw, zjRaw StringOptCases
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"count", "amount"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Count") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Amount")) {
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Count") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Amount")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -1960,14 +2261,14 @@ func FuzzStringOptCasesZJSON(f *testing.F) {
 			var zjRaw StringOptCases
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedStringOptCases(data) {
 				var stdRaw StringOptCases
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed StringOptCases
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "count", "amount") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj StringOptCases
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -1997,7 +2298,7 @@ func FuzzStringOptCasesZJSON(f *testing.F) {
 		}
 		var viaFallback StringOptCases
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackStringOptCases(&lFallback, &viaFallback, &zjArenaStringOptCases{})
+		zjDecodeFallback_StringOptCases(&lFallback, &viaFallback, &zjArenaStringOptCases{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -2008,6 +2309,10 @@ func FuzzStringOptCasesZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ StringOptCases
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -2078,18 +2383,19 @@ func FuzzAppenderCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeAppenderCases)
 		{
 			var zjRaw AppenderCases
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedAppenderCases(data) {
 				var stdRaw AppenderCases
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed AppenderCases
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "amount", "cost") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj AppenderCases
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -2119,7 +2425,7 @@ func FuzzAppenderCasesZJSON(f *testing.F) {
 		}
 		var viaFallback AppenderCases
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackAppenderCases(&lFallback, &viaFallback, &zjArenaAppenderCases{})
+		zjDecodeFallback_AppenderCases(&lFallback, &viaFallback, &zjArenaAppenderCases{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -2130,6 +2436,10 @@ func FuzzAppenderCasesZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ AppenderCases
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -2203,11 +2513,12 @@ func FuzzMapFieldsLikeZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeMapFieldsLike)
 		{
 			var stdRaw, zjRaw MapFieldsLike
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"op", "set", "where"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Op")) {
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Op")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -2215,14 +2526,14 @@ func FuzzMapFieldsLikeZJSON(f *testing.F) {
 			var zjRaw MapFieldsLike
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedMapFieldsLike(data) {
 				var stdRaw MapFieldsLike
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed MapFieldsLike
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "op", "set", "where") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj MapFieldsLike
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -2252,7 +2563,7 @@ func FuzzMapFieldsLikeZJSON(f *testing.F) {
 		}
 		var viaFallback MapFieldsLike
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackMapFieldsLike(&lFallback, &viaFallback, &zjArenaMapFieldsLike{})
+		zjDecodeFallback_MapFieldsLike(&lFallback, &viaFallback, &zjArenaMapFieldsLike{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -2263,6 +2574,10 @@ func FuzzMapFieldsLikeZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ MapFieldsLike
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -2342,11 +2657,12 @@ func FuzzEventLegZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeEventLeg)
 		{
 			var stdRaw, zjRaw EventLeg
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"ratio", "label", "mode"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Label") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Mode")) {
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Label") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Mode")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -2354,14 +2670,14 @@ func FuzzEventLegZJSON(f *testing.F) {
 			var zjRaw EventLeg
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedEventLeg(data) {
 				var stdRaw EventLeg
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed EventLeg
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "ratio", "label", "mode") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj EventLeg
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -2391,7 +2707,7 @@ func FuzzEventLegZJSON(f *testing.F) {
 		}
 		var viaFallback EventLeg
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackEventLeg(&lFallback, &viaFallback, &zjArenaEventLeg{})
+		zjDecodeFallback_EventLeg(&lFallback, &viaFallback, &zjArenaEventLeg{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -2402,6 +2718,10 @@ func FuzzEventLegZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ EventLeg
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -2484,11 +2804,12 @@ func FuzzEmbedMidZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeEmbedMid)
 		{
 			var stdRaw, zjRaw EmbedMid
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"first", "created_by", "version", "last"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "First") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Audit.CreatedBy") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Audit.Version") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Last")) {
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "First") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Audit.CreatedBy") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Audit.Version") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Last")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -2496,14 +2817,14 @@ func FuzzEmbedMidZJSON(f *testing.F) {
 			var zjRaw EmbedMid
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedEmbedMid(data) {
 				var stdRaw EmbedMid
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed EmbedMid
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "first", "created_by", "version", "last") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj EmbedMid
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -2533,7 +2854,7 @@ func FuzzEmbedMidZJSON(f *testing.F) {
 		}
 		var viaFallback EmbedMid
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackEmbedMid(&lFallback, &viaFallback, &zjArenaEmbedMid{})
+		zjDecodeFallback_EmbedMid(&lFallback, &viaFallback, &zjArenaEmbedMid{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -2544,6 +2865,10 @@ func FuzzEmbedMidZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ EmbedMid
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -2624,11 +2949,12 @@ func FuzzEventProjectionZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeEventProjection)
 		{
 			var stdRaw, zjRaw EventProjection
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"origin", "active"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Origin") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Active")) {
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Origin") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Active")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -2636,14 +2962,14 @@ func FuzzEventProjectionZJSON(f *testing.F) {
 			var zjRaw EventProjection
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedEventProjection(data) {
 				var stdRaw EventProjection
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed EventProjection
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "origin", "active") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj EventProjection
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -2673,7 +2999,7 @@ func FuzzEventProjectionZJSON(f *testing.F) {
 		}
 		var viaFallback EventProjection
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackEventProjection(&lFallback, &viaFallback, &zjArenaEventProjection{})
+		zjDecodeFallback_EventProjection(&lFallback, &viaFallback, &zjArenaEventProjection{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -2684,6 +3010,10 @@ func FuzzEventProjectionZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ EventProjection
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -2756,11 +3086,12 @@ func FuzzInteractionOmitZeroZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeInteractionOmitZero)
 		{
 			var stdRaw, zjRaw InteractionOmitZero
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"when", "both", "odd", "items"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "When") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Both") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Odd") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Items")) {
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "When") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Both") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Odd") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Items")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -2768,14 +3099,14 @@ func FuzzInteractionOmitZeroZJSON(f *testing.F) {
 			var zjRaw InteractionOmitZero
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedInteractionOmitZero(data) {
 				var stdRaw InteractionOmitZero
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed InteractionOmitZero
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "when", "both", "odd", "items") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj InteractionOmitZero
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -2805,7 +3136,7 @@ func FuzzInteractionOmitZeroZJSON(f *testing.F) {
 		}
 		var viaFallback InteractionOmitZero
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackInteractionOmitZero(&lFallback, &viaFallback, &zjArenaInteractionOmitZero{})
+		zjDecodeFallback_InteractionOmitZero(&lFallback, &viaFallback, &zjArenaInteractionOmitZero{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -2816,6 +3147,10 @@ func FuzzInteractionOmitZeroZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ InteractionOmitZero
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -2894,18 +3229,19 @@ func FuzzMapPointerMethodsZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeMapPointerMethods)
 		{
 			var zjRaw MapPointerMethods
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedMapPointerMethods(data) {
 				var stdRaw MapPointerMethods
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed MapPointerMethods
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "values", "numbers") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj MapPointerMethods
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -2935,7 +3271,7 @@ func FuzzMapPointerMethodsZJSON(f *testing.F) {
 		}
 		var viaFallback MapPointerMethods
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackMapPointerMethods(&lFallback, &viaFallback, &zjArenaMapPointerMethods{})
+		zjDecodeFallback_MapPointerMethods(&lFallback, &viaFallback, &zjArenaMapPointerMethods{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -2946,6 +3282,10 @@ func FuzzMapPointerMethodsZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ MapPointerMethods
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -3017,11 +3357,12 @@ func FuzzReuseSemanticsZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeReuseSemantics)
 		{
 			var stdRaw, zjRaw ReuseSemantics
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"values", "inner", "accum"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Values") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Inner")) {
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Values") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Inner")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -3029,14 +3370,14 @@ func FuzzReuseSemanticsZJSON(f *testing.F) {
 			var zjRaw ReuseSemantics
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedReuseSemantics(data) {
 				var stdRaw ReuseSemantics
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed ReuseSemantics
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "values", "inner", "accum") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj ReuseSemantics
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -3066,7 +3407,7 @@ func FuzzReuseSemanticsZJSON(f *testing.F) {
 		}
 		var viaFallback ReuseSemantics
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackReuseSemantics(&lFallback, &viaFallback, &zjArenaReuseSemantics{})
+		zjDecodeFallback_ReuseSemantics(&lFallback, &viaFallback, &zjArenaReuseSemantics{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -3077,6 +3418,10 @@ func FuzzReuseSemanticsZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ ReuseSemantics
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -3151,11 +3496,12 @@ func FuzzOrderedSideEffectsZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeOrderedSideEffects)
 		{
 			var stdRaw, zjRaw OrderedSideEffects
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"first", "last"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Last")) {
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Last")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -3163,14 +3509,14 @@ func FuzzOrderedSideEffectsZJSON(f *testing.F) {
 			var zjRaw OrderedSideEffects
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedOrderedSideEffects(data) {
 				var stdRaw OrderedSideEffects
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed OrderedSideEffects
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "first", "last") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj OrderedSideEffects
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -3200,7 +3546,7 @@ func FuzzOrderedSideEffectsZJSON(f *testing.F) {
 		}
 		var viaFallback OrderedSideEffects
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackOrderedSideEffects(&lFallback, &viaFallback, &zjArenaOrderedSideEffects{})
+		zjDecodeFallback_OrderedSideEffects(&lFallback, &viaFallback, &zjArenaOrderedSideEffects{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -3211,6 +3557,10 @@ func FuzzOrderedSideEffectsZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ OrderedSideEffects
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -3280,18 +3630,19 @@ func FuzzPoolAppenderHolderZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapePoolAppenderHolder)
 		{
 			var zjRaw PoolAppenderHolder
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedPoolAppenderHolder(data) {
 				var stdRaw PoolAppenderHolder
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed PoolAppenderHolder
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "value") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj PoolAppenderHolder
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -3321,7 +3672,7 @@ func FuzzPoolAppenderHolderZJSON(f *testing.F) {
 		}
 		var viaFallback PoolAppenderHolder
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackPoolAppenderHolder(&lFallback, &viaFallback, &zjArenaPoolAppenderHolder{})
+		zjDecodeFallback_PoolAppenderHolder(&lFallback, &viaFallback, &zjArenaPoolAppenderHolder{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -3332,6 +3683,10 @@ func FuzzPoolAppenderHolderZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ PoolAppenderHolder
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -3404,11 +3759,12 @@ func FuzzBytesCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeBytesCases)
 		{
 			var stdRaw, zjRaw BytesCases
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"data", "ptr", "lists", "index"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Data") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Ptr") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Lists") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Index")) {
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Data") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Ptr") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Lists") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Index")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -3416,14 +3772,14 @@ func FuzzBytesCasesZJSON(f *testing.F) {
 			var zjRaw BytesCases
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedBytesCases(data) {
 				var stdRaw BytesCases
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed BytesCases
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "data", "ptr", "lists", "index") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj BytesCases
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -3453,7 +3809,7 @@ func FuzzBytesCasesZJSON(f *testing.F) {
 		}
 		var viaFallback BytesCases
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackBytesCases(&lFallback, &viaFallback, &zjArenaBytesCases{})
+		zjDecodeFallback_BytesCases(&lFallback, &viaFallback, &zjArenaBytesCases{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -3464,6 +3820,10 @@ func FuzzBytesCasesZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ BytesCases
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -3558,18 +3918,19 @@ func FuzzEventListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeEventList)
 		{
 			var zjRaw EventList
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedEventList(data) {
 				var stdRaw EventList
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed EventList
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr) {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj EventList
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -3600,6 +3961,10 @@ func FuzzEventListZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ EventList
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -3670,18 +4035,19 @@ func FuzzLegPtrListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeLegPtrList)
 		{
 			var zjRaw LegPtrList
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedLegPtrList(data) {
 				var stdRaw LegPtrList
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed LegPtrList
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr) {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj LegPtrList
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -3712,6 +4078,10 @@ func FuzzLegPtrListZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ LegPtrList
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -3782,18 +4152,19 @@ func FuzzLegIndexZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeLegIndex)
 		{
 			var zjRaw LegIndex
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedLegIndex(data) {
 				var stdRaw LegIndex
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed LegIndex
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr) {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj LegIndex
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -3824,6 +4195,10 @@ func FuzzLegIndexZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ LegIndex
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -3894,18 +4269,19 @@ func FuzzPointerMethodIndexZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapePointerMethodIndex)
 		{
 			var zjRaw PointerMethodIndex
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedPointerMethodIndex(data) {
 				var stdRaw PointerMethodIndex
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed PointerMethodIndex
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr) {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj PointerMethodIndex
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -3936,6 +4312,10 @@ func FuzzPointerMethodIndexZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ PointerMethodIndex
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -4006,18 +4386,19 @@ func FuzzPointerQuotedIndexZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapePointerQuotedIndex)
 		{
 			var zjRaw PointerQuotedIndex
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedPointerQuotedIndex(data) {
 				var stdRaw PointerQuotedIndex
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed PointerQuotedIndex
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr) {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj PointerQuotedIndex
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -4048,6 +4429,10 @@ func FuzzPointerQuotedIndexZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ PointerQuotedIndex
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -4119,11 +4504,12 @@ func FuzzRawListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeRawList)
 		{
 			var stdRaw, zjRaw RawList
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{}) && (!reflect.DeepEqual(&stdRaw, &zjRaw)) {
+			if stdErr == nil && zjErr == nil && (!reflect.DeepEqual(&stdRaw, &zjRaw)) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -4131,7 +4517,7 @@ func FuzzRawListZJSON(f *testing.F) {
 			var zjRaw RawList
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedRawList(data) {
 				var stdRaw RawList
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
@@ -4163,8 +4549,8 @@ func FuzzRawListZJSON(f *testing.F) {
 			}
 		}
 		var seed RawList
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr) {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj RawList
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -4195,6 +4581,10 @@ func FuzzRawListZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ RawList
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -4270,11 +4660,12 @@ func FuzzRawIndexZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeRawIndex)
 		{
 			var stdRaw, zjRaw RawIndex
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{}) && (!reflect.DeepEqual(&stdRaw, &zjRaw)) {
+			if stdErr == nil && zjErr == nil && (!reflect.DeepEqual(&stdRaw, &zjRaw)) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -4282,7 +4673,7 @@ func FuzzRawIndexZJSON(f *testing.F) {
 			var zjRaw RawIndex
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedRawIndex(data) {
 				var stdRaw RawIndex
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
@@ -4314,8 +4705,8 @@ func FuzzRawIndexZJSON(f *testing.F) {
 			}
 		}
 		var seed RawIndex
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr) {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj RawIndex
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -4346,6 +4737,10 @@ func FuzzRawIndexZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ RawIndex
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -4420,11 +4815,12 @@ func FuzzRawHolderListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeRawHolderList)
 		{
 			var stdRaw, zjRaw RawHolderList
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{}) && (!reflect.DeepEqual(&stdRaw, &zjRaw)) {
+			if stdErr == nil && zjErr == nil && (!reflect.DeepEqual(&stdRaw, &zjRaw)) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -4432,7 +4828,7 @@ func FuzzRawHolderListZJSON(f *testing.F) {
 			var zjRaw RawHolderList
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedRawHolderList(data) {
 				var stdRaw RawHolderList
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
@@ -4464,8 +4860,8 @@ func FuzzRawHolderListZJSON(f *testing.F) {
 			}
 		}
 		var seed RawHolderList
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr) {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj RawHolderList
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -4496,6 +4892,10 @@ func FuzzRawHolderListZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ RawHolderList
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -4566,18 +4966,19 @@ func FuzzDecimalListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeDecimalList)
 		{
 			var zjRaw DecimalList
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedDecimalList(data) {
 				var stdRaw DecimalList
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed DecimalList
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr) {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj DecimalList
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -4608,6 +5009,10 @@ func FuzzDecimalListZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ DecimalList
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -4680,11 +5085,12 @@ func FuzzPointerCollectionsZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapePointerCollections)
 		{
 			var stdRaw, zjRaw PointerCollections
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"names", "index", "legs", "tags"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Names") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Index") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Tags")) {
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Names") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Index") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Tags")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -4692,14 +5098,14 @@ func FuzzPointerCollectionsZJSON(f *testing.F) {
 			var zjRaw PointerCollections
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedPointerCollections(data) {
 				var stdRaw PointerCollections
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed PointerCollections
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "names", "index", "legs", "tags") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj PointerCollections
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -4729,7 +5135,7 @@ func FuzzPointerCollectionsZJSON(f *testing.F) {
 		}
 		var viaFallback PointerCollections
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackPointerCollections(&lFallback, &viaFallback, &zjArenaPointerCollections{})
+		zjDecodeFallback_PointerCollections(&lFallback, &viaFallback, &zjArenaPointerCollections{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -4740,6 +5146,10 @@ func FuzzPointerCollectionsZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ PointerCollections
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -4827,11 +5237,12 @@ func FuzzNumberCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeNumberCases)
 		{
 			var stdRaw, zjRaw NumberCases
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"n", "no", "np", "ns", "nm", "cnt_s", "ptr_s"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "N") || !zjRawFieldEqual(&stdRaw, &zjRaw, "NO") || !zjRawFieldEqual(&stdRaw, &zjRaw, "NP") || !zjRawFieldEqual(&stdRaw, &zjRaw, "NS") || !zjRawFieldEqual(&stdRaw, &zjRaw, "NM") || !zjRawFieldEqual(&stdRaw, &zjRaw, "CntS") || !zjRawFieldEqual(&stdRaw, &zjRaw, "PtrS")) {
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "N") || !zjRawFieldEqual(&stdRaw, &zjRaw, "NO") || !zjRawFieldEqual(&stdRaw, &zjRaw, "NP") || !zjRawFieldEqual(&stdRaw, &zjRaw, "NS") || !zjRawFieldEqual(&stdRaw, &zjRaw, "NM") || !zjRawFieldEqual(&stdRaw, &zjRaw, "CntS") || !zjRawFieldEqual(&stdRaw, &zjRaw, "PtrS")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -4839,14 +5250,14 @@ func FuzzNumberCasesZJSON(f *testing.F) {
 			var zjRaw NumberCases
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedNumberCases(data) {
 				var stdRaw NumberCases
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed NumberCases
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "n", "no", "np", "ns", "nm", "cnt_s", "ptr_s") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj NumberCases
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -4876,7 +5287,7 @@ func FuzzNumberCasesZJSON(f *testing.F) {
 		}
 		var viaFallback NumberCases
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackNumberCases(&lFallback, &viaFallback, &zjArenaNumberCases{})
+		zjDecodeFallback_NumberCases(&lFallback, &viaFallback, &zjArenaNumberCases{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -4887,6 +5298,10 @@ func FuzzNumberCasesZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ NumberCases
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -4979,18 +5394,19 @@ func FuzzNullCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeNullCases)
 		{
 			var zjRaw NullCases
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedNullCases(data) {
 				var stdRaw NullCases
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed NullCases
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "one", "many", "index", "ptr") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj NullCases
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -5020,7 +5436,7 @@ func FuzzNullCasesZJSON(f *testing.F) {
 		}
 		var viaFallback NullCases
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackNullCases(&lFallback, &viaFallback, &zjArenaNullCases{})
+		zjDecodeFallback_NullCases(&lFallback, &viaFallback, &zjArenaNullCases{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -5031,6 +5447,10 @@ func FuzzNullCasesZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ NullCases
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -5112,11 +5532,12 @@ func FuzzEventMetaZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeEventMeta)
 		{
 			var stdRaw, zjRaw EventMeta
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"note", "cost", "internal"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Note") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Internal")) {
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Note") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Internal")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -5124,14 +5545,14 @@ func FuzzEventMetaZJSON(f *testing.F) {
 			var zjRaw EventMeta
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedEventMeta(data) {
 				var stdRaw EventMeta
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed EventMeta
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "note", "cost", "internal") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj EventMeta
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -5161,7 +5582,7 @@ func FuzzEventMetaZJSON(f *testing.F) {
 		}
 		var viaFallback EventMeta
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackEventMeta(&lFallback, &viaFallback, &zjArenaEventMeta{})
+		zjDecodeFallback_EventMeta(&lFallback, &viaFallback, &zjArenaEventMeta{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -5172,6 +5593,10 @@ func FuzzEventMetaZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ EventMeta
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {
@@ -5192,11 +5617,12 @@ func FuzzReuseInnerZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		oracleData := zjOracleData(data, zjOracleShapeReuseInner)
 		{
 			var stdRaw, zjRaw ReuseInner
-			stdErr := json.Unmarshal(data, &stdRaw)
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && !zjHasCaseFoldOnlyKey(data, []string{"a", "b"}) && (!zjRawFieldEqual(&stdRaw, &zjRaw, "A") || !zjRawFieldEqual(&stdRaw, &zjRaw, "B")) {
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "A") || !zjRawFieldEqual(&stdRaw, &zjRaw, "B")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -5204,14 +5630,14 @@ func FuzzReuseInnerZJSON(f *testing.F) {
 			var zjRaw ReuseInner
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedReuseInner(data) {
 				var stdRaw ReuseInner
-				if json.Unmarshal(data, &stdRaw) == nil {
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
 					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
 				}
 			}
 		}
 		var seed ReuseInner
-		if serr := json.Unmarshal(data, &seed); serr != nil {
-			if zjStdlibValueError(data, serr, "a", "b") {
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibValueError(serr) {
 				var zj ReuseInner
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -5241,7 +5667,7 @@ func FuzzReuseInnerZJSON(f *testing.F) {
 		}
 		var viaFallback ReuseInner
 		lFallback := zerojson.NewLexer(canon, false)
-		zjDecodeFallbackReuseInner(&lFallback, &viaFallback, &zjArenaReuseInner{})
+		zjDecodeFallback_ReuseInner(&lFallback, &viaFallback, &zjArenaReuseInner{})
 		lFallback.Finish()
 		if err := lFallback.Err(); err != nil {
 			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
@@ -5252,6 +5678,10 @@ func FuzzReuseInnerZJSON(f *testing.F) {
 		enc, err := viaZJ.AppendZJSON(nil)
 		if err != nil {
 			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
 		}
 		var reZJ ReuseInner
 		if err := reZJ.UnmarshalZJSON(enc); err != nil {

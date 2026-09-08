@@ -325,7 +325,7 @@ func (g *generator) flattenEmbedded(typeName string, f *types.Var, accessPrefix,
 	if !ok {
 		log.Fatalf("%s.%s: embedded non-named type is not supported", typeName, f.Name())
 	}
-	if hasMarshalJSON(named) || hasMarshalText(named) {
+	if (hasMarshalJSON(named) && g.handwritten(named, "MarshalJSON")) || (hasMarshalText(named) && g.handwritten(named, "MarshalText")) {
 		// Go promotes the method to the parent, so json.Marshal(parent)
 		// would call it and ignore sibling fields — not something to
 		// silently reimplement.
@@ -555,6 +555,14 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 		// (e.g. json.RawMessage, zerojson.Raw) was already classified as a
 		// Marshaler/leaf above and never reaches here.
 		if eb, ok := s.Elem().Underlying().(*types.Basic); ok && eb.Kind() == types.Uint8 {
+			// Validate the element through the ordinary classifier before
+			// selecting a representation shortcut. This enforces the same
+			// method-set policy for direct fields and optimized containers.
+			var element fieldInfo
+			g.classify(&element, s.Elem(), ctx+"[elem]")
+			if !types.Identical(s.Elem(), types.Typ[types.Uint8]) {
+				fi.byteElem = g.typeExpr(s.Elem())
+			}
 			if en, isNamed := types.Unalias(s.Elem()).(*types.Named); !isNamed || (!hasMarshalJSON(en) && !hasMarshalText(en)) {
 				fi.kind = kByteSlice
 				if !types.Identical(s.Elem(), types.Typ[types.Uint8]) {
@@ -658,7 +666,6 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 	// pointer requires encoding/json's receiver semantics.
 	if iface, ok := t.Underlying().(*types.Interface); ok && iface.NumMethods() == 0 {
 		fi.kind = kInterface
-		fi.typeStr = "any"
 		return
 	}
 
