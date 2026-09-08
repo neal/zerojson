@@ -264,3 +264,41 @@ func TestEventPooledDecodeBorrowAllocationBudget(t *testing.T) {
 		t.Fatalf("EventDecoder.DecodeBorrow (reused arena) allocations=%v, budget %v", allocs, maxAllocs)
 	}
 }
+
+// TestPointerCollectionsPooledFallbackAllocationBudget pins that a pooled
+// Decoder keeps recycling its slice and map cells when a document takes the
+// KEYED fallback path: keys out of declaration order, whitespace the ordered
+// matcher does not consume, and a duplicated member. The ordered attempt
+// publishes the arena's own cells into the target and rewinds; the fallback
+// then finds them there and must recognize them as ours, not as
+// caller-supplied storage to leave alone. A regression here costs one
+// allocation per container field per decode for every producer that is
+// not zerojson's own compact encoder (pretty-printed JSON, other
+// serializers, a reordered wire format).
+func TestPointerCollectionsPooledFallbackAllocationBudget(t *testing.T) {
+	requireStableAllocationInstrumentation(t)
+	for name, doc := range map[string]string{
+		"declaration order": `{"names":["a","b"],"index":{"k":1}}`,
+		"out of order":      `{"index":{"k":1},"names":["a","b"]}`,
+		"spaced":            `{"names": ["a", "b"], "index": {"k": 1}}`,
+		"duplicate member":  `{"names":["a"],"names":["a","b"],"index":{"k":1},"index":{"j":2}}`,
+		"bail on first key": `{"zzz":0,"names":["a","b"],"index":{"k":1}}`,
+	} {
+		var d PointerCollectionsDecoder
+		var v PointerCollections
+		data := []byte(doc)
+		for i := 0; i < 3; i++ { // warm the arena, including growth
+			if err := d.DecodeBorrow(data, &v); err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+		}
+		allocs := testing.AllocsPerRun(200, func() {
+			if err := d.DecodeBorrow(data, &v); err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+		})
+		if allocs != 0 {
+			t.Errorf("%s: PointerCollectionsDecoder.DecodeBorrow (reused arena) allocations=%v, want 0", name, allocs)
+		}
+	}
+}

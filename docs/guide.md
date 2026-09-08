@@ -59,9 +59,10 @@ leave the type out of the explicit roots to retain its custom behavior.
 The loader overlays stale generated method bodies while loading the package,
 preserving declarations needed by caller code where possible, and prunes the
 declarations a renamed type leaves dangling. This lets field edits and type
-renames regenerate even if the old output no longer compiles, as long as
-hand-written code does not itself name a type that no longer exists (a
-`-pool` Decoder for a root you renamed, say). Unrelated package errors still
+renames regenerate even if the old output no longer compiles. Regeneration
+does not repair hand-written code that names a type which no longer exists
+(a `-pool` Decoder for a root you renamed, say): generation succeeds and the
+following build reports that reference. Unrelated package errors still
 require manual repair.
 
 Generated declarations must not collide with hand-written ones: a type named

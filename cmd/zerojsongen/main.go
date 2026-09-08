@@ -295,7 +295,7 @@ func main() {
 		log.Fatalf("-tests %s must name a _test.go file; otherwise the fuzz tests would compile into the production package", *testsOut)
 	}
 	if *testsOut != "" && (*compat || *compatEasyjson) {
-		log.Fatalf("-tests cannot be combined with -compat/-compat-easyjson: the fuzzers use encoding/json as an independent oracle, and the compat wrappers would route json.Marshal/Unmarshal through the generated codec itself — generate the tests in a separate run without -compat")
+		log.Fatalf("-tests cannot be combined with -compat/-compat-easyjson: the fuzzers use encoding/json as an independent oracle, and the compat wrappers would route json.Marshal/Unmarshal through the generated codec itself — keep the wrapper-free fixture types that get -tests in a separate package (see the guide: do not alternate flags over the same files)")
 	}
 	for i, n := range names {
 		names[i] = strings.TrimSpace(n)
