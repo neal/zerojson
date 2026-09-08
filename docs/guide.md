@@ -158,7 +158,9 @@ reserved; a target package declaring that name at package scope is refused.
 across decodes, eliminating the per-decode arena allocation. Combined
 with `DecodeBorrow`, a decode loop over a leaf-only shape allocates
 **zero** bytes (fields that delegate to user methods, `any`, `[]byte`,
-and maps of structs still allocate on their own):
+maps of structs, `[]*Struct` elements, and elements of `[]Struct` whose
+struct has pointer fields still allocate on their own, the last three
+once per element):
 
 ```go
 var d models.EventDecoder // pool one per goroutine, or via sync.Pool

@@ -160,7 +160,7 @@ check does not validate your schema, business rules, or resource limits.
 - **Borrow mode aliases the input buffer.** Never use it when the
   buffer is pooled/reused (e.g. Kafka fetch buffers) unless lifetimes
   are pinned. Note that *which* strings alias is input-dependent: a
-  plain string aliases, but one that needed unescaping was copied into
+  plain string (or `json.Number`) aliases, but one that needed unescaping was copied into
   a fresh allocation, an enum value that matched a declared constant
   is that constant, and an enum value that matched none was copied — so
   a test that happens to use escaped strings or declared constants can

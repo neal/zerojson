@@ -355,8 +355,9 @@ func (l *Lexer) ReadFloat64() float64 {
 // ReadJSONNumber reads a value for an encoding/json.Number field: a bare
 // number token, or (as classic encoding/json also accepts for Number) a
 // string token whose contents are a valid JSON number. The literal is
-// returned verbatim (copied), never parsed, so precision is preserved
-// exactly as with encoding/json. A string that is not a number literal,
+// returned verbatim, never parsed, so precision is preserved exactly as
+// with encoding/json; like every other string it is copied in copy mode
+// and aliases the input in borrow mode. A string that is not a number literal,
 // or a bare token that fails the RFC 8259 grammar, is a decode error —
 // this reader is grammar-strict even for the bare form (no leading zero),
 // because the literal is stored, not parsed, and would otherwise be
@@ -375,6 +376,9 @@ func (l *Lexer) ReadJSONNumber() string {
 	if end, err := validNumber(b, 0); err != nil || end != len(b) {
 		l.setErr("json.Number %s: invalid number literal", errToken(b))
 		return ""
+	}
+	if l.Borrow {
+		return bytesToString(b)
 	}
 	return string(b)
 }
