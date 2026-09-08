@@ -165,7 +165,7 @@ func mutationCatalog() []mutationCase {
 		},
 		{
 			name: "slice_adoption_forgets_caller_ownership", tier: "full", file: "cmd/zerojsongen/decode.go",
-			old: `g.p("%s\ta.sliceBorrowed%s = true", ind, f.cellName)`, new: `g.p("%s\ta.sliceBorrowed%s = false", ind, f.cellName)`, wantCount: 1,
+			old: `g.p("%s\ta.sliceBorrowed%s = a.sliceBorrowed%s || !zerojson.SameBacking(%s, %s)", ind, f.cellName, f.cellName, source, cell)`, new: `g.p("%s\ta.sliceBorrowed%s = false", ind, f.cellName)`, wantCount: 1,
 			detector: generatorDetector(`^TestGeneratorBehaviorMatrix/pooled_adopted_slice_lifetime$`), wantOutput: "pooled decode recycled caller-owned slice",
 		},
 		{
