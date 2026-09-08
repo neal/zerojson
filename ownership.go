@@ -1,7 +1,5 @@
 package zerojson
 
-import "reflect"
-
 // SameBacking reports whether a and b share a backing array: both have
 // capacity and their first backing element is the same. Generated pooled
 // decoders use it to tell an arena cell handed back through the target —
@@ -21,6 +19,8 @@ func SameBacking[T any](a, b []T) bool {
 
 // SameMap reports whether a and b are the same map (two headers over one
 // table), the map counterpart of SameBacking. Two nil maps are the same.
+// The default build reads the map pointer directly (unsafe_on.go); the
+// nounsafe build goes through reflect (unsafe_off.go).
 func SameMap[K comparable, V any](a, b map[K]V) bool {
-	return reflect.ValueOf(a).Pointer() == reflect.ValueOf(b).Pointer()
+	return sameMap(a, b)
 }

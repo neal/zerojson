@@ -2,6 +2,8 @@
 
 package zerojson
 
+import "reflect"
+
 // This file is the provably-unsafe-free counterpart to unsafe_on.go,
 // selected by `go build -tags nounsafe`. The helpers here copy where the
 // default build aliases; output is byte-identical, only the allocation
@@ -18,4 +20,11 @@ func bytesToString(b []byte) string {
 // the result, so copying is behaviorally identical.
 func stringToBytes(s string) []byte {
 	return []byte(s)
+}
+
+// sameMap is the reflect-based counterpart to the pointer read in
+// unsafe_on.go; identical result, and it may allocate under
+// instrumentation.
+func sameMap[K comparable, V any](a, b map[K]V) bool {
+	return reflect.ValueOf(a).Pointer() == reflect.ValueOf(b).Pointer()
 }

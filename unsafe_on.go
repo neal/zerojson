@@ -23,3 +23,11 @@ func bytesToString(b []byte) string {
 func stringToBytes(s string) []byte {
 	return unsafe.Slice(unsafe.StringData(s), len(s))
 }
+
+// sameMap compares the map pointers behind two map values. A map value is
+// a single pointer to its table, so reading it through the variable's
+// address is exact and allocation-free; the nounsafe counterpart uses
+// reflect.
+func sameMap[K comparable, V any](a, b map[K]V) bool {
+	return *(*unsafe.Pointer)(unsafe.Pointer(&a)) == *(*unsafe.Pointer)(unsafe.Pointer(&b))
+}

@@ -1,6 +1,9 @@
 package zerojson
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestSameBacking(t *testing.T) {
 	base := make([]int, 2, 8)
@@ -31,6 +34,9 @@ func TestSameMap(t *testing.T) {
 	}
 	if !SameMap[string, int](nil, nil) || SameMap(m, nil) {
 		t.Fatal("nil handling")
+	}
+	if os.Getenv("ZEROJSON_CHECKPTR") != "" {
+		return // exact allocation counts are not stable under checkptr instrumentation
 	}
 	if n := testing.AllocsPerRun(100, func() { _ = SameMap(m, alias) }); n != 0 {
 		t.Fatalf("SameMap allocates: %v", n)
