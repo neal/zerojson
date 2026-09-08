@@ -65,6 +65,71 @@ func fuzzSeedValue(f fieldInfo) string {
 	}
 }
 
+// fuzzSecondSeedValue returns a valid value for f distinguishable from
+// fuzzSeedValue's, for duplicate-member seeds; false when the kind has no
+// second cheap spelling worth seeding.
+func fuzzSecondSeedValue(f fieldInfo) (string, bool) {
+	if f.stringOpt {
+		return `"2"`, true
+	}
+	switch f.kind {
+	case kString, kEnum:
+		return `"y"`, true
+	case kBool:
+		return `false`, true
+	case kInt, kUint, kFloat32, kFloat64, kJSONNumber:
+		return `2`, true
+	case kQuotedInt:
+		return `"2"`, true
+	case kTime:
+		return `"2001-02-03T04:05:06Z"`, true
+	case kUUID:
+		return `"11111111-1111-1111-1111-111111111111"`, true
+	case kLeafSlice, kSlice:
+		return `[]`, true
+	case kMap:
+		return `{}`, true
+	}
+	return "", false
+}
+
+// fuzzInvalidSeedValue returns a syntactically valid JSON value that the
+// field's parser or custom method is expected to reject, for the
+// stdlib-rejects arm; false for kinds with no such cheap spelling.
+func fuzzInvalidSeedValue(f fieldInfo) (string, bool) {
+	switch f.kind {
+	case kTime, kUUID, kTextMarshaler, kMarshaler, kAppender:
+		return `"bad"`, true
+	case kCustomLeaf:
+		if !isRawLeaf(f) {
+			return `"bad"`, true
+		}
+	case kByteSlice:
+		return `"!!"`, true
+	case kQuotedInt:
+		return `"bad"`, true
+	case kInt, kUint, kFloat32, kFloat64:
+		if f.stringOpt {
+			return `"bad"`, true
+		}
+		return `"1"`, true
+	case kBool:
+		return `"true"`, true
+	case kString, kEnum:
+		return `1`, true
+	case kLeafSlice, kMap:
+		if f.valInfo != nil {
+			if v, ok := fuzzInvalidSeedValue(*f.valInfo); ok {
+				if f.kind == kMap {
+					return `{"k":` + v + `}`, true
+				}
+				return `[` + v + `]`, true
+			}
+		}
+	}
+	return "", false
+}
+
 func fuzzObjectSeed(f fieldInfo) string {
 	return fuzzObjectSeedValue(f, fuzzSeedValue(f))
 }
@@ -104,8 +169,40 @@ func fuzzAlternateSeedValue(f fieldInfo) (string, bool) {
 // uncommon fields would otherwise go unexercised.
 func emitStructFuzzSeeds(b *strings.Builder, ti typeInfo) {
 	fmt.Fprintf(b, "\tf.Add([]byte(`{}`))\n")
+	// Trailing data after the document: encoding/json's "after top-level
+	// value" SyntaxError, which Finish must mirror.
+	fmt.Fprintf(b, "\tf.Add([]byte(`{} x`))\n")
 	for _, field := range ti.fields {
 		fmt.Fprintf(b, "\tf.Add([]byte(%q))\n", fuzzObjectSeed(field))
+		// A literal the field's own parser or method should reject: the
+		// stdlib-rejects arm then requires zerojson's decode to fail too
+		// (a dropped AddError after UnmarshalText, or a timestamp parser
+		// that swallows its error, is invisible without such a seed).
+		if invalid, ok := fuzzInvalidSeedValue(field); ok {
+			fmt.Fprintf(b, "\tf.Add([]byte(%q))\n", fuzzObjectSeedValue(field, invalid))
+		}
+		// A duplicated member with two distinguishable values: last wins in
+		// both decoders, and Go's mutator does not invent a repeated key
+		// on its own.
+		if second, ok := fuzzSecondSeedValue(field); ok {
+			key, _ := stdjson.Marshal(field.jsonName)
+			fmt.Fprintf(b, "\tf.Add([]byte(%q))\n", "{"+string(key)+":"+fuzzSeedValue(field)+","+string(key)+":"+second+"}")
+		}
+		// Integer boundaries just outside each width: encoding/json rejects
+		// them with an UnmarshalTypeError, which the stdlib-rejects arm
+		// requires zerojson to mirror; the mutator rarely lands on them.
+		if !field.stringOpt {
+			switch field.kind {
+			case kInt:
+				for _, v := range []string{"128", "32768", "2147483648", "9223372036854775808", "-129", "-9223372036854775809"} {
+					fmt.Fprintf(b, "\tf.Add([]byte(%q))\n", fuzzObjectSeedValue(field, v))
+				}
+			case kUint:
+				for _, v := range []string{"256", "65536", "4294967296", "18446744073709551616", "-1"} {
+					fmt.Fprintf(b, "\tf.Add([]byte(%q))\n", fuzzObjectSeedValue(field, v))
+				}
+			}
+		}
 		if alternate, ok := fuzzAlternateSeedValue(field); ok {
 			// encoding/json accepts both the usual base64 string and an
 			// array of byte values, including inside supported containers.
@@ -153,7 +250,14 @@ func fuzzSequenceSeeds(ti typeInfo) []string {
 // type being fuzzed. Assumes `data []byte` and `t *testing.T` are in scope.
 func emitStdlibRejectClassify(b *strings.Builder, n string) {
 	fmt.Fprintf(b, "\t\tif serr := json.Unmarshal(oracleData, &seed); serr != nil {\n")
-	fmt.Fprintf(b, "\t\t\tif zjStdlibValueError(serr) {\n")
+	// Every stdlib rejection that is not a grammar-level SyntaxError must be
+	// mirrored: wrong value kinds, custom UnmarshalJSON/UnmarshalText
+	// errors, timestamp/uuid/base64 parse errors, and trailing data after
+	// the top-level value (which is a SyntaxError, but one Finish rejects
+	// too). The two documented exceptions — a null on a value-typed
+	// quoted-int64 marker, and an escaped spelling of a direct leaf that
+	// zerojson unescapes before parsing — are exempted on the raw input.
+	fmt.Fprintf(b, "\t\t\tif zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshaler%s(data) && !zjEscapedDirectLeaf%s(data) {\n", n, n)
 	fmt.Fprintf(b, "\t\t\t\tvar zj %s\n", n)
 	fmt.Fprintf(b, "\t\t\t\tif zj.UnmarshalZJSON(data) == nil {\n")
 	fmt.Fprintf(b, "\t\t\t\t\tt.Fatalf(\"stdlib rejected value in %%q (%%v) but zerojson accepted it\", data, serr)\n")
@@ -552,12 +656,33 @@ func (g *generator) generateTests() string {
 	fmt.Fprintf(&b, "\tfor _, v := range zjMemberValueStarts(data, key, depth, nil) {\n")
 	fmt.Fprintf(&b, "\t\tif bytes.Contains(data[v:zjValueEnd(data, v)], []byte(\"null\")) {\n\t\t\treturn true\n\t\t}\n")
 	fmt.Fprintf(&b, "\t}\n\treturn false\n}\n\n")
+	fmt.Fprintf(&b, "// zjMemberHasEscape reports whether the value of member key at object depth\n")
+	fmt.Fprintf(&b, "// depth (or any string inside it) is spelled with a JSON escape.\n")
+	fmt.Fprintf(&b, "func zjMemberHasEscape(data []byte, key string, depth int) bool {\n")
+	fmt.Fprintf(&b, "\tfor _, v := range zjMemberValueStarts(data, key, depth, nil) {\n")
+	fmt.Fprintf(&b, "\t\tif bytes.IndexByte(data[v:zjValueEnd(data, v)], '\\\\') >= 0 {\n\t\t\treturn true\n\t\t}\n")
+	fmt.Fprintf(&b, "\t}\n\treturn false\n}\n\n")
+	// zjStdlibMustMirror widens zjStdlibValueError: a grammar SyntaxError is
+	// the only stdlib rejection zerojson is documented to be lenient about
+	// (leading zeros, raw control bytes, invalid escapes in declared-field
+	// values), except trailing data after the top-level value, which
+	// Finish rejects as well. Everything else — a custom method's error, a
+	// timestamp, uuid or base64 parse failure, a wrong value kind — must be
+	// a decode error in zerojson too, or a codec that silently accepts
+	// invalid input would pass its own suite.
+	fmt.Fprintf(&b, "func zjStdlibMustMirror(err error) bool {\n")
+	fmt.Fprintf(&b, "\tif zjStdlibValueError(err) {\n\t\treturn true\n\t}\n")
+	fmt.Fprintf(&b, "\tvar se *json.SyntaxError\n")
+	fmt.Fprintf(&b, "\tif errors.As(err, &se) {\n")
+	fmt.Fprintf(&b, "\t\treturn strings.Contains(err.Error(), \"after top-level value\")\n")
+	fmt.Fprintf(&b, "\t}\n\treturn true\n}\n\n")
 	fmt.Fprintf(&b, "// zjDeleteBytes returns data with the bytes at the given indices removed.\n")
 	fmt.Fprintf(&b, "func zjDeleteBytes(data []byte, at []int) []byte {\n")
 	fmt.Fprintf(&b, "\tdrop := make(map[int]bool, len(at))\n\tfor _, i := range at {\n\t\tdrop[i] = true\n\t}\n")
 	fmt.Fprintf(&b, "\tout := make([]byte, 0, len(data))\n\tfor i, c := range data {\n\t\tif !drop[i] {\n\t\t\tout = append(out, c)\n\t\t}\n\t}\n\treturn out\n}\n\n")
 	for _, ti := range g.types {
 		g.emitStricterAllowed(&b, ti)
+		g.emitEscapedLeafGuard(&b, ti)
 		if g.typeHasInvalidTag(ti.name, map[string]bool{}) {
 			g.emitNoOracleFuzz(&b, ti)
 		}
@@ -717,6 +842,7 @@ func (g *generator) emitRootFuzz(b *strings.Builder, ti typeInfo) {
 		fmt.Fprintf(b, "\tf.Add([]byte(%q))\n", alternate)
 	}
 	fmt.Fprintf(b, "\tf.Add([]byte(`null`))\n")
+	fmt.Fprintf(b, "\tf.Add([]byte(`%s x`))\n", seed)
 	fmt.Fprintf(b, "\tf.Fuzz(func(t *testing.T, data []byte) {\n")
 	fmt.Fprintf(b, "\t\tif zjFuzzHugeExponent(data) { return }\n")
 	emitNoOracleCall(b, n, g.typeHasInvalidTag(n, map[string]bool{}))
@@ -932,6 +1058,86 @@ func (g *generator) emitNullDivergenceGuard(b *strings.Builder, ti typeInfo) {
 			fn = "zjMemberContainsNull"
 		}
 		fmt.Fprintf(b, " ||\n\t\t%s(data, %q, %d)", fn, st.key, st.depth)
+	}
+	fmt.Fprintf(b, "\n}\n\n")
+}
+
+// escapedLeafSite is one direct-leaf field reachable from a fuzz target
+// whose reader unescapes the literal before parsing it (timestamps, UUIDs,
+// quoted-int64 markers, registered leaves), with the depth it sits at —
+// the same depth model as stringOptSite.
+type escapedLeafSite struct {
+	key   string
+	depth int
+}
+
+func (g *generator) escapedLeafSites(name string, depth int, out *[]escapedLeafSite) {
+	for _, ti := range g.types {
+		if ti.name != name {
+			continue
+		}
+		if ti.rootField != nil {
+			g.fieldEscapedLeafSites(*ti.rootField, depth-1, out)
+			return
+		}
+		for _, f := range ti.fields {
+			g.fieldEscapedLeafSites(f, depth, out)
+		}
+		return
+	}
+}
+
+func unescapingLeaf(f *fieldInfo) bool {
+	if f == nil {
+		return false
+	}
+	switch f.kind {
+	case kTime, kUUID, kQuotedInt:
+		return true
+	case kCustomLeaf:
+		return !isRawLeaf(*f)
+	}
+	return false
+}
+
+func (g *generator) fieldEscapedLeafSites(f fieldInfo, depth int, out *[]escapedLeafSite) {
+	if unescapingLeaf(&f) || ((f.kind == kLeafSlice || f.kind == kMap) && unescapingLeaf(f.valInfo)) {
+		*out = append(*out, escapedLeafSite{key: f.jsonName, depth: depth})
+	}
+	switch f.kind {
+	case kStruct:
+		g.escapedLeafSites(f.elem, depth+1, out)
+	case kSlice:
+		g.escapedLeafSites(f.elem, depth+2, out)
+	case kMap:
+		if f.valInfo != nil && f.valInfo.kind == kStruct {
+			g.escapedLeafSites(f.valInfo.elem, depth+2, out)
+		}
+	}
+}
+
+// emitEscapedLeafGuard emits zjEscapedDirectLeaf<T>(data) bool: true when
+// data spells a direct-leaf value reachable from T with a JSON escape.
+// zerojson unescapes such a literal before parsing it, while encoding/json
+// hands the raw bytes to the type's own UnmarshalJSON, which may reject
+// the escaped spelling — a documented divergence, so a stdlib rejection
+// of such a document is not one zerojson must mirror.
+func (g *generator) emitEscapedLeafGuard(b *strings.Builder, ti typeInfo) {
+	n := ti.name
+	var sites []escapedLeafSite
+	g.escapedLeafSites(n, 1, &sites)
+	fmt.Fprintf(b, "// zjEscapedDirectLeaf%s reports whether data spells a timestamp, UUID,\n", n)
+	fmt.Fprintf(b, "// quoted-int64 marker, or registered leaf reachable from %s with a JSON\n", n)
+	fmt.Fprintf(b, "// escape — the documented divergence where zerojson unescapes before parsing\n")
+	fmt.Fprintf(b, "// and encoding/json's UnmarshalJSON sees the raw bytes.\n")
+	fmt.Fprintf(b, "func zjEscapedDirectLeaf%s(data []byte) bool {\n", n)
+	if len(sites) == 0 {
+		fmt.Fprintf(b, "\t_ = data\n\treturn false // no unescaping direct leaf reachable from %s\n}\n\n", n)
+		return
+	}
+	fmt.Fprintf(b, "\treturn false")
+	for _, st := range sites {
+		fmt.Fprintf(b, " ||\n\t\tzjMemberHasEscape(data, %q, %d)", st.key, st.depth)
 	}
 	fmt.Fprintf(b, "\n}\n\n")
 }

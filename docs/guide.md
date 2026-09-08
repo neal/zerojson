@@ -393,8 +393,15 @@ also generate `FuzzEventZJSONSequence`, which can be run separately.
 `-tests <path>` emits schema-seeded differential fuzz tests. They compare
 stdlib and zerojson acceptance, raw Go values where custom codec state permits,
 normalized re-encoding, valid output, and ordered/fallback agreement.
-Documented differences, such as quoted-int64 marker nulls and the v2-backed
-`,string` leading-plus behavior, have targeted exemptions.
+Acceptance is checked in both directions: whatever `encoding/json` rejects
+for a reason other than JSON grammar — a wrong value kind, a custom
+`UnmarshalJSON`/`UnmarshalText` error, an unparseable timestamp, UUID, or
+base64 payload, trailing data after the document — zerojson must reject too,
+so a codec that silently accepts invalid input cannot pass its own suite.
+Seeds cover every declared member, duplicated members, and integer width
+boundaries. Documented differences, such as quoted-int64 marker nulls,
+escaped spellings of direct leaves, and the v2-backed `,string`
+leading-plus behavior, have targeted exemptions.
 
 With `-pool`, it also emits a four-operation sequence fuzzer per explicit root.
 Operations share one decoder and mix copy/borrow modes, including invalid input

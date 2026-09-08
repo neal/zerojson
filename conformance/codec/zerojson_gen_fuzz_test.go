@@ -512,6 +512,28 @@ func zjMemberContainsNull(data []byte, key string, depth int) bool {
 	return false
 }
 
+// zjMemberHasEscape reports whether the value of member key at object depth
+// depth (or any string inside it) is spelled with a JSON escape.
+func zjMemberHasEscape(data []byte, key string, depth int) bool {
+	for _, v := range zjMemberValueStarts(data, key, depth, nil) {
+		if bytes.IndexByte(data[v:zjValueEnd(data, v)], '\\') >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func zjStdlibMustMirror(err error) bool {
+	if zjStdlibValueError(err) {
+		return true
+	}
+	var se *json.SyntaxError
+	if errors.As(err, &se) {
+		return strings.Contains(err.Error(), "after top-level value")
+	}
+	return true
+}
+
 // zjDeleteBytes returns data with the bytes at the given indices removed.
 func zjDeleteBytes(data []byte, at []int) []byte {
 	drop := make(map[int]bool, len(at))
@@ -562,6 +584,27 @@ func zjDecodeStricterAllowedEvent(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusEvent(data)
 }
 
+// zjEscapedDirectLeafEvent reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from Event with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafEvent(data []byte) bool {
+	return false ||
+		zjMemberHasEscape(data, "created_at", 1) ||
+		zjMemberHasEscape(data, "closed_at", 1) ||
+		zjMemberHasEscape(data, "amount", 1) ||
+		zjMemberHasEscape(data, "size", 1) ||
+		zjMemberHasEscape(data, "total", 1) ||
+		zjMemberHasEscape(data, "seq", 1) ||
+		zjMemberHasEscape(data, "recv_ns", 1) ||
+		zjMemberHasEscape(data, "cost", 2) ||
+		zjMemberHasEscape(data, "cost", 2) ||
+		zjMemberHasEscape(data, "ratio", 3) ||
+		zjMemberHasEscape(data, "ratio", 3) ||
+		zjMemberHasEscape(data, "amounts", 1) ||
+		zjMemberHasEscape(data, "id", 1)
+}
+
 // zjStripStringOptPlusRawHolder returns data with the leading '+' removed from every
 // quoted value on one of RawHolder's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -597,6 +640,15 @@ func zjDecodeStricterAllowedRawHolder(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusRawHolder(data)
 }
 
+// zjEscapedDirectLeafRawHolder reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from RawHolder with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafRawHolder(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from RawHolder
+}
+
 // zjStripStringOptPlusOmitZeroCases returns data with the leading '+' removed from every
 // quoted value on one of OmitZeroCases's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -630,6 +682,17 @@ func zjNullOnValueUnmarshalerOmitZeroCases(data []byte) bool {
 // only when that drift alone accounts for the rejection.
 func zjDecodeStricterAllowedOmitZeroCases(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusOmitZeroCases(data)
+}
+
+// zjEscapedDirectLeafOmitZeroCases reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from OmitZeroCases with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafOmitZeroCases(data []byte) bool {
+	return false ||
+		zjMemberHasEscape(data, "when", 1) ||
+		zjMemberHasEscape(data, "amount", 1) ||
+		zjMemberHasEscape(data, "id", 1)
 }
 
 // zjStripStringOptPlusStringOptCases returns data with the leading '+' removed from every
@@ -673,6 +736,15 @@ func zjDecodeStricterAllowedStringOptCases(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusStringOptCases(data)
 }
 
+// zjEscapedDirectLeafStringOptCases reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from StringOptCases with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafStringOptCases(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from StringOptCases
+}
+
 // zjStripStringOptPlusAppenderCases returns data with the leading '+' removed from every
 // quoted value on one of AppenderCases's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -706,6 +778,15 @@ func zjNullOnValueUnmarshalerAppenderCases(data []byte) bool {
 // only when that drift alone accounts for the rejection.
 func zjDecodeStricterAllowedAppenderCases(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusAppenderCases(data)
+}
+
+// zjEscapedDirectLeafAppenderCases reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from AppenderCases with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafAppenderCases(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from AppenderCases
 }
 
 // zjStripStringOptPlusMapFieldsLike returns data with the leading '+' removed from every
@@ -743,6 +824,15 @@ func zjDecodeStricterAllowedMapFieldsLike(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusMapFieldsLike(data)
 }
 
+// zjEscapedDirectLeafMapFieldsLike reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from MapFieldsLike with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafMapFieldsLike(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from MapFieldsLike
+}
+
 // zjStripStringOptPlusEventLeg returns data with the leading '+' removed from every
 // quoted value on one of EventLeg's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -776,6 +866,15 @@ func zjNullOnValueUnmarshalerEventLeg(data []byte) bool {
 // only when that drift alone accounts for the rejection.
 func zjDecodeStricterAllowedEventLeg(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusEventLeg(data)
+}
+
+// zjEscapedDirectLeafEventLeg reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from EventLeg with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafEventLeg(data []byte) bool {
+	return false ||
+		zjMemberHasEscape(data, "ratio", 1)
 }
 
 // zjStripStringOptPlusEmbedMid returns data with the leading '+' removed from every
@@ -813,6 +912,15 @@ func zjDecodeStricterAllowedEmbedMid(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusEmbedMid(data)
 }
 
+// zjEscapedDirectLeafEmbedMid reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from EmbedMid with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafEmbedMid(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from EmbedMid
+}
+
 // zjStripStringOptPlusEventProjection returns data with the leading '+' removed from every
 // quoted value on one of EventProjection's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -846,6 +954,15 @@ func zjNullOnValueUnmarshalerEventProjection(data []byte) bool {
 // only when that drift alone accounts for the rejection.
 func zjDecodeStricterAllowedEventProjection(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusEventProjection(data)
+}
+
+// zjEscapedDirectLeafEventProjection reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from EventProjection with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafEventProjection(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from EventProjection
 }
 
 // zjStripStringOptPlusInteractionOmitZero returns data with the leading '+' removed from every
@@ -883,6 +1000,16 @@ func zjDecodeStricterAllowedInteractionOmitZero(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusInteractionOmitZero(data)
 }
 
+// zjEscapedDirectLeafInteractionOmitZero reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from InteractionOmitZero with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafInteractionOmitZero(data []byte) bool {
+	return false ||
+		zjMemberHasEscape(data, "when", 1) ||
+		zjMemberHasEscape(data, "both", 1)
+}
+
 // zjStripStringOptPlusMapPointerMethods returns data with the leading '+' removed from every
 // quoted value on one of MapPointerMethods's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -916,6 +1043,15 @@ func zjNullOnValueUnmarshalerMapPointerMethods(data []byte) bool {
 // only when that drift alone accounts for the rejection.
 func zjDecodeStricterAllowedMapPointerMethods(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusMapPointerMethods(data)
+}
+
+// zjEscapedDirectLeafMapPointerMethods reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from MapPointerMethods with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafMapPointerMethods(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from MapPointerMethods
 }
 
 // zjStripStringOptPlusReuseSemantics returns data with the leading '+' removed from every
@@ -953,6 +1089,15 @@ func zjDecodeStricterAllowedReuseSemantics(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusReuseSemantics(data)
 }
 
+// zjEscapedDirectLeafReuseSemantics reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from ReuseSemantics with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafReuseSemantics(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from ReuseSemantics
+}
+
 // zjStripStringOptPlusOrderedSideEffects returns data with the leading '+' removed from every
 // quoted value on one of OrderedSideEffects's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -986,6 +1131,15 @@ func zjNullOnValueUnmarshalerOrderedSideEffects(data []byte) bool {
 // only when that drift alone accounts for the rejection.
 func zjDecodeStricterAllowedOrderedSideEffects(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusOrderedSideEffects(data)
+}
+
+// zjEscapedDirectLeafOrderedSideEffects reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from OrderedSideEffects with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafOrderedSideEffects(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from OrderedSideEffects
 }
 
 // zjStripStringOptPlusPoolAppenderHolder returns data with the leading '+' removed from every
@@ -1023,6 +1177,15 @@ func zjDecodeStricterAllowedPoolAppenderHolder(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusPoolAppenderHolder(data)
 }
 
+// zjEscapedDirectLeafPoolAppenderHolder reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from PoolAppenderHolder with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafPoolAppenderHolder(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from PoolAppenderHolder
+}
+
 // zjStripStringOptPlusBytesCases returns data with the leading '+' removed from every
 // quoted value on one of BytesCases's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1056,6 +1219,15 @@ func zjNullOnValueUnmarshalerBytesCases(data []byte) bool {
 // only when that drift alone accounts for the rejection.
 func zjDecodeStricterAllowedBytesCases(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusBytesCases(data)
+}
+
+// zjEscapedDirectLeafBytesCases reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from BytesCases with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafBytesCases(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from BytesCases
 }
 
 // zjStripStringOptPlusEventList returns data with the leading '+' removed from every
@@ -1093,6 +1265,27 @@ func zjDecodeStricterAllowedEventList(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusEventList(data)
 }
 
+// zjEscapedDirectLeafEventList reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from EventList with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafEventList(data []byte) bool {
+	return false ||
+		zjMemberHasEscape(data, "created_at", 2) ||
+		zjMemberHasEscape(data, "closed_at", 2) ||
+		zjMemberHasEscape(data, "amount", 2) ||
+		zjMemberHasEscape(data, "size", 2) ||
+		zjMemberHasEscape(data, "total", 2) ||
+		zjMemberHasEscape(data, "seq", 2) ||
+		zjMemberHasEscape(data, "recv_ns", 2) ||
+		zjMemberHasEscape(data, "cost", 3) ||
+		zjMemberHasEscape(data, "cost", 3) ||
+		zjMemberHasEscape(data, "ratio", 4) ||
+		zjMemberHasEscape(data, "ratio", 4) ||
+		zjMemberHasEscape(data, "amounts", 2) ||
+		zjMemberHasEscape(data, "id", 2)
+}
+
 // zjStripStringOptPlusLegPtrList returns data with the leading '+' removed from every
 // quoted value on one of LegPtrList's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1126,6 +1319,15 @@ func zjNullOnValueUnmarshalerLegPtrList(data []byte) bool {
 // only when that drift alone accounts for the rejection.
 func zjDecodeStricterAllowedLegPtrList(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusLegPtrList(data)
+}
+
+// zjEscapedDirectLeafLegPtrList reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from LegPtrList with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafLegPtrList(data []byte) bool {
+	return false ||
+		zjMemberHasEscape(data, "ratio", 2)
 }
 
 // zjStripStringOptPlusLegIndex returns data with the leading '+' removed from every
@@ -1163,6 +1365,15 @@ func zjDecodeStricterAllowedLegIndex(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusLegIndex(data)
 }
 
+// zjEscapedDirectLeafLegIndex reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from LegIndex with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafLegIndex(data []byte) bool {
+	return false ||
+		zjMemberHasEscape(data, "ratio", 2)
+}
+
 // zjStripStringOptPlusPointerMethodIndex returns data with the leading '+' removed from every
 // quoted value on one of PointerMethodIndex's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1196,6 +1407,15 @@ func zjNullOnValueUnmarshalerPointerMethodIndex(data []byte) bool {
 // only when that drift alone accounts for the rejection.
 func zjDecodeStricterAllowedPointerMethodIndex(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusPointerMethodIndex(data)
+}
+
+// zjEscapedDirectLeafPointerMethodIndex reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from PointerMethodIndex with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafPointerMethodIndex(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from PointerMethodIndex
 }
 
 // zjStripStringOptPlusPointerQuotedIndex returns data with the leading '+' removed from every
@@ -1233,6 +1453,15 @@ func zjDecodeStricterAllowedPointerQuotedIndex(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusPointerQuotedIndex(data)
 }
 
+// zjEscapedDirectLeafPointerQuotedIndex reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from PointerQuotedIndex with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafPointerQuotedIndex(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from PointerQuotedIndex
+}
+
 // zjStripStringOptPlusRawList returns data with the leading '+' removed from every
 // quoted value on one of RawList's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1266,6 +1495,15 @@ func zjNullOnValueUnmarshalerRawList(data []byte) bool {
 // only when that drift alone accounts for the rejection.
 func zjDecodeStricterAllowedRawList(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusRawList(data)
+}
+
+// zjEscapedDirectLeafRawList reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from RawList with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafRawList(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from RawList
 }
 
 // zjStripStringOptPlusRawIndex returns data with the leading '+' removed from every
@@ -1303,6 +1541,15 @@ func zjDecodeStricterAllowedRawIndex(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusRawIndex(data)
 }
 
+// zjEscapedDirectLeafRawIndex reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from RawIndex with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafRawIndex(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from RawIndex
+}
+
 // zjStripStringOptPlusRawHolderList returns data with the leading '+' removed from every
 // quoted value on one of RawHolderList's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1336,6 +1583,15 @@ func zjNullOnValueUnmarshalerRawHolderList(data []byte) bool {
 // only when that drift alone accounts for the rejection.
 func zjDecodeStricterAllowedRawHolderList(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusRawHolderList(data)
+}
+
+// zjEscapedDirectLeafRawHolderList reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from RawHolderList with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafRawHolderList(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from RawHolderList
 }
 
 // zjStripStringOptPlusDecimalList returns data with the leading '+' removed from every
@@ -1373,6 +1629,15 @@ func zjDecodeStricterAllowedDecimalList(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusDecimalList(data)
 }
 
+// zjEscapedDirectLeafDecimalList reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from DecimalList with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafDecimalList(data []byte) bool {
+	return false ||
+		zjMemberHasEscape(data, "DecimalList", 0)
+}
+
 // zjStripStringOptPlusPointerCollections returns data with the leading '+' removed from every
 // quoted value on one of PointerCollections's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1406,6 +1671,15 @@ func zjNullOnValueUnmarshalerPointerCollections(data []byte) bool {
 // only when that drift alone accounts for the rejection.
 func zjDecodeStricterAllowedPointerCollections(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusPointerCollections(data)
+}
+
+// zjEscapedDirectLeafPointerCollections reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from PointerCollections with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafPointerCollections(data []byte) bool {
+	return false ||
+		zjMemberHasEscape(data, "ratio", 3)
 }
 
 // zjStripStringOptPlusNumberCases returns data with the leading '+' removed from every
@@ -1449,6 +1723,15 @@ func zjDecodeStricterAllowedNumberCases(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusNumberCases(data)
 }
 
+// zjEscapedDirectLeafNumberCases reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from NumberCases with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafNumberCases(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from NumberCases
+}
+
 // zjStripStringOptPlusNullCases returns data with the leading '+' removed from every
 // quoted value on one of NullCases's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1482,6 +1765,15 @@ func zjNullOnValueUnmarshalerNullCases(data []byte) bool {
 // only when that drift alone accounts for the rejection.
 func zjDecodeStricterAllowedNullCases(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusNullCases(data)
+}
+
+// zjEscapedDirectLeafNullCases reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from NullCases with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafNullCases(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from NullCases
 }
 
 // zjStripStringOptPlusEventMeta returns data with the leading '+' removed from every
@@ -1519,6 +1811,15 @@ func zjDecodeStricterAllowedEventMeta(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusEventMeta(data)
 }
 
+// zjEscapedDirectLeafEventMeta reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from EventMeta with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafEventMeta(data []byte) bool {
+	return false ||
+		zjMemberHasEscape(data, "cost", 1)
+}
+
 // zjStripStringOptPlusReuseInner returns data with the leading '+' removed from every
 // quoted value on one of ReuseInner's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1554,6 +1855,15 @@ func zjDecodeStricterAllowedReuseInner(data []byte) bool {
 	return zjStdlibJSONV2 && zjStricterCausedByPlusReuseInner(data)
 }
 
+// zjEscapedDirectLeafReuseInner reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from ReuseInner with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafReuseInner(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from ReuseInner
+}
+
 func zjFuzzHugeExponent(data []byte) bool {
 	for i, c := range data {
 		if c != 'e' && c != 'E' {
@@ -1577,57 +1887,140 @@ func zjFuzzHugeExponent(data []byte) bool {
 
 func FuzzEventZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"created_at\":\"2000-01-01T00:00:00Z\"}"))
+	f.Add([]byte("{\"created_at\":\"bad\"}"))
+	f.Add([]byte("{\"created_at\":\"2000-01-01T00:00:00Z\",\"created_at\":\"2001-02-03T04:05:06Z\"}"))
 	f.Add([]byte("{\"closed_at\":\"2000-01-01T00:00:00Z\"}"))
+	f.Add([]byte("{\"closed_at\":\"bad\"}"))
+	f.Add([]byte("{\"closed_at\":\"2000-01-01T00:00:00Z\",\"closed_at\":\"2001-02-03T04:05:06Z\"}"))
 	f.Add([]byte("{\"amount\":null}"))
+	f.Add([]byte("{\"amount\":\"bad\"}"))
 	f.Add([]byte("{\"size\":null}"))
+	f.Add([]byte("{\"size\":\"bad\"}"))
 	f.Add([]byte("{\"total\":null}"))
+	f.Add([]byte("{\"total\":\"bad\"}"))
 	f.Add([]byte("{\"origin\":\"x\"}"))
+	f.Add([]byte("{\"origin\":1}"))
+	f.Add([]byte("{\"origin\":\"x\",\"origin\":\"y\"}"))
 	f.Add([]byte("{\"origin\":\"\\u0078\"}"))
 	f.Add(append(append([]byte("{\"origin\":\""), byte(0xff)), []byte("\"}")...))
 	f.Add([]byte("{\"location\":\"x\"}"))
+	f.Add([]byte("{\"location\":1}"))
+	f.Add([]byte("{\"location\":\"x\",\"location\":\"y\"}"))
 	f.Add([]byte("{\"location\":\"\\u0078\"}"))
 	f.Add(append(append([]byte("{\"location\":\""), byte(0xff)), []byte("\"}")...))
 	f.Add([]byte("{\"comment\":\"x\"}"))
+	f.Add([]byte("{\"comment\":1}"))
+	f.Add([]byte("{\"comment\":\"x\",\"comment\":\"y\"}"))
 	f.Add([]byte("{\"comment\":\"\\u0078\"}"))
 	f.Add(append(append([]byte("{\"comment\":\""), byte(0xff)), []byte("\"}")...))
 	f.Add([]byte("{\"mode\":\"x\"}"))
+	f.Add([]byte("{\"mode\":1}"))
+	f.Add([]byte("{\"mode\":\"x\",\"mode\":\"y\"}"))
 	f.Add([]byte("{\"mode\":\"\\u0078\"}"))
 	f.Add(append(append([]byte("{\"mode\":\""), byte(0xff)), []byte("\"}")...))
 	f.Add([]byte("{\"phase\":\"x\"}"))
+	f.Add([]byte("{\"phase\":1}"))
+	f.Add([]byte("{\"phase\":\"x\",\"phase\":\"y\"}"))
 	f.Add([]byte("{\"phase\":\"\\u0078\"}"))
 	f.Add(append(append([]byte("{\"phase\":\""), byte(0xff)), []byte("\"}")...))
 	f.Add([]byte("{\"seq\":\"1\"}"))
+	f.Add([]byte("{\"seq\":\"bad\"}"))
+	f.Add([]byte("{\"seq\":\"1\",\"seq\":\"2\"}"))
 	f.Add([]byte("{\"seq\":\"\\u0031\"}"))
 	f.Add([]byte("{\"seq\":\"+00\"}"))
 	f.Add([]byte("{\"recv_ns\":\"1\"}"))
+	f.Add([]byte("{\"recv_ns\":\"bad\"}"))
+	f.Add([]byte("{\"recv_ns\":\"1\",\"recv_ns\":\"2\"}"))
 	f.Add([]byte("{\"recv_ns\":\"\\u0031\"}"))
 	f.Add([]byte("{\"recv_ns\":\"+00\"}"))
 	f.Add([]byte("{\"tags\":null}"))
+	f.Add([]byte("{\"tags\":\"bad\"}"))
 	f.Add([]byte("{\"parents\":null}"))
+	f.Add([]byte("{\"parents\":\"bad\"}"))
 	f.Add([]byte("{\"meta\":{}}"))
 	f.Add([]byte("{\"meta_ptr\":{}}"))
 	f.Add([]byte("{\"items\":[{}]}"))
+	f.Add([]byte("{\"items\":[{}],\"items\":[]}"))
 	f.Add([]byte("{\"ptr_items\":[{}]}"))
+	f.Add([]byte("{\"ptr_items\":[{}],\"ptr_items\":[]}"))
 	f.Add([]byte("{\"names\":[\"x\"]}"))
+	f.Add([]byte("{\"names\":[1]}"))
+	f.Add([]byte("{\"names\":[\"x\"],\"names\":[]}"))
 	f.Add([]byte("{\"count\":1}"))
+	f.Add([]byte("{\"count\":\"1\"}"))
+	f.Add([]byte("{\"count\":1,\"count\":2}"))
+	f.Add([]byte("{\"count\":128}"))
+	f.Add([]byte("{\"count\":32768}"))
+	f.Add([]byte("{\"count\":2147483648}"))
+	f.Add([]byte("{\"count\":9223372036854775808}"))
+	f.Add([]byte("{\"count\":-129}"))
+	f.Add([]byte("{\"count\":-9223372036854775809}"))
 	f.Add([]byte("{\"shard\":1}"))
+	f.Add([]byte("{\"shard\":\"1\"}"))
+	f.Add([]byte("{\"shard\":1,\"shard\":2}"))
+	f.Add([]byte("{\"shard\":128}"))
+	f.Add([]byte("{\"shard\":32768}"))
+	f.Add([]byte("{\"shard\":2147483648}"))
+	f.Add([]byte("{\"shard\":9223372036854775808}"))
+	f.Add([]byte("{\"shard\":-129}"))
+	f.Add([]byte("{\"shard\":-9223372036854775809}"))
 	f.Add([]byte("{\"flags\":1}"))
+	f.Add([]byte("{\"flags\":\"1\"}"))
+	f.Add([]byte("{\"flags\":1,\"flags\":2}"))
+	f.Add([]byte("{\"flags\":256}"))
+	f.Add([]byte("{\"flags\":65536}"))
+	f.Add([]byte("{\"flags\":4294967296}"))
+	f.Add([]byte("{\"flags\":18446744073709551616}"))
+	f.Add([]byte("{\"flags\":-1}"))
 	f.Add([]byte("{\"weight\":1}"))
+	f.Add([]byte("{\"weight\":\"1\"}"))
+	f.Add([]byte("{\"weight\":1,\"weight\":2}"))
 	f.Add([]byte("{\"ratio32\":1}"))
+	f.Add([]byte("{\"ratio32\":\"1\"}"))
+	f.Add([]byte("{\"ratio32\":1,\"ratio32\":2}"))
 	f.Add([]byte("{\"timeout\":1}"))
+	f.Add([]byte("{\"timeout\":\"1\"}"))
+	f.Add([]byte("{\"timeout\":1,\"timeout\":2}"))
+	f.Add([]byte("{\"timeout\":128}"))
+	f.Add([]byte("{\"timeout\":32768}"))
+	f.Add([]byte("{\"timeout\":2147483648}"))
+	f.Add([]byte("{\"timeout\":9223372036854775808}"))
+	f.Add([]byte("{\"timeout\":-129}"))
+	f.Add([]byte("{\"timeout\":-9223372036854775809}"))
 	f.Add([]byte("{\"primary_date\":null}"))
+	f.Add([]byte("{\"primary_date\":\"bad\"}"))
 	f.Add([]byte("{\"second_date\":null}"))
+	f.Add([]byte("{\"second_date\":\"bad\"}"))
 	f.Add([]byte("{\"amounts\":{\"k\":null}}"))
+	f.Add([]byte("{\"amounts\":{\"k\":\"bad\"}}"))
+	f.Add([]byte("{\"amounts\":{\"k\":null},\"amounts\":{}}"))
 	f.Add([]byte("{\"extra\":null}"))
 	f.Add([]byte("{\"bag\":{\"k\":null}}"))
+	f.Add([]byte("{\"bag\":{\"k\":null},\"bag\":{}}"))
 	f.Add([]byte("{\"any_list\":[null]}"))
+	f.Add([]byte("{\"any_list\":[null],\"any_list\":[]}"))
 	f.Add([]byte("{\"id\":\"00000000-0000-0000-0000-000000000000\"}"))
+	f.Add([]byte("{\"id\":\"bad\"}"))
+	f.Add([]byte("{\"id\":\"00000000-0000-0000-0000-000000000000\",\"id\":\"11111111-1111-1111-1111-111111111111\"}"))
 	f.Add([]byte("{\"active\":true}"))
+	f.Add([]byte("{\"active\":\"true\"}"))
+	f.Add([]byte("{\"active\":true,\"active\":false}"))
 	f.Add([]byte("{\"created_by\":\"x\"}"))
+	f.Add([]byte("{\"created_by\":1}"))
+	f.Add([]byte("{\"created_by\":\"x\",\"created_by\":\"y\"}"))
 	f.Add([]byte("{\"created_by\":\"\\u0078\"}"))
 	f.Add(append(append([]byte("{\"created_by\":\""), byte(0xff)), []byte("\"}")...))
 	f.Add([]byte("{\"version\":1}"))
+	f.Add([]byte("{\"version\":\"1\"}"))
+	f.Add([]byte("{\"version\":1,\"version\":2}"))
+	f.Add([]byte("{\"version\":128}"))
+	f.Add([]byte("{\"version\":32768}"))
+	f.Add([]byte("{\"version\":2147483648}"))
+	f.Add([]byte("{\"version\":9223372036854775808}"))
+	f.Add([]byte("{\"version\":-129}"))
+	f.Add([]byte("{\"version\":-9223372036854775809}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -1652,7 +2045,7 @@ func FuzzEventZJSON(f *testing.F) {
 		}
 		var seed Event
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerEvent(data) && !zjEscapedDirectLeafEvent(data) {
 				var zj Event
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -1893,7 +2286,10 @@ func FuzzEventZJSONSequence(f *testing.F) {
 
 func FuzzRawHolderZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"table\":\"x\"}"))
+	f.Add([]byte("{\"table\":1}"))
+	f.Add([]byte("{\"table\":\"x\",\"table\":\"y\"}"))
 	f.Add([]byte("{\"table\":\"\\u0078\"}"))
 	f.Add(append(append([]byte("{\"table\":\""), byte(0xff)), []byte("\"}")...))
 	f.Add([]byte("{\"set\":{ \"x\": [1, \"y\"] }}"))
@@ -1950,7 +2346,7 @@ func FuzzRawHolderZJSON(f *testing.F) {
 		}
 		var seed RawHolder
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerRawHolder(data) && !zjEscapedDirectLeafRawHolder(data) {
 				var zj RawHolder
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -2071,16 +2467,44 @@ func FuzzRawHolderZJSONSequence(f *testing.F) {
 
 func FuzzOmitZeroCasesZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"when\":\"2000-01-01T00:00:00Z\"}"))
+	f.Add([]byte("{\"when\":\"bad\"}"))
+	f.Add([]byte("{\"when\":\"2000-01-01T00:00:00Z\",\"when\":\"2001-02-03T04:05:06Z\"}"))
 	f.Add([]byte("{\"amount\":null}"))
+	f.Add([]byte("{\"amount\":\"bad\"}"))
 	f.Add([]byte("{\"id\":\"00000000-0000-0000-0000-000000000000\"}"))
+	f.Add([]byte("{\"id\":\"bad\"}"))
+	f.Add([]byte("{\"id\":\"00000000-0000-0000-0000-000000000000\",\"id\":\"11111111-1111-1111-1111-111111111111\"}"))
 	f.Add([]byte("{\"count\":1}"))
+	f.Add([]byte("{\"count\":\"1\"}"))
+	f.Add([]byte("{\"count\":1,\"count\":2}"))
+	f.Add([]byte("{\"count\":128}"))
+	f.Add([]byte("{\"count\":32768}"))
+	f.Add([]byte("{\"count\":2147483648}"))
+	f.Add([]byte("{\"count\":9223372036854775808}"))
+	f.Add([]byte("{\"count\":-129}"))
+	f.Add([]byte("{\"count\":-9223372036854775809}"))
 	f.Add([]byte("{\"name\":\"x\"}"))
+	f.Add([]byte("{\"name\":1}"))
+	f.Add([]byte("{\"name\":\"x\",\"name\":\"y\"}"))
 	f.Add([]byte("{\"name\":\"\\u0078\"}"))
 	f.Add(append(append([]byte("{\"name\":\""), byte(0xff)), []byte("\"}")...))
 	f.Add([]byte("{\"ptr\":1}"))
+	f.Add([]byte("{\"ptr\":\"1\"}"))
+	f.Add([]byte("{\"ptr\":1,\"ptr\":2}"))
+	f.Add([]byte("{\"ptr\":128}"))
+	f.Add([]byte("{\"ptr\":32768}"))
+	f.Add([]byte("{\"ptr\":2147483648}"))
+	f.Add([]byte("{\"ptr\":9223372036854775808}"))
+	f.Add([]byte("{\"ptr\":-129}"))
+	f.Add([]byte("{\"ptr\":-9223372036854775809}"))
 	f.Add([]byte("{\"nil_slice\":[\"x\"]}"))
+	f.Add([]byte("{\"nil_slice\":[1]}"))
+	f.Add([]byte("{\"nil_slice\":[\"x\"],\"nil_slice\":[]}"))
 	f.Add([]byte("{\"empty_slice\":[\"x\"]}"))
+	f.Add([]byte("{\"empty_slice\":[1]}"))
+	f.Add([]byte("{\"empty_slice\":[\"x\"],\"empty_slice\":[]}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -2105,7 +2529,7 @@ func FuzzOmitZeroCasesZJSON(f *testing.F) {
 		}
 		var seed OmitZeroCases
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerOmitZeroCases(data) && !zjEscapedDirectLeafOmitZeroCases(data) {
 				var zj OmitZeroCases
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -2238,10 +2662,15 @@ func FuzzOmitZeroCasesZJSONSequence(f *testing.F) {
 
 func FuzzStringOptCasesZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"count\":\"1\"}"))
+	f.Add([]byte("{\"count\":\"bad\"}"))
+	f.Add([]byte("{\"count\":\"1\",\"count\":\"2\"}"))
 	f.Add([]byte("{\"count\":\"\\u0031\"}"))
 	f.Add([]byte("{\"count\":\"+00\"}"))
 	f.Add([]byte("{\"amount\":\"1\"}"))
+	f.Add([]byte("{\"amount\":\"bad\"}"))
+	f.Add([]byte("{\"amount\":\"1\",\"amount\":\"2\"}"))
 	f.Add([]byte("{\"amount\":\"\\u0031\"}"))
 	f.Add([]byte("{\"amount\":\"+00\"}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
@@ -2268,7 +2697,7 @@ func FuzzStringOptCasesZJSON(f *testing.F) {
 		}
 		var seed StringOptCases
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerStringOptCases(data) && !zjEscapedDirectLeafStringOptCases(data) {
 				var zj StringOptCases
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -2377,8 +2806,11 @@ func FuzzStringOptCasesZJSONSequence(f *testing.F) {
 
 func FuzzAppenderCasesZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"amount\":null}"))
+	f.Add([]byte("{\"amount\":\"bad\"}"))
 	f.Add([]byte("{\"cost\":null}"))
+	f.Add([]byte("{\"cost\":\"bad\"}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -2395,7 +2827,7 @@ func FuzzAppenderCasesZJSON(f *testing.F) {
 		}
 		var seed AppenderCases
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerAppenderCases(data) && !zjEscapedDirectLeafAppenderCases(data) {
 				var zj AppenderCases
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -2504,11 +2936,16 @@ func FuzzAppenderCasesZJSONSequence(f *testing.F) {
 
 func FuzzMapFieldsLikeZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"op\":\"x\"}"))
+	f.Add([]byte("{\"op\":1}"))
+	f.Add([]byte("{\"op\":\"x\",\"op\":\"y\"}"))
 	f.Add([]byte("{\"op\":\"\\u0078\"}"))
 	f.Add(append(append([]byte("{\"op\":\""), byte(0xff)), []byte("\"}")...))
 	f.Add([]byte("{\"set\":null}"))
+	f.Add([]byte("{\"set\":\"bad\"}"))
 	f.Add([]byte("{\"where\":null}"))
+	f.Add([]byte("{\"where\":\"bad\"}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -2533,7 +2970,7 @@ func FuzzMapFieldsLikeZJSON(f *testing.F) {
 		}
 		var seed MapFieldsLike
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerMapFieldsLike(data) && !zjEscapedDirectLeafMapFieldsLike(data) {
 				var zj MapFieldsLike
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -2646,11 +3083,17 @@ func FuzzMapFieldsLikeZJSONSequence(f *testing.F) {
 
 func FuzzEventLegZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"ratio\":null}"))
+	f.Add([]byte("{\"ratio\":\"bad\"}"))
 	f.Add([]byte("{\"label\":\"x\"}"))
+	f.Add([]byte("{\"label\":1}"))
+	f.Add([]byte("{\"label\":\"x\",\"label\":\"y\"}"))
 	f.Add([]byte("{\"label\":\"\\u0078\"}"))
 	f.Add(append(append([]byte("{\"label\":\""), byte(0xff)), []byte("\"}")...))
 	f.Add([]byte("{\"mode\":\"x\"}"))
+	f.Add([]byte("{\"mode\":1}"))
+	f.Add([]byte("{\"mode\":\"x\",\"mode\":\"y\"}"))
 	f.Add([]byte("{\"mode\":\"\\u0078\"}"))
 	f.Add(append(append([]byte("{\"mode\":\""), byte(0xff)), []byte("\"}")...))
 	f.Fuzz(func(t *testing.T, data []byte) {
@@ -2677,7 +3120,7 @@ func FuzzEventLegZJSON(f *testing.F) {
 		}
 		var seed EventLeg
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerEventLeg(data) && !zjEscapedDirectLeafEventLeg(data) {
 				var zj EventLeg
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -2790,14 +3233,29 @@ func FuzzEventLegZJSONSequence(f *testing.F) {
 
 func FuzzEmbedMidZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"first\":\"x\"}"))
+	f.Add([]byte("{\"first\":1}"))
+	f.Add([]byte("{\"first\":\"x\",\"first\":\"y\"}"))
 	f.Add([]byte("{\"first\":\"\\u0078\"}"))
 	f.Add(append(append([]byte("{\"first\":\""), byte(0xff)), []byte("\"}")...))
 	f.Add([]byte("{\"created_by\":\"x\"}"))
+	f.Add([]byte("{\"created_by\":1}"))
+	f.Add([]byte("{\"created_by\":\"x\",\"created_by\":\"y\"}"))
 	f.Add([]byte("{\"created_by\":\"\\u0078\"}"))
 	f.Add(append(append([]byte("{\"created_by\":\""), byte(0xff)), []byte("\"}")...))
 	f.Add([]byte("{\"version\":1}"))
+	f.Add([]byte("{\"version\":\"1\"}"))
+	f.Add([]byte("{\"version\":1,\"version\":2}"))
+	f.Add([]byte("{\"version\":128}"))
+	f.Add([]byte("{\"version\":32768}"))
+	f.Add([]byte("{\"version\":2147483648}"))
+	f.Add([]byte("{\"version\":9223372036854775808}"))
+	f.Add([]byte("{\"version\":-129}"))
+	f.Add([]byte("{\"version\":-9223372036854775809}"))
 	f.Add([]byte("{\"last\":\"x\"}"))
+	f.Add([]byte("{\"last\":1}"))
+	f.Add([]byte("{\"last\":\"x\",\"last\":\"y\"}"))
 	f.Add([]byte("{\"last\":\"\\u0078\"}"))
 	f.Add(append(append([]byte("{\"last\":\""), byte(0xff)), []byte("\"}")...))
 	f.Fuzz(func(t *testing.T, data []byte) {
@@ -2824,7 +3282,7 @@ func FuzzEmbedMidZJSON(f *testing.F) {
 		}
 		var seed EmbedMid
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerEmbedMid(data) && !zjEscapedDirectLeafEmbedMid(data) {
 				var zj EmbedMid
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -2941,10 +3399,15 @@ func FuzzEmbedMidZJSONSequence(f *testing.F) {
 
 func FuzzEventProjectionZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"origin\":\"x\"}"))
+	f.Add([]byte("{\"origin\":1}"))
+	f.Add([]byte("{\"origin\":\"x\",\"origin\":\"y\"}"))
 	f.Add([]byte("{\"origin\":\"\\u0078\"}"))
 	f.Add(append(append([]byte("{\"origin\":\""), byte(0xff)), []byte("\"}")...))
 	f.Add([]byte("{\"active\":true}"))
+	f.Add([]byte("{\"active\":\"true\"}"))
+	f.Add([]byte("{\"active\":true,\"active\":false}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -2969,7 +3432,7 @@ func FuzzEventProjectionZJSON(f *testing.F) {
 		}
 		var seed EventProjection
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerEventProjection(data) && !zjEscapedDirectLeafEventProjection(data) {
 				var zj EventProjection
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -3078,10 +3541,25 @@ func FuzzEventProjectionZJSONSequence(f *testing.F) {
 
 func FuzzInteractionOmitZeroZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"when\":\"2000-01-01T00:00:00Z\"}"))
+	f.Add([]byte("{\"when\":\"bad\"}"))
+	f.Add([]byte("{\"when\":\"2000-01-01T00:00:00Z\",\"when\":\"2001-02-03T04:05:06Z\"}"))
 	f.Add([]byte("{\"both\":\"2000-01-01T00:00:00Z\"}"))
+	f.Add([]byte("{\"both\":\"bad\"}"))
+	f.Add([]byte("{\"both\":\"2000-01-01T00:00:00Z\",\"both\":\"2001-02-03T04:05:06Z\"}"))
 	f.Add([]byte("{\"odd\":1}"))
+	f.Add([]byte("{\"odd\":\"1\"}"))
+	f.Add([]byte("{\"odd\":1,\"odd\":2}"))
+	f.Add([]byte("{\"odd\":128}"))
+	f.Add([]byte("{\"odd\":32768}"))
+	f.Add([]byte("{\"odd\":2147483648}"))
+	f.Add([]byte("{\"odd\":9223372036854775808}"))
+	f.Add([]byte("{\"odd\":-129}"))
+	f.Add([]byte("{\"odd\":-9223372036854775809}"))
 	f.Add([]byte("{\"items\":[1]}"))
+	f.Add([]byte("{\"items\":[\"1\"]}"))
+	f.Add([]byte("{\"items\":[1],\"items\":[]}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -3106,7 +3584,7 @@ func FuzzInteractionOmitZeroZJSON(f *testing.F) {
 		}
 		var seed InteractionOmitZero
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerInteractionOmitZero(data) && !zjEscapedDirectLeafInteractionOmitZero(data) {
 				var zj InteractionOmitZero
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -3223,8 +3701,13 @@ func FuzzInteractionOmitZeroZJSONSequence(f *testing.F) {
 
 func FuzzMapPointerMethodsZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"values\":{\"k\":null}}"))
+	f.Add([]byte("{\"values\":{\"k\":\"bad\"}}"))
+	f.Add([]byte("{\"values\":{\"k\":null},\"values\":{}}"))
 	f.Add([]byte("{\"numbers\":{\"k\":null}}"))
+	f.Add([]byte("{\"numbers\":{\"k\":\"bad\"}}"))
+	f.Add([]byte("{\"numbers\":{\"k\":null},\"numbers\":{}}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -3241,7 +3724,7 @@ func FuzzMapPointerMethodsZJSON(f *testing.F) {
 		}
 		var seed MapPointerMethods
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerMapPointerMethods(data) && !zjEscapedDirectLeafMapPointerMethods(data) {
 				var zj MapPointerMethods
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -3350,9 +3833,13 @@ func FuzzMapPointerMethodsZJSONSequence(f *testing.F) {
 
 func FuzzReuseSemanticsZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"values\":{\"k\":1}}"))
+	f.Add([]byte("{\"values\":{\"k\":\"1\"}}"))
+	f.Add([]byte("{\"values\":{\"k\":1},\"values\":{}}"))
 	f.Add([]byte("{\"inner\":{}}"))
 	f.Add([]byte("{\"accum\":null}"))
+	f.Add([]byte("{\"accum\":\"bad\"}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -3377,7 +3864,7 @@ func FuzzReuseSemanticsZJSON(f *testing.F) {
 		}
 		var seed ReuseSemantics
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerReuseSemantics(data) && !zjEscapedDirectLeafReuseSemantics(data) {
 				var zj ReuseSemantics
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -3490,8 +3977,18 @@ func FuzzReuseSemanticsZJSONSequence(f *testing.F) {
 
 func FuzzOrderedSideEffectsZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"first\":null}"))
+	f.Add([]byte("{\"first\":\"bad\"}"))
 	f.Add([]byte("{\"last\":1}"))
+	f.Add([]byte("{\"last\":\"1\"}"))
+	f.Add([]byte("{\"last\":1,\"last\":2}"))
+	f.Add([]byte("{\"last\":128}"))
+	f.Add([]byte("{\"last\":32768}"))
+	f.Add([]byte("{\"last\":2147483648}"))
+	f.Add([]byte("{\"last\":9223372036854775808}"))
+	f.Add([]byte("{\"last\":-129}"))
+	f.Add([]byte("{\"last\":-9223372036854775809}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -3516,7 +4013,7 @@ func FuzzOrderedSideEffectsZJSON(f *testing.F) {
 		}
 		var seed OrderedSideEffects
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerOrderedSideEffects(data) && !zjEscapedDirectLeafOrderedSideEffects(data) {
 				var zj OrderedSideEffects
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -3625,7 +4122,9 @@ func FuzzOrderedSideEffectsZJSONSequence(f *testing.F) {
 
 func FuzzPoolAppenderHolderZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"value\":null}"))
+	f.Add([]byte("{\"value\":\"bad\"}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -3642,7 +4141,7 @@ func FuzzPoolAppenderHolderZJSON(f *testing.F) {
 		}
 		var seed PoolAppenderHolder
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerPoolAppenderHolder(data) && !zjEscapedDirectLeafPoolAppenderHolder(data) {
 				var zj PoolAppenderHolder
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -3747,13 +4246,20 @@ func FuzzPoolAppenderHolderZJSONSequence(f *testing.F) {
 
 func FuzzBytesCasesZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"data\":\"\"}"))
+	f.Add([]byte("{\"data\":\"!!\"}"))
 	f.Add([]byte("{\"data\":[0,1,255]}"))
 	f.Add([]byte("{\"ptr\":\"\"}"))
+	f.Add([]byte("{\"ptr\":\"!!\"}"))
 	f.Add([]byte("{\"ptr\":[0,1,255]}"))
 	f.Add([]byte("{\"lists\":[\"\"]}"))
+	f.Add([]byte("{\"lists\":[\"!!\"]}"))
+	f.Add([]byte("{\"lists\":[\"\"],\"lists\":[]}"))
 	f.Add([]byte("{\"lists\":[[0,1,255]]}"))
 	f.Add([]byte("{\"index\":{\"k\":\"\"}}"))
+	f.Add([]byte("{\"index\":{\"k\":\"!!\"}}"))
+	f.Add([]byte("{\"index\":{\"k\":\"\"},\"index\":{}}"))
 	f.Add([]byte("{\"index\":{\"k\":[0,1,255]}}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
@@ -3779,7 +4285,7 @@ func FuzzBytesCasesZJSON(f *testing.F) {
 		}
 		var seed BytesCases
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerBytesCases(data) && !zjEscapedDirectLeafBytesCases(data) {
 				var zj BytesCases
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -3914,6 +4420,7 @@ func FuzzEventListZJSON(f *testing.F) {
 	f.Add([]byte(`[]`))
 	f.Add([]byte("[{}]"))
 	f.Add([]byte(`null`))
+	f.Add([]byte(`[] x`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -3930,7 +4437,7 @@ func FuzzEventListZJSON(f *testing.F) {
 		}
 		var seed EventList
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerEventList(data) && !zjEscapedDirectLeafEventList(data) {
 				var zj EventList
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -4031,6 +4538,7 @@ func FuzzLegPtrListZJSON(f *testing.F) {
 	f.Add([]byte(`[]`))
 	f.Add([]byte("[{}]"))
 	f.Add([]byte(`null`))
+	f.Add([]byte(`[] x`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -4047,7 +4555,7 @@ func FuzzLegPtrListZJSON(f *testing.F) {
 		}
 		var seed LegPtrList
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerLegPtrList(data) && !zjEscapedDirectLeafLegPtrList(data) {
 				var zj LegPtrList
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -4148,6 +4656,7 @@ func FuzzLegIndexZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
 	f.Add([]byte("{\"k\":{}}"))
 	f.Add([]byte(`null`))
+	f.Add([]byte(`{} x`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -4164,7 +4673,7 @@ func FuzzLegIndexZJSON(f *testing.F) {
 		}
 		var seed LegIndex
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerLegIndex(data) && !zjEscapedDirectLeafLegIndex(data) {
 				var zj LegIndex
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -4265,6 +4774,7 @@ func FuzzPointerMethodIndexZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
 	f.Add([]byte("{\"k\":null}"))
 	f.Add([]byte(`null`))
+	f.Add([]byte(`{} x`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -4281,7 +4791,7 @@ func FuzzPointerMethodIndexZJSON(f *testing.F) {
 		}
 		var seed PointerMethodIndex
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerPointerMethodIndex(data) && !zjEscapedDirectLeafPointerMethodIndex(data) {
 				var zj PointerMethodIndex
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -4382,6 +4892,7 @@ func FuzzPointerQuotedIndexZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
 	f.Add([]byte("{\"k\":null}"))
 	f.Add([]byte(`null`))
+	f.Add([]byte(`{} x`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -4398,7 +4909,7 @@ func FuzzPointerQuotedIndexZJSON(f *testing.F) {
 		}
 		var seed PointerQuotedIndex
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerPointerQuotedIndex(data) && !zjEscapedDirectLeafPointerQuotedIndex(data) {
 				var zj PointerQuotedIndex
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -4500,6 +5011,7 @@ func FuzzRawListZJSON(f *testing.F) {
 	f.Add([]byte("[{ \"x\": [1, \"y\"] }]"))
 	f.Add([]byte("[null]"))
 	f.Add([]byte(`null`))
+	f.Add([]byte(`[] x`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -4550,7 +5062,7 @@ func FuzzRawListZJSON(f *testing.F) {
 		}
 		var seed RawList
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerRawList(data) && !zjEscapedDirectLeafRawList(data) {
 				var zj RawList
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -4656,6 +5168,7 @@ func FuzzRawIndexZJSON(f *testing.F) {
 	f.Add([]byte("{\"k\":{ \"x\": [1, \"y\"] }}"))
 	f.Add([]byte("{\"k\":null}"))
 	f.Add([]byte(`null`))
+	f.Add([]byte(`{} x`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -4706,7 +5219,7 @@ func FuzzRawIndexZJSON(f *testing.F) {
 		}
 		var seed RawIndex
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerRawIndex(data) && !zjEscapedDirectLeafRawIndex(data) {
 				var zj RawIndex
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -4811,6 +5324,7 @@ func FuzzRawHolderListZJSON(f *testing.F) {
 	f.Add([]byte(`[]`))
 	f.Add([]byte("[{}]"))
 	f.Add([]byte(`null`))
+	f.Add([]byte(`[] x`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -4861,7 +5375,7 @@ func FuzzRawHolderListZJSON(f *testing.F) {
 		}
 		var seed RawHolderList
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerRawHolderList(data) && !zjEscapedDirectLeafRawHolderList(data) {
 				var zj RawHolderList
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -4962,6 +5476,7 @@ func FuzzDecimalListZJSON(f *testing.F) {
 	f.Add([]byte(`[]`))
 	f.Add([]byte("[null]"))
 	f.Add([]byte(`null`))
+	f.Add([]byte(`[] x`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -4978,7 +5493,7 @@ func FuzzDecimalListZJSON(f *testing.F) {
 		}
 		var seed DecimalList
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerDecimalList(data) && !zjEscapedDirectLeafDecimalList(data) {
 				var zj DecimalList
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -5077,10 +5592,18 @@ func FuzzDecimalListZJSONSequence(f *testing.F) {
 
 func FuzzPointerCollectionsZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"names\":[\"x\"]}"))
+	f.Add([]byte("{\"names\":[1]}"))
+	f.Add([]byte("{\"names\":[\"x\"],\"names\":[]}"))
 	f.Add([]byte("{\"index\":{\"k\":1}}"))
+	f.Add([]byte("{\"index\":{\"k\":\"1\"}}"))
+	f.Add([]byte("{\"index\":{\"k\":1},\"index\":{}}"))
 	f.Add([]byte("{\"legs\":[{}]}"))
+	f.Add([]byte("{\"legs\":[{}],\"legs\":[]}"))
 	f.Add([]byte("{\"tags\":{\"k\":\"x\"}}"))
+	f.Add([]byte("{\"tags\":{\"k\":1}}"))
+	f.Add([]byte("{\"tags\":{\"k\":\"x\"},\"tags\":{}}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -5105,7 +5628,7 @@ func FuzzPointerCollectionsZJSON(f *testing.F) {
 		}
 		var seed PointerCollections
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerPointerCollections(data) && !zjEscapedDirectLeafPointerCollections(data) {
 				var zj PointerCollections
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -5222,15 +5745,25 @@ func FuzzPointerCollectionsZJSONSequence(f *testing.F) {
 
 func FuzzNumberCasesZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"n\":1}"))
+	f.Add([]byte("{\"n\":1,\"n\":2}"))
 	f.Add([]byte("{\"no\":1}"))
+	f.Add([]byte("{\"no\":1,\"no\":2}"))
 	f.Add([]byte("{\"np\":1}"))
+	f.Add([]byte("{\"np\":1,\"np\":2}"))
 	f.Add([]byte("{\"ns\":[1]}"))
+	f.Add([]byte("{\"ns\":[1],\"ns\":[]}"))
 	f.Add([]byte("{\"nm\":{\"k\":1}}"))
+	f.Add([]byte("{\"nm\":{\"k\":1},\"nm\":{}}"))
 	f.Add([]byte("{\"cnt_s\":\"1\"}"))
+	f.Add([]byte("{\"cnt_s\":\"bad\"}"))
+	f.Add([]byte("{\"cnt_s\":\"1\",\"cnt_s\":\"2\"}"))
 	f.Add([]byte("{\"cnt_s\":\"\\u0031\"}"))
 	f.Add([]byte("{\"cnt_s\":\"+00\"}"))
 	f.Add([]byte("{\"ptr_s\":\"1\"}"))
+	f.Add([]byte("{\"ptr_s\":\"bad\"}"))
+	f.Add([]byte("{\"ptr_s\":\"1\",\"ptr_s\":\"2\"}"))
 	f.Add([]byte("{\"ptr_s\":\"\\u0031\"}"))
 	f.Add([]byte("{\"ptr_s\":\"+00\"}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
@@ -5257,7 +5790,7 @@ func FuzzNumberCasesZJSON(f *testing.F) {
 		}
 		var seed NumberCases
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerNumberCases(data) && !zjEscapedDirectLeafNumberCases(data) {
 				var zj NumberCases
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -5386,10 +5919,17 @@ func FuzzNumberCasesZJSONSequence(f *testing.F) {
 
 func FuzzNullCasesZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"one\":null}"))
+	f.Add([]byte("{\"one\":\"bad\"}"))
 	f.Add([]byte("{\"many\":[null]}"))
+	f.Add([]byte("{\"many\":[\"bad\"]}"))
+	f.Add([]byte("{\"many\":[null],\"many\":[]}"))
 	f.Add([]byte("{\"index\":{\"k\":null}}"))
+	f.Add([]byte("{\"index\":{\"k\":\"bad\"}}"))
+	f.Add([]byte("{\"index\":{\"k\":null},\"index\":{}}"))
 	f.Add([]byte("{\"ptr\":null}"))
+	f.Add([]byte("{\"ptr\":\"bad\"}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -5406,7 +5946,7 @@ func FuzzNullCasesZJSON(f *testing.F) {
 		}
 		var seed NullCases
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerNullCases(data) && !zjEscapedDirectLeafNullCases(data) {
 				var zj NullCases
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -5523,11 +6063,17 @@ func FuzzNullCasesZJSONSequence(f *testing.F) {
 
 func FuzzEventMetaZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"note\":\"x\"}"))
+	f.Add([]byte("{\"note\":1}"))
+	f.Add([]byte("{\"note\":\"x\",\"note\":\"y\"}"))
 	f.Add([]byte("{\"note\":\"\\u0078\"}"))
 	f.Add(append(append([]byte("{\"note\":\""), byte(0xff)), []byte("\"}")...))
 	f.Add([]byte("{\"cost\":null}"))
+	f.Add([]byte("{\"cost\":\"bad\"}"))
 	f.Add([]byte("{\"internal\":true}"))
+	f.Add([]byte("{\"internal\":\"true\"}"))
+	f.Add([]byte("{\"internal\":true,\"internal\":false}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -5552,7 +6098,7 @@ func FuzzEventMetaZJSON(f *testing.F) {
 		}
 		var seed EventMeta
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerEventMeta(data) && !zjEscapedDirectLeafEventMeta(data) {
 				var zj EventMeta
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
@@ -5611,8 +6157,25 @@ func FuzzEventMetaZJSON(f *testing.F) {
 
 func FuzzReuseInnerZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"a\":1}"))
+	f.Add([]byte("{\"a\":\"1\"}"))
+	f.Add([]byte("{\"a\":1,\"a\":2}"))
+	f.Add([]byte("{\"a\":128}"))
+	f.Add([]byte("{\"a\":32768}"))
+	f.Add([]byte("{\"a\":2147483648}"))
+	f.Add([]byte("{\"a\":9223372036854775808}"))
+	f.Add([]byte("{\"a\":-129}"))
+	f.Add([]byte("{\"a\":-9223372036854775809}"))
 	f.Add([]byte("{\"b\":1}"))
+	f.Add([]byte("{\"b\":\"1\"}"))
+	f.Add([]byte("{\"b\":1,\"b\":2}"))
+	f.Add([]byte("{\"b\":128}"))
+	f.Add([]byte("{\"b\":32768}"))
+	f.Add([]byte("{\"b\":2147483648}"))
+	f.Add([]byte("{\"b\":9223372036854775808}"))
+	f.Add([]byte("{\"b\":-129}"))
+	f.Add([]byte("{\"b\":-9223372036854775809}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if zjFuzzHugeExponent(data) {
 			return
@@ -5637,7 +6200,7 @@ func FuzzReuseInnerZJSON(f *testing.F) {
 		}
 		var seed ReuseInner
 		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
-			if zjStdlibValueError(serr) {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerReuseInner(data) && !zjEscapedDirectLeafReuseInner(data) {
 				var zj ReuseInner
 				if zj.UnmarshalZJSON(data) == nil {
 					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
