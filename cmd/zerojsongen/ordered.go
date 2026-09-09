@@ -277,11 +277,11 @@ func (g *generator) emitOrderedDeclaredKey(ti typeInfo) {
 	for i, f := range ti.fields {
 		names[i] = fmt.Sprintf("%q", f.jsonName)
 	}
-	g.p("\tswitch zjFieldName_%s(name) {", n)
+	g.p("\tswitch name {")
 	g.p("\tcase %s:", strings.Join(names, ", "))
 	g.p("\t\treturn true")
 	g.p("\t}")
-	g.p("\treturn false")
+	g.p("\treturn zjFieldName_%s(name) != name", n)
 	g.p("}")
 }
 

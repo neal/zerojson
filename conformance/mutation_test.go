@@ -154,6 +154,18 @@ func mutationCatalog() []mutationCase {
 	)
 	return []mutationCase{
 		{
+			name: "scalar_root_reuse_rejects_null", tier: "full", file: "cmd/zerojsongen/decode.go",
+			old: `g.p("%sif l.IsNull() { %s = nil } else if l.EnterArray() {", ind, target)`,
+			new: `g.p("%sif l.EnterArray() {", ind)`, wantCount: 1,
+			detector: generatorDetector(`^TestIndependentChallenge$`), wantOutput: "scalar root capacity:",
+		},
+		{
+			name: "scalar_reuse_clears_existing_element", tier: "full", file: "cmd/zerojsongen/decode.go",
+			old: `g.p("%s\t\tif !l.IsNull() { zjSlice[zjIndex] = %s }", ind, g.leafReadExpr(f.valInfo))`,
+			new: `g.p("%s\t\tvar zjReset %s; zjSlice[zjIndex] = zjReset; if !l.IsNull() { zjSlice[zjIndex] = %s }", ind, f.valInfo.typeStr, g.leafReadExpr(f.valInfo))`, wantCount: 1,
+			detector: generatorDetector(`^TestIndependentChallenge$`), wantOutput: "scalar slice capacity:",
+		},
+		{
 			name: "custom_container_private_publication", tier: "full", file: "cmd/zerojsongen/decode.go",
 			old: `delegate := stdlibMethodContainer(f) || (collection && g.stdlibValue(f, map[string]bool{}) && g.fieldHasReplayCallbacks(f, map[string]bool{}))`,
 			new: `delegate := false && (stdlibMethodContainer(f) || (collection && g.stdlibValue(f, map[string]bool{}) && g.fieldHasReplayCallbacks(f, map[string]bool{})))`, wantCount: 1,

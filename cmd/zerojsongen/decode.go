@@ -339,8 +339,9 @@ func (g *generator) genDecode(ti typeInfo) {
 	g.p("\tfor {")
 	g.p("\t\tkey := l.ReadKey()")
 	g.p("\t\tif l.Err() != nil { return }")
-	g.p("\t\tname := zjFieldName_%s(string(key))", ti.name)
+	g.p("\t\tname := string(key)")
 	g.p("\t\tif l.IsNull() {")
+	g.p("\t\t\tname = zjFieldName_%s(name)", ti.name)
 	g.emitNullSwitch(ti)
 	g.p("\t\t\tif l.Err() != nil {")
 	g.p("\t\t\t\tl.AnnotateField(key)")
@@ -349,12 +350,14 @@ func (g *generator) genDecode(ti typeInfo) {
 	g.p("\t\t\tif !l.NextMember() { break }")
 	g.p("\t\t\tcontinue")
 	g.p("\t\t}")
+	g.p("\t\tzjDispatch:")
 	g.p("\t\tswitch name {")
 	for _, f := range ti.fields {
 		g.p("\t\tcase %q:", f.jsonName)
 		g.emitDecode(f, false)
 	}
 	g.p("\t\tdefault:")
+	g.p("\t\t\tif folded := zjFieldName_%s(name); folded != name { name = folded; goto zjDispatch }", ti.name)
 	g.p("\t\t\tl.Skip()")
 	g.p("\t\t}")
 	g.p("\t\tif l.Err() != nil {")
@@ -478,13 +481,41 @@ func (g *generator) emitNullSwitch(ti typeInfo) {
 	g.p("\t\t\t}")
 }
 
-// emitDecode emits the decode statement(s) for a single field's value
-// (the lexer is already positioned at the value; key/colon/null handling
-// is the caller's responsibility). ordered selects, for kStruct fields
-// only, whether nested recursion goes through the nested type's pure
-// ordered decoder (propagating a bail as a bool) or its normal
-// try-ordered-then-fallback dispatcher (fallback mode, which never
-// "fails" — any error surfaces via l.Err()).
+// scalarSlice identifies values that cannot invoke user code while the
+// slice header is private.
+// Bytes, enums, registered readers and method-bearing values keep their
+// existing paths; representation and ownership rules differ for those kinds.
+func scalarSlice(f fieldInfo) bool {
+	if f.kind != kLeafSlice || f.elemPtr || f.byteElem != "" || f.valInfo == nil {
+		return false
+	}
+	switch f.valInfo.kind {
+	case kString, kBool, kInt, kUint, kFloat32, kFloat64, kJSONNumber:
+		return true
+	}
+	return false
+}
+
+func (g *generator) emitReusedScalarSlice(f fieldInfo, target, ind string) {
+	g.p("%sif l.IsNull() { %s = nil } else if l.EnterArray() {", ind, target)
+	g.p("%s\tzjSlice := %s", ind, target)
+	g.p("%s\tzjIndex := 0", ind)
+	g.p("%s\tfor {", ind)
+	// Stdlib extends through capacity, preserving even previously hidden
+	// elements on null. Newly appended elements alone start at zero.
+	g.p("%s\t\tif zjIndex < cap(zjSlice) { zjSlice = zjSlice[:zjIndex+1] } else {", ind)
+	g.p("%s\t\t\tvar zjZero %s; zjSlice = append(zjSlice, zjZero)", ind, f.valInfo.typeStr)
+	g.p("%s\t\t}", ind)
+	g.p("%s\t\tif !l.IsNull() { zjSlice[zjIndex] = %s }", ind, g.leafReadExpr(f.valInfo))
+	g.p("%s\t\tzjIndex++", ind)
+	g.p("%s\t\tif l.Err() != nil || !l.NextElem() { break }", ind)
+	g.p("%s\t}", ind)
+	g.p("%s\t%s = zjSlice[:zjIndex]", ind, target)
+	g.p("%s} else if l.Err() == nil { %s = make(%s, 0) }", ind, target, f.typeStr)
+}
+
+// emitDecode emits a field value read. The caller handles the key, colon,
+// and field-level null; the lexer is already positioned at the value.
 func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 	ind := "\t\t\t"
 	target := "v." + f.access
@@ -492,13 +523,21 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 	delegate := stdlibMethodContainer(f) || (collection && g.stdlibValue(f, map[string]bool{}) && g.fieldHasReplayCallbacks(f, map[string]bool{}))
 	reusedSlice := !delegate && (f.kind == kSlice || f.kind == kLeafSlice) && g.stdlibValue(f, map[string]bool{})
 	if delegate || reusedSlice {
-		q := g.importAlias("encoding/json", "json")
 		if reusedSlice {
 			g.p("%sif %s != nil {", ind, target)
 		}
-		g.p("%sif raw := l.RawValue(); l.Err() == nil {", ind)
-		g.p("%s\tif err := %s.Unmarshal(raw, &%s); err != nil { l.AddError(err) }", ind, q, target)
-		g.p("%s}", ind)
+		if reusedSlice && scalarSlice(f) {
+			sliceTarget := target
+			if f.ptr {
+				sliceTarget = "*" + target
+			}
+			g.emitReusedScalarSlice(f, sliceTarget, ind)
+		} else {
+			q := g.importAlias("encoding/json", "json")
+			g.p("%sif raw := l.RawValue(); l.Err() == nil {", ind)
+			g.p("%s\tif err := %s.Unmarshal(raw, &%s); err != nil { l.AddError(err) }", ind, q, target)
+			g.p("%s}", ind)
+		}
 		if delegate {
 			return
 		}

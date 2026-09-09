@@ -163,6 +163,37 @@ func BenchmarkDecodeEventLeg_ZJSON_PooledBorrow(b *testing.B) {
 // struct. The error check keeps each call live against dead-code
 // elimination; the post-loop sink pins the final value.
 
+// Keep syntax preflight and scalar-slice reuse separately measurable from
+// the mixed Event benchmark, which also contains custom codecs and maps.
+func BenchmarkValidateEvent(b *testing.B) {
+	_, data := benchEvent(b)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if err := zerojson.Valid(data); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkDecodeScalarSliceReused(b *testing.B) {
+	data := []byte(`{"names":["first",null,"third"]}`)
+	var v PointerCollections
+	if err := v.UnmarshalZJSONBorrow(data); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if err := v.UnmarshalZJSONBorrow(data); err != nil {
+			b.Fatal(err)
+		}
+	}
+	scalarSliceSink = v.Names
+}
+
+var scalarSliceSink *[]string
+
 func BenchmarkDecodeEvent_ZJSON_Copy(b *testing.B) {
 	_, data := benchEvent(b)
 	var e Event

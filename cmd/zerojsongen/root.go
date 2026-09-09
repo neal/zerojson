@@ -201,16 +201,20 @@ func (g *generator) genRootDecode(ti typeInfo) {
 	delegate := stdlibMethodContainer(*rf) || (g.stdlibValue(*rf, map[string]bool{}) && g.fieldHasReplayCallbacks(*rf, map[string]bool{}))
 	reusedSlice := !delegate && rf.kind != kMap && g.stdlibValue(*rf, map[string]bool{})
 	if delegate || reusedSlice {
-		q := g.importAlias("encoding/json", "json")
 		if reusedSlice {
 			g.p("\tif *v != nil {")
 		}
-		// A methodless local view prevents recursion through generated
-		// compatibility UnmarshalJSON wrappers on the container itself.
-		g.p("\ttype container %s", n)
-		g.p("\tif raw := l.RawValue(); l.Err() == nil {")
-		g.p("\t\tif err := %s.Unmarshal(raw, (*container)(v)); err != nil { l.AddError(err) }", q)
-		g.p("\t}")
+		if reusedSlice && scalarSlice(*rf) {
+			g.emitReusedScalarSlice(*rf, "*v", "\t")
+		} else {
+			q := g.importAlias("encoding/json", "json")
+			// A methodless local view prevents recursion through generated
+			// compatibility UnmarshalJSON wrappers on the container itself.
+			g.p("\ttype container %s", n)
+			g.p("\tif raw := l.RawValue(); l.Err() == nil {")
+			g.p("\t\tif err := %s.Unmarshal(raw, (*container)(v)); err != nil { l.AddError(err) }", q)
+			g.p("\t}")
+		}
 		if reusedSlice {
 			g.p("\treturn\n\t}")
 		}

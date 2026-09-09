@@ -11,6 +11,46 @@ import (
 
 type recordDecoder func([]byte, *Record) error
 
+func TestReusedScalarSliceCapacity(t *testing.T) {
+	for _, borrow := range []bool{false, true} {
+		gotBacking, wantBacking := []int{7, 8, 9}, []int{7, 8, 9}
+		got, want := Ordinary{Numbers: gotBacking[:1]}, Ordinary{Numbers: wantBacking[:1]}
+		for _, input := range []string{`{"Numbers":[null,null,4]}`, `{"Numbers":[5]}`, `{"Numbers":[]}`, `{"Numbers":[1,2,3,4]}`} {
+			if err := json.Unmarshal([]byte(input), &want); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			if borrow {
+				err = got.UnmarshalZJSONBorrow([]byte(input))
+			} else {
+				err = got.UnmarshalZJSON([]byte(input))
+			}
+			if err != nil || !reflect.DeepEqual(got, want) || !reflect.DeepEqual(gotBacking, wantBacking) {
+				t.Fatalf("scalar slice capacity: input=%s got=%v want=%v retained=%v/%v err=%v", input, got.Numbers, want.Numbers, gotBacking, wantBacking, err)
+			}
+			if len(want.Numbers) == 0 && cap(got.Numbers) != 0 {
+				t.Fatalf("scalar empty slice capacity: got=%d", cap(got.Numbers))
+			}
+		}
+		groot, wroot := RootSlice{7, 8, 9}, RootSlice{7, 8, 9}
+		groot, wroot = groot[:1], wroot[:1]
+		for _, input := range []string{`[null,null,4]`, `null`, `[]`, `[2]`, `null`} {
+			if err := json.Unmarshal([]byte(input), &wroot); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			if borrow {
+				err = groot.UnmarshalZJSONBorrow([]byte(input))
+			} else {
+				err = groot.UnmarshalZJSON([]byte(input))
+			}
+			if err != nil || !reflect.DeepEqual(groot, wroot) {
+				t.Fatalf("scalar root capacity: got=%v want=%v err=%v", groot, wroot, err)
+			}
+		}
+	}
+}
+
 // Separate, methodless twins prevent generated UnmarshalJSON wrappers from
 // contaminating the stdlib oracle in the compatibility build.
 func TestCompatContainerObservations(t *testing.T) {

@@ -293,11 +293,11 @@ func zjTryOrderedKeyPoint(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyPoint(name string) bool {
-	switch zjFieldName_Point(name) {
+	switch name {
 	case "x", "y", "name":
 		return true
 	}
-	return false
+	return zjFieldName_Point(name) != name
 }
 
 // zjDecodeFallback_Point is the general keyed decoder: every member is read via
@@ -313,8 +313,9 @@ func zjDecodeFallback_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
 		if l.Err() != nil {
 			return
 		}
-		name := zjFieldName_Point(string(key))
+		name := string(key)
 		if l.IsNull() {
+			name = zjFieldName_Point(name)
 			if l.Err() != nil {
 				l.AnnotateField(key)
 				return
@@ -324,6 +325,7 @@ func zjDecodeFallback_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
 			}
 			continue
 		}
+	zjDispatch:
 		switch name {
 		case "x":
 			v.X = int(l.ReadInt())
@@ -332,6 +334,10 @@ func zjDecodeFallback_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
 		case "name":
 			v.Name = l.ReadString()
 		default:
+			if folded := zjFieldName_Point(name); folded != name {
+				name = folded
+				goto zjDispatch
+			}
 			l.Skip()
 		}
 		if l.Err() != nil {

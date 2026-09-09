@@ -265,9 +265,27 @@ func TestEventPooledDecodeBorrowAllocationBudget(t *testing.T) {
 	}
 }
 
-// Pin pooled fallback costs, including stdlib delegation when a rewind or
-// duplicate revisits an existing slice. Those paths must preserve element
-// reuse semantics even when the first traversal allocated arena storage.
+func TestReusedScalarSliceAllocationBudget(t *testing.T) {
+	requireStableAllocationInstrumentation(t)
+	data := []byte(`{"names":["first",null,"third"]}`)
+	var v PointerCollections
+	if err := v.UnmarshalZJSONBorrow(data); err != nil {
+		t.Fatal(err)
+	}
+	n := testing.AllocsPerRun(200, func() {
+		if err := v.UnmarshalZJSONBorrow(data); err != nil {
+			t.Fatal(err)
+		}
+	})
+	// The containing non-pooled arena escapes; the scalar traversal itself
+	// must not add stdlib state or string-copy allocations in borrow mode.
+	if n > 1 {
+		t.Fatalf("reused scalar slice allocations=%g, budget 1", n)
+	}
+}
+
+// Pin fallback costs while preserving element reuse across rewinds and
+// duplicate members, including stdlib delegation where still required.
 func TestPointerCollectionsPooledFallbackAllocationBudget(t *testing.T) {
 	requireStableAllocationInstrumentation(t)
 	for name, doc := range map[string]string{
@@ -290,7 +308,8 @@ func TestPointerCollectionsPooledFallbackAllocationBudget(t *testing.T) {
 				t.Fatalf("%s: %v", name, err)
 			}
 		})
-		// Revisited slices use stdlib traversal to preserve element reuse.
+		// Revisited slices preserve stdlib element reuse, with generated
+		// scalar traversal where eligible.
 		// This is a ceiling: newer stdlib implementations can allocate less.
 		want := map[string]float64{"spaced": 2, "duplicate member": 5}[name]
 		if allocs > want {
