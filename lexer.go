@@ -349,17 +349,9 @@ func (l *Lexer) RawValue() []byte {
 // so a subtree skipped 3 levels down has 3 fewer levels to spend, exactly
 // as Valid would count it) rather than merely brace/bracket-counted.
 //
-// So every byte a decode does NOT hand to a declared field's own reader
-// is grammar-checked: unknown members (a genuinely unknown field's value,
-// and the ordered decoder's inline skip of one, both go through this
-// method), plus Finish's trailing-data check. Declared fields' readers
-// are deliberately more lenient (leading zeros in a known int, a raw
-// control byte in a known string — see the compatibility notes), which is
-// why a successful decode still does not certify the payload as strict
-// JSON; Valid does that, in one pass, when it matters. The one thing
-// this deliberately does not touch is the known-field decode primitives
-// (readStringBytes, readNumericBytes) — those stay lenient and fast; only
-// content the caller never otherwise inspects gets the stricter treatment.
+// Unlike some low-level value readers, Skip checks the complete grammar of
+// its subtree. Generated public decode methods additionally call Valid on
+// the whole document before invoking any value reader or custom method.
 func (l *Lexer) Skip() {
 	if l.err != nil {
 		return

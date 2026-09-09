@@ -165,6 +165,45 @@ func sliceCellType(elemType string, elemPtr bool) string {
 	return "[]" + elemType
 }
 
+// Custom element methods can inspect or replace the container while it is
+// being decoded. Let stdlib own that traversal and publication protocol;
+// an arena-backed private header cannot reproduce those observations.
+func stdlibMethodContainer(f fieldInfo) bool {
+	return (f.kind == kLeafSlice || f.kind == kMap) && f.valInfo != nil &&
+		(f.valInfo.kind == kMarshaler || f.valInfo.kind == kTextMarshaler)
+}
+
+// Delegation must not bypass explicitly registered/marker reader contracts.
+func (g *generator) stdlibValue(f fieldInfo, visiting map[string]bool) bool {
+	switch f.kind {
+	case kCustomLeaf:
+		return isRawLeaf(f)
+	case kQuotedInt, kAppender:
+		return false
+	case kStruct, kSlice:
+		if visiting[f.elem] {
+			return true
+		}
+		visiting[f.elem] = true
+		defer delete(visiting, f.elem)
+		for _, ti := range g.types {
+			if ti.name != f.elem {
+				continue
+			}
+			for _, child := range ti.fields {
+				if !g.stdlibValue(child, visiting) {
+					return false
+				}
+			}
+			return true
+		}
+		return false
+	case kLeafSlice, kMap:
+		return f.valInfo != nil && g.stdlibValue(*f.valInfo, visiting)
+	}
+	return true
+}
+
 // Preserve an existing receiver, including aliases held elsewhere in the
 // caller's object graph. An arena cell can be published only once per public
 // decode: null may detach it after a callback has retained its address. Only
@@ -227,9 +266,10 @@ func (g *generator) emitNonNilEmptySlice(cell, cellType, ind string) {
 func (g *generator) genDecode(ti typeInfo) {
 	g.p("")
 	g.p("// UnmarshalZJSON decodes data into v, copying strings and Raw values.")
-	g.p("// Existing pointers are preserved; slice elements are rebuilt from zero.")
+	g.p("// Existing pointers and ordinary slice elements are reused as in stdlib.")
+	g.p("// Registered leaf contracts may override traversal and reuse.")
 	g.p("// Custom codecs define their own value/null behavior. Errors may leave v")
-	g.p("// partially changed. Use zerojson.Valid first if strict grammar is required.")
+	g.p("// partially changed. Complete JSON grammar is validated before decoding.")
 	g.p("func (v *%s) UnmarshalZJSON(data []byte) error {", ti.name)
 	g.p("\treturn v.unmarshalZJSON(data, false)")
 	g.p("}")
@@ -242,6 +282,7 @@ func (g *generator) genDecode(ti typeInfo) {
 	g.p("}")
 	g.p("")
 	g.p("func (v *%s) unmarshalZJSON(data []byte, borrow bool) error {", ti.name)
+	g.p("\tif err := zerojson.Valid(data); err != nil { return err }")
 	g.p("\tl := zerojson.NewLexer(data, borrow)")
 	g.p("\ta := &%s{}", arenaName(ti.name))
 	g.p("\t%s(&l, v, a)", decodeName(ti.name))
@@ -249,6 +290,7 @@ func (g *generator) genDecode(ti typeInfo) {
 	g.p("\treturn l.Err()")
 	g.p("}")
 	g.genReadZJSON(ti.name)
+	g.emitFieldName(ti)
 
 	orderedOK := g.ordered && g.canOrderType(ti)
 	g.p("")
@@ -297,6 +339,7 @@ func (g *generator) genDecode(ti typeInfo) {
 	g.p("\tfor {")
 	g.p("\t\tkey := l.ReadKey()")
 	g.p("\t\tif l.Err() != nil { return }")
+	g.p("\t\tname := zjFieldName_%s(string(key))", ti.name)
 	g.p("\t\tif l.IsNull() {")
 	g.emitNullSwitch(ti)
 	g.p("\t\t\tif l.Err() != nil {")
@@ -306,7 +349,7 @@ func (g *generator) genDecode(ti typeInfo) {
 	g.p("\t\t\tif !l.NextMember() { break }")
 	g.p("\t\t\tcontinue")
 	g.p("\t\t}")
-	g.p("\t\tswitch string(key) {")
+	g.p("\t\tswitch name {")
 	for _, f := range ti.fields {
 		g.p("\t\tcase %q:", f.jsonName)
 		g.emitDecode(f, false)
@@ -320,6 +363,25 @@ func (g *generator) genDecode(ti typeInfo) {
 	g.p("\t\t}")
 	g.p("\t\tif !l.NextMember() { break }")
 	g.p("\t}")
+	g.p("}")
+}
+
+// Exact names take precedence. Folded ties follow field index order, like
+// encoding/json's first folded-name match, including Unicode simple folds.
+func (g *generator) emitFieldName(ti typeInfo) {
+	g.p("func zjFieldName_%s(name string) string {", ti.name)
+	if len(ti.fields) != 0 {
+		g.p("\tswitch name {")
+		for _, f := range ti.fields {
+			g.p("\tcase %q: return name", f.jsonName)
+		}
+		g.p("\t}")
+		q := g.importAlias("strings", "strings")
+		for _, f := range ti.fields {
+			g.p("\tif %s.EqualFold(name, %q) { return %q }", q, f.jsonName, f.jsonName)
+		}
+	}
+	g.p("\treturn name")
 	g.p("}")
 }
 
@@ -400,7 +462,7 @@ func (g *generator) emitNullSwitch(ti typeInfo) {
 	if len(nullable) == 0 {
 		return
 	}
-	g.p("\t\t\tswitch string(key) {")
+	g.p("\t\t\tswitch name {")
 	for _, f := range nullable {
 		g.p("\t\t\tcase %q:", f.jsonName)
 		if isNullDelivered(f) {
@@ -426,6 +488,23 @@ func (g *generator) emitNullSwitch(ti typeInfo) {
 func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 	ind := "\t\t\t"
 	target := "v." + f.access
+	collection := f.kind == kSlice || f.kind == kLeafSlice || f.kind == kMap
+	delegate := stdlibMethodContainer(f) || (collection && g.stdlibValue(f, map[string]bool{}) && g.fieldHasReplayCallbacks(f, map[string]bool{}))
+	reusedSlice := !delegate && (f.kind == kSlice || f.kind == kLeafSlice) && g.stdlibValue(f, map[string]bool{})
+	if delegate || reusedSlice {
+		q := g.importAlias("encoding/json", "json")
+		if reusedSlice {
+			g.p("%sif %s != nil {", ind, target)
+		}
+		g.p("%sif raw := l.RawValue(); l.Err() == nil {", ind)
+		g.p("%s\tif err := %s.Unmarshal(raw, &%s); err != nil { l.AddError(err) }", ind, q, target)
+		g.p("%s}", ind)
+		if delegate {
+			return
+		}
+		g.p("%s} else {", ind)
+		defer g.p("%s}", ind)
+	}
 	cell := "a.f" + f.cellName
 	// A mid-loop element error (kSlice/kLeafSlice/kMap) breaks out of
 	// the element loop rather than returning, so control reaches the

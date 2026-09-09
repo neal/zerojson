@@ -94,8 +94,8 @@ does.
   pointers. It requires a quoted number; quoted `"null"` leaves a scalar
   unchanged or clears a pointer. Other kinds are refused.
 - Ordinary numeric fields require bare tokens. Quoted numbers, leading `+`,
-  `.5`, `1.`, and range overflows are rejected; leading zeros remain a
-  documented leniency. `json.Number` preserves its literal and checks number
+  `.5`, `1.`, leading zeros, and range overflows are rejected.
+  `json.Number` preserves its literal and checks number
   grammar on encode/decode, accepting quoted numeric input like classic stdlib.
 - Invalid JSON tag names fall back to the Go field name under classic-v1 rules.
   The v2-backed stdlib differs; see [toolchain compatibility](compatibility.md#which-encodingjson-go-127-and-later).

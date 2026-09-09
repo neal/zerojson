@@ -23,7 +23,8 @@
 //
 // UnmarshalZJSON copies strings and Raw values read by the runtime. Ordinary
 // decodes preserve existing pointer identities and merge into reused targets,
-// except that slice elements are rebuilt from zero. Custom decoders must
+// including ordinary slice elements. Registered leaf contracts may override
+// traversal and reuse. Custom decoders must
 // honor their own input-ownership contracts.
 //
 // UnmarshalZJSONBorrow may alias input bytes for strings and Raw values.
@@ -47,14 +48,13 @@
 // encoding/json.Valid, including acceptance of invalid UTF-8 in strings.
 // It allocates nothing on success and returns a *SyntaxError on failure.
 //
-// Decode success does not imply strict JSON validity: ordinary string and
-// number readers intentionally accept some malformed values. Keys, skipped
-// values, and trailing data are checked strictly. Call Valid before decoding
-// when strict grammar is required, or use it alone for opaque payloads.
+// Public decode methods validate the complete document before custom methods
+// run. Use Valid alone for opaque payloads. Low-level Lexer readers are not a
+// substitute for document validation when implementing a custom Reader.
 //
 // The codec targets classic encoding/json semantics and easyjson-style
-// encoding, with documented differences including case-sensitive key matching,
-// unsorted maps, float formatting, verbatim Marshaler output, and slice reuse.
+// encoding, with documented differences including unsorted maps, float
+// formatting, verbatim Marshaler output, and registered leaf contracts.
 // Null handling also depends on custom methods. Read the [compatibility guide]
 // before adopting it; byte identity is not universal.
 //

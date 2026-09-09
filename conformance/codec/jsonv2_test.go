@@ -30,14 +30,12 @@ import (
 //     match when no exact key match exists; v2 matches case-sensitively
 //     only, with no case-insensitive fallback (an opt-in
 //     MatchCaseInsensitiveNames option restores v1's behavior).
-//     zerojson's documented choice (case-sensitive, "like easyjson and
-//     json/v2's default") sides with v2 here.
+//     zerojson follows v1's exact-first, case-insensitive fallback.
 //  2. Duplicate object member names: v1 resolves them last-occurrence-
 //     wins; v2 rejects the whole decode with a "duplicate object member
 //     name" error by default. zerojson's documented choice (see
 //     ordered_test.go's orderedTrapSeeds: "duplicate key, last wins")
-//     sides with v1 here — the one place this file's v2 oracle is NOT
-//     the side zerojson takes.
+//     sides with v1 here.
 //  3. time.Duration representation: v1 has no special handling for
 //     time.Duration at all — it's just a named int64, so a bare JSON
 //     number decodes into it like any other integer. v2 special-cases
@@ -127,7 +125,7 @@ func FuzzDecodeAgainstJSONV2(f *testing.F) {
 // 1 directly against both live packages: a key that only case-
 // insensitively matches a declared field name is bound by v1 and left
 // unbound by v2 — zerojson matches v2.
-func TestKeyMatchingCaseSensitivityDivergesFromV1MatchesV2(t *testing.T) {
+func TestKeyMatchingCaseSensitivityMatchesV1(t *testing.T) {
 	data := []byte(`{"ORIGIN":"acme","ACTIVE":true}`)
 
 	var v1 Event
@@ -150,8 +148,8 @@ func TestKeyMatchingCaseSensitivityDivergesFromV1MatchesV2(t *testing.T) {
 	if err := got.UnmarshalZJSON(data); err != nil {
 		t.Fatal(err)
 	}
-	if got.Origin != "" || got.Active {
-		t.Fatalf("zerojson case-insensitively matched a key, diverging from its documented case-sensitive (v2/easyjson-matching) choice: %+v", got)
+	if got.Origin != v1.Origin || got.Active != v1.Active {
+		t.Fatalf("zerojson case folding differs from stdlib: %+v", got)
 	}
 }
 

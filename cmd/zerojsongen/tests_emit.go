@@ -244,17 +244,13 @@ func fuzzSequenceSeeds(ti typeInfo) []string {
 }
 
 // emitStdlibRejectClassify emits the decode-arm handling of a stdlib
-// json.Unmarshal that REJECTS data: a value-class rejection (see
-// zjStdlibValueError) requires zerojson to reject the same bytes too, while
-// a grammar-level rejection is skipped as an allowed divergence. n is the
+// json.Unmarshal that REJECTS data: syntax and value rejections require
+// zerojson to reject the same bytes too. n is the
 // type being fuzzed. Assumes `data []byte` and `t *testing.T` are in scope.
 func emitStdlibRejectClassify(b *strings.Builder, n string) {
 	fmt.Fprintf(b, "\t\tif serr := json.Unmarshal(oracleData, &seed); serr != nil {\n")
-	// Every stdlib rejection that is not a grammar-level SyntaxError must be
-	// mirrored: wrong value kinds, custom UnmarshalJSON/UnmarshalText
-	// errors, timestamp/uuid/base64 parse errors, and trailing data after
-	// the top-level value (which is a SyntaxError, but one Finish rejects
-	// too). The two documented exceptions — a null on a value-typed
+	// Mirror syntax and value rejections. The two documented exceptions —
+	// a null on a value-typed
 	// quoted-int64 marker, and an escaped spelling of a direct leaf that
 	// zerojson unescapes before parsing — are exempted on the raw input.
 	fmt.Fprintf(b, "\t\t\tif zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshaler%s(data) && !zjEscapedDirectLeaf%s(data) {\n", n, n)
@@ -525,7 +521,6 @@ func (g *generator) generateTests() string {
 	}
 	fmt.Fprintf(&b, ")\n\n")
 	b.WriteString(jsonValueOracleSource)
-	g.emitOracleShapes(&b)
 	if needsReflect {
 		// Access raw fields through reflection rather than emitted selector
 		// expressions: a promoted field may sit behind a nil embedded pointer,
@@ -546,13 +541,8 @@ func (g *generator) generateTests() string {
 		fmt.Fprintf(&b, "\treturn v.Interface(), true\n")
 		fmt.Fprintf(&b, "}\n\n")
 	}
-	// zjStdlibValueError classifies a stdlib json.Unmarshal failure: a
-	// grammar-level SyntaxError is an allowed divergence (zerojson's trusted
-	// path is deliberately lenient about leading zeros, raw control bytes in
-	// values, etc.), but a VALUE-class failure — any UnmarshalTypeError
-	// or an invalid bare json:",string" value — is one
-	// zerojson has NO leniency for and must reject too. A string-into-number
-	// or bare-into-,string mismatch must be rejected by both decoders.
+	// Keep value-error classification available for focused oracle tests.
+	// Both value and syntax errors must be mirrored by public decoding.
 	fmt.Fprintf(&b, "func zjStdlibValueError(err error) bool {\n")
 	fmt.Fprintf(&b, "\tvar ute *json.UnmarshalTypeError\n")
 	fmt.Fprintf(&b, "\tif errors.As(err, &ute) {\n")
@@ -567,10 +557,7 @@ func (g *generator) generateTests() string {
 	// zjDecodeStricterAllowed is the allowlist hook for the decode-error
 	// ORACLE DIRECTION (zerojson-error ⇒ stdlib-error): it reports whether
 	// zerojson may reject `data` that encoding/json ACCEPTS as a DOCUMENTED
-	// deliberate strictness. zerojson's divergences from stdlib are otherwise
-	// all in the lenient direction (it accepts leading zeros, raw control
-	// bytes in declared-field values, invalid escapes — MORE than stdlib), so
-	// this returns false for the shapes generated here. []byte's uncommon
+	// deliberate strictness. []byte's uncommon
 	// array-of-numbers form is seeded explicitly and is supported, so it needs
 	// no exception here.
 	// Trailing data is NOT stricter than stdlib (encoding/json rejects it
@@ -662,20 +649,10 @@ func (g *generator) generateTests() string {
 	fmt.Fprintf(&b, "\tfor _, v := range zjMemberValueStarts(data, key, depth, nil) {\n")
 	fmt.Fprintf(&b, "\t\tif bytes.IndexByte(data[v:zjValueEnd(data, v)], '\\\\') >= 0 {\n\t\t\treturn true\n\t\t}\n")
 	fmt.Fprintf(&b, "\t}\n\treturn false\n}\n\n")
-	// zjStdlibMustMirror widens zjStdlibValueError: a grammar SyntaxError is
-	// the only stdlib rejection zerojson is documented to be lenient about
-	// (leading zeros, raw control bytes, invalid escapes in declared-field
-	// values), except trailing data after the top-level value, which
-	// Finish rejects as well. Everything else — a custom method's error, a
-	// timestamp, uuid or base64 parse failure, a wrong value kind — must be
-	// a decode error in zerojson too, or a codec that silently accepts
-	// invalid input would pass its own suite.
+	// Public decode validates grammar before reading values. Syntax errors
+	// must be mirrored too; no blanket malformed-value exemption remains.
 	fmt.Fprintf(&b, "func zjStdlibMustMirror(err error) bool {\n")
-	fmt.Fprintf(&b, "\tif zjStdlibValueError(err) {\n\t\treturn true\n\t}\n")
-	fmt.Fprintf(&b, "\tvar se *json.SyntaxError\n")
-	fmt.Fprintf(&b, "\tif errors.As(err, &se) {\n")
-	fmt.Fprintf(&b, "\t\treturn strings.Contains(err.Error(), \"after top-level value\")\n")
-	fmt.Fprintf(&b, "\t}\n\treturn true\n}\n\n")
+	fmt.Fprintf(&b, "\treturn err != nil\n}\n\n")
 	fmt.Fprintf(&b, "// zjDeleteBytes returns data with the bytes at the given indices removed.\n")
 	fmt.Fprintf(&b, "func zjDeleteBytes(data []byte, at []int) []byte {\n")
 	fmt.Fprintf(&b, "\tdrop := make(map[int]bool, len(at))\n\tfor _, i := range at {\n\t\tdrop[i] = true\n\t}\n")
@@ -708,16 +685,14 @@ func (g *generator) generateTests() string {
 		fmt.Fprintf(&b, "\tf.Fuzz(func(t *testing.T, data []byte) {\n")
 		fmt.Fprintf(&b, "\t\tif zjFuzzHugeExponent(data) { return }\n")
 		emitNoOracleCall(&b, n, g.typeHasInvalidTag(n, map[string]bool{}))
-		fmt.Fprintf(&b, "\t\toracleData := zjOracleData(data, zjOracleShape%s)\n", n)
+		b.WriteString("\t\toracleData := data\n")
 		g.emitRawValueComparison(&b, n, ti.fields, false)
 		emitDecodeErrorDirection(&b, n)
 		if g.typeContainsRaw(ti.name, map[string]bool{}) {
 			emitRawGraphRoundTrip(&b, n)
 		}
 		// Decode arm: canonicalize via stdlib, then zerojson must match.
-		// When stdlib REJECTS data, a value-class failure (see
-		// zjStdlibValueError) additionally requires zerojson to reject it too
-		// — grammar leniency stays an allowed divergence.
+		// When stdlib rejects data, zerojson must reject the original too.
 		fmt.Fprintf(&b, "\t\tvar seed %s\n", n)
 		emitStdlibRejectClassify(&b, n)
 		fmt.Fprintf(&b, "\t\tcanon, err := json.Marshal(&seed)\n")
@@ -846,7 +821,7 @@ func (g *generator) emitRootFuzz(b *strings.Builder, ti typeInfo) {
 	fmt.Fprintf(b, "\tf.Fuzz(func(t *testing.T, data []byte) {\n")
 	fmt.Fprintf(b, "\t\tif zjFuzzHugeExponent(data) { return }\n")
 	emitNoOracleCall(b, n, g.typeHasInvalidTag(n, map[string]bool{}))
-	fmt.Fprintf(b, "\t\toracleData := zjOracleData(data, zjOracleShape%s)\n", n)
+	b.WriteString("\t\toracleData := data\n")
 	if g.fieldRawComparable(*ti.rootField, map[string]bool{}) {
 		g.emitRawValueComparison(b, n, nil, true)
 	}

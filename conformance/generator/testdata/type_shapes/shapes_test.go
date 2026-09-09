@@ -245,10 +245,9 @@ func TestInterfaceReceivers(t *testing.T) {
 			}
 		}
 	}
-	// A nil/non-pointer any retains the ordinary lenient number reader,
-	// including after the first occurrence of a duplicate member.
+	// Whole-document validation rejects malformed numbers before mutation.
 	v := Interfaces{}
-	if err := v.UnmarshalZJSON([]byte(`{"v":1,"v":007}`)); err != nil || v.V != float64(7) {
+	if err := v.UnmarshalZJSON([]byte(`{"v":1,"v":007}`)); err == nil || v.V != nil {
 		t.Fatalf("generic any reader changed: %#v %v", v.V, err)
 	}
 }

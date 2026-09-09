@@ -25,19 +25,15 @@ func TestCallbacksNotInvokedOnMalformedInput(t *testing.T) {
 			t.Errorf("%s: UnmarshalJSON callback ran %d time(s) on malformed input", doc, sideEffectCalls-before)
 		}
 	}
-	// A value that IS complete and grammar-valid is delivered even if the
-	// document fails later (single-pass decoding; encoding/json would have
-	// scanned the whole document first): `01` is the valid value `0`
-	// followed by a trailing `1`, so the callback runs once and the decode
-	// still errors.
+	// A valid prefix must not invoke a callback in a malformed document.
 	{
 		before := sideEffectCalls
 		var v OrderedSideEffects
 		if err := v.UnmarshalZJSON([]byte(`{"first":01}`)); err == nil {
 			t.Error(`{"first":01}: decoded without error`)
 		}
-		if sideEffectCalls != before+1 {
-			t.Errorf(`{"first":01}: callback ran %d time(s), want 1 (the value 0 is complete)`, sideEffectCalls-before)
+		if sideEffectCalls != before {
+			t.Errorf(`{"first":01}: callback ran %d time(s), want 0`, sideEffectCalls-before)
 		}
 	}
 	// And it still runs exactly once on a well-formed value.

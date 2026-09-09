@@ -102,247 +102,6 @@ func zjJSONNumberParts(s string) (string, *big.Int) {
 	return trimmed, exponent
 }
 
-// Only struct members that stdlib would match by case folding are removed.
-// Exact members (including duplicates), unknown values, dictionary keys and
-// custom codecs retain their semantics. This is not a blanket exemption:
-// unrelated value errors and all comparable exact fields remain checked.
-type zjOracleShape struct {
-	object bool
-	fields map[string]*zjOracleShape
-	elem   *zjOracleShape
-}
-
-func zjOracleData(data []byte, shape *zjOracleShape) []byte {
-	if !json.Valid(data) {
-		return data
-	}
-	projected, err := zjProjectOracle(data, shape)
-	if err != nil {
-		return data
-	}
-	return projected
-}
-
-func zjProjectOracle(data []byte, shape *zjOracleShape) ([]byte, error) {
-	if shape == nil {
-		return data, nil
-	}
-	trimmed := bytes.TrimSpace(data)
-	open, close := byte('['), byte(']')
-	if shape.object {
-		open, close = '{', '}'
-	}
-	if len(trimmed) == 0 || trimmed[0] != open {
-		return data, nil
-	}
-	dec := json.NewDecoder(bytes.NewReader(trimmed))
-	if _, err := dec.Token(); err != nil {
-		return nil, err
-	}
-	out := []byte{open}
-	first := true
-	for dec.More() {
-		var key string
-		child := shape.elem
-		drop := false
-		if shape.object {
-			token, err := dec.Token()
-			if err != nil {
-				return nil, err
-			}
-			key = token.(string)
-			if shape.fields != nil {
-				var exact bool
-				child, exact = shape.fields[key]
-				if !exact {
-					for name := range shape.fields {
-						if strings.EqualFold(name, key) {
-							drop = true
-							break
-						}
-					}
-				}
-			}
-		}
-		var raw json.RawMessage
-		if err := dec.Decode(&raw); err != nil {
-			return nil, err
-		}
-		if drop {
-			continue
-		}
-		value, err := zjProjectOracle(raw, child)
-		if err != nil {
-			return nil, err
-		}
-		if !first {
-			out = append(out, ',')
-		}
-		first = false
-		if shape.object {
-			name, err := json.Marshal(key)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, name...)
-			out = append(out, ':')
-		}
-		out = append(out, value...)
-	}
-	if _, err := dec.Token(); err != nil {
-		return nil, err
-	}
-	return append(out, close), nil
-}
-
-var zjOracleShapeEvent = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"created_at":   nil,
-	"closed_at":    nil,
-	"amount":       nil,
-	"size":         nil,
-	"total":        nil,
-	"origin":       nil,
-	"location":     nil,
-	"comment":      nil,
-	"mode":         nil,
-	"phase":        nil,
-	"seq":          nil,
-	"recv_ns":      nil,
-	"tags":         nil,
-	"parents":      nil,
-	"meta":         zjOracleShapeEventMeta,
-	"meta_ptr":     zjOracleShapeEventMeta,
-	"items":        &zjOracleShape{elem: zjOracleShapeEventLeg},
-	"ptr_items":    &zjOracleShape{elem: zjOracleShapeEventLeg},
-	"names":        &zjOracleShape{object: false, elem: nil},
-	"count":        nil,
-	"shard":        nil,
-	"flags":        nil,
-	"weight":       nil,
-	"ratio32":      nil,
-	"timeout":      nil,
-	"primary_date": nil,
-	"second_date":  nil,
-	"amounts":      &zjOracleShape{object: true, elem: nil},
-	"extra":        nil,
-	"bag":          &zjOracleShape{object: true, elem: nil},
-	"any_list":     &zjOracleShape{object: false, elem: nil},
-	"id":           nil,
-	"active":       nil,
-	"created_by":   nil,
-	"version":      nil,
-}}
-var zjOracleShapeRawHolder = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"table": nil,
-	"set":   nil,
-	"where": nil,
-}}
-var zjOracleShapeOmitZeroCases = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"when":        nil,
-	"amount":      nil,
-	"id":          nil,
-	"count":       nil,
-	"name":        nil,
-	"ptr":         nil,
-	"nil_slice":   &zjOracleShape{object: false, elem: nil},
-	"empty_slice": &zjOracleShape{object: false, elem: nil},
-}}
-var zjOracleShapeStringOptCases = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"count":  nil,
-	"amount": nil,
-}}
-var zjOracleShapeAppenderCases = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"amount": nil,
-	"cost":   nil,
-}}
-var zjOracleShapeMapFieldsLike = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"op":    nil,
-	"set":   nil,
-	"where": nil,
-}}
-var zjOracleShapeEventLeg = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"ratio": nil,
-	"label": nil,
-	"mode":  nil,
-}}
-var zjOracleShapeEmbedMid = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"first":      nil,
-	"created_by": nil,
-	"version":    nil,
-	"last":       nil,
-}}
-var zjOracleShapeEventProjection = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"origin": nil,
-	"active": nil,
-}}
-var zjOracleShapeInteractionOmitZero = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"when":  nil,
-	"both":  nil,
-	"odd":   nil,
-	"items": &zjOracleShape{object: false, elem: nil},
-}}
-var zjOracleShapeMapPointerMethods = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"values":  &zjOracleShape{object: true, elem: nil},
-	"numbers": &zjOracleShape{object: true, elem: nil},
-}}
-var zjOracleShapeReuseSemantics = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"values": &zjOracleShape{object: true, elem: nil},
-	"inner":  zjOracleShapeReuseInner,
-	"accum":  nil,
-}}
-var zjOracleShapeOrderedSideEffects = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"first": nil,
-	"last":  nil,
-}}
-var zjOracleShapePoolAppenderHolder = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"value": nil,
-}}
-var zjOracleShapeBytesCases = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"data":  nil,
-	"ptr":   nil,
-	"lists": &zjOracleShape{object: false, elem: nil},
-	"index": &zjOracleShape{object: true, elem: nil},
-}}
-var zjOracleShapeEventList = &zjOracleShape{elem: zjOracleShapeEvent}
-var zjOracleShapeLegPtrList = &zjOracleShape{elem: zjOracleShapeEventLeg}
-var zjOracleShapeLegIndex = &zjOracleShape{object: true, elem: zjOracleShapeEventLeg}
-var zjOracleShapePointerMethodIndex = &zjOracleShape{object: true, elem: nil}
-var zjOracleShapePointerQuotedIndex = &zjOracleShape{object: true, elem: nil}
-var zjOracleShapeRawList = &zjOracleShape{object: false, elem: nil}
-var zjOracleShapeRawIndex = &zjOracleShape{object: true, elem: nil}
-var zjOracleShapeRawHolderList = &zjOracleShape{elem: zjOracleShapeRawHolder}
-var zjOracleShapeDecimalList = &zjOracleShape{object: false, elem: nil}
-var zjOracleShapePointerCollections = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"names": &zjOracleShape{object: false, elem: nil},
-	"index": &zjOracleShape{object: true, elem: nil},
-	"legs":  &zjOracleShape{elem: zjOracleShapeEventLeg},
-	"tags":  &zjOracleShape{object: true, elem: nil},
-}}
-var zjOracleShapeNumberCases = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"n":     nil,
-	"no":    nil,
-	"np":    nil,
-	"ns":    &zjOracleShape{object: false, elem: nil},
-	"nm":    &zjOracleShape{object: true, elem: nil},
-	"cnt_s": nil,
-	"ptr_s": nil,
-}}
-var zjOracleShapeNullCases = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"one":   nil,
-	"many":  &zjOracleShape{object: false, elem: nil},
-	"index": &zjOracleShape{object: true, elem: nil},
-	"ptr":   nil,
-}}
-var zjOracleShapeEventMeta = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"note":     nil,
-	"cost":     nil,
-	"internal": nil,
-}}
-var zjOracleShapeReuseInner = &zjOracleShape{object: true, fields: map[string]*zjOracleShape{
-	"a": nil,
-	"b": nil,
-}}
-
 func zjRawFieldEqual(a, other any, path string) bool {
 	av, aok := zjRawFieldValue(reflect.ValueOf(a), strings.Split(path, "."))
 	bv, bok := zjRawFieldValue(reflect.ValueOf(other), strings.Split(path, "."))
@@ -524,14 +283,7 @@ func zjMemberHasEscape(data []byte, key string, depth int) bool {
 }
 
 func zjStdlibMustMirror(err error) bool {
-	if zjStdlibValueError(err) {
-		return true
-	}
-	var se *json.SyntaxError
-	if errors.As(err, &se) {
-		return strings.Contains(err.Error(), "after top-level value")
-	}
-	return true
+	return err != nil
 }
 
 // zjDeleteBytes returns data with the bytes at the given indices removed.
@@ -2025,7 +1777,7 @@ func FuzzEventZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeEvent)
+		oracleData := data
 		{
 			var stdRaw, zjRaw Event
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
@@ -2300,7 +2052,7 @@ func FuzzRawHolderZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeRawHolder)
+		oracleData := data
 		{
 			var stdRaw, zjRaw RawHolder
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
@@ -2509,7 +2261,7 @@ func FuzzOmitZeroCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeOmitZeroCases)
+		oracleData := data
 		{
 			var stdRaw, zjRaw OmitZeroCases
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
@@ -2677,7 +2429,7 @@ func FuzzStringOptCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeStringOptCases)
+		oracleData := data
 		{
 			var stdRaw, zjRaw StringOptCases
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
@@ -2815,7 +2567,7 @@ func FuzzAppenderCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeAppenderCases)
+		oracleData := data
 		{
 			var zjRaw AppenderCases
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedAppenderCases(data) {
@@ -2950,7 +2702,7 @@ func FuzzMapFieldsLikeZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeMapFieldsLike)
+		oracleData := data
 		{
 			var stdRaw, zjRaw MapFieldsLike
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
@@ -3100,7 +2852,7 @@ func FuzzEventLegZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeEventLeg)
+		oracleData := data
 		{
 			var stdRaw, zjRaw EventLeg
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
@@ -3262,7 +3014,7 @@ func FuzzEmbedMidZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeEmbedMid)
+		oracleData := data
 		{
 			var stdRaw, zjRaw EmbedMid
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
@@ -3412,7 +3164,7 @@ func FuzzEventProjectionZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeEventProjection)
+		oracleData := data
 		{
 			var stdRaw, zjRaw EventProjection
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
@@ -3564,7 +3316,7 @@ func FuzzInteractionOmitZeroZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeInteractionOmitZero)
+		oracleData := data
 		{
 			var stdRaw, zjRaw InteractionOmitZero
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
@@ -3712,7 +3464,7 @@ func FuzzMapPointerMethodsZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeMapPointerMethods)
+		oracleData := data
 		{
 			var zjRaw MapPointerMethods
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedMapPointerMethods(data) {
@@ -3844,7 +3596,7 @@ func FuzzReuseSemanticsZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeReuseSemantics)
+		oracleData := data
 		{
 			var stdRaw, zjRaw ReuseSemantics
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
@@ -3993,7 +3745,7 @@ func FuzzOrderedSideEffectsZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeOrderedSideEffects)
+		oracleData := data
 		{
 			var stdRaw, zjRaw OrderedSideEffects
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
@@ -4129,7 +3881,7 @@ func FuzzPoolAppenderHolderZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapePoolAppenderHolder)
+		oracleData := data
 		{
 			var zjRaw PoolAppenderHolder
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedPoolAppenderHolder(data) {
@@ -4265,7 +4017,7 @@ func FuzzBytesCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeBytesCases)
+		oracleData := data
 		{
 			var stdRaw, zjRaw BytesCases
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
@@ -4425,7 +4177,7 @@ func FuzzEventListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeEventList)
+		oracleData := data
 		{
 			var zjRaw EventList
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedEventList(data) {
@@ -4543,7 +4295,7 @@ func FuzzLegPtrListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeLegPtrList)
+		oracleData := data
 		{
 			var zjRaw LegPtrList
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedLegPtrList(data) {
@@ -4661,7 +4413,7 @@ func FuzzLegIndexZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeLegIndex)
+		oracleData := data
 		{
 			var zjRaw LegIndex
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedLegIndex(data) {
@@ -4779,7 +4531,7 @@ func FuzzPointerMethodIndexZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapePointerMethodIndex)
+		oracleData := data
 		{
 			var zjRaw PointerMethodIndex
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedPointerMethodIndex(data) {
@@ -4897,7 +4649,7 @@ func FuzzPointerQuotedIndexZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapePointerQuotedIndex)
+		oracleData := data
 		{
 			var zjRaw PointerQuotedIndex
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedPointerQuotedIndex(data) {
@@ -5016,7 +4768,7 @@ func FuzzRawListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeRawList)
+		oracleData := data
 		{
 			var stdRaw, zjRaw RawList
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
@@ -5173,7 +4925,7 @@ func FuzzRawIndexZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeRawIndex)
+		oracleData := data
 		{
 			var stdRaw, zjRaw RawIndex
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
@@ -5329,7 +5081,7 @@ func FuzzRawHolderListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeRawHolderList)
+		oracleData := data
 		{
 			var stdRaw, zjRaw RawHolderList
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
@@ -5481,7 +5233,7 @@ func FuzzDecimalListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeDecimalList)
+		oracleData := data
 		{
 			var zjRaw DecimalList
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedDecimalList(data) {
@@ -5608,7 +5360,7 @@ func FuzzPointerCollectionsZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapePointerCollections)
+		oracleData := data
 		{
 			var stdRaw, zjRaw PointerCollections
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
@@ -5770,7 +5522,7 @@ func FuzzNumberCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeNumberCases)
+		oracleData := data
 		{
 			var stdRaw, zjRaw NumberCases
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
@@ -5934,7 +5686,7 @@ func FuzzNullCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeNullCases)
+		oracleData := data
 		{
 			var zjRaw NullCases
 			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedNullCases(data) {
@@ -6078,7 +5830,7 @@ func FuzzEventMetaZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeEventMeta)
+		oracleData := data
 		{
 			var stdRaw, zjRaw EventMeta
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
@@ -6180,7 +5932,7 @@ func FuzzReuseInnerZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
-		oracleData := zjOracleData(data, zjOracleShapeReuseInner)
+		oracleData := data
 		{
 			var stdRaw, zjRaw ReuseInner
 			stdErr := json.Unmarshal(oracleData, &stdRaw)

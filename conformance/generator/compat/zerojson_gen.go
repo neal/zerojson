@@ -7,6 +7,7 @@ import (
 	jlexer_ "github.com/mailru/easyjson/jlexer"
 	jwriter_ "github.com/mailru/easyjson/jwriter"
 	zerojson "github.com/neal/zerojson"
+	strings_ "strings"
 )
 
 // zjArenaPoint holds first-use pointer cells for a decoded Point in one
@@ -51,9 +52,10 @@ func (v *Point) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *Point) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -66,6 +68,9 @@ func (v *Point) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *Point) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaPoint{}
 	zjDecode_Point(&l, v, a)
@@ -79,6 +84,26 @@ func (v *Point) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *Point) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaPoint{}
 	zjDecode_Point(l, v, a)
+}
+func zjFieldName_Point(name string) string {
+	switch name {
+	case "x":
+		return name
+	case "y":
+		return name
+	case "name":
+		return name
+	}
+	if strings_.EqualFold(name, "x") {
+		return "x"
+	}
+	if strings_.EqualFold(name, "y") {
+		return "y"
+	}
+	if strings_.EqualFold(name, "name") {
+		return "name"
+	}
+	return name
 }
 
 // zjDecode_Point tries the speculative ordered fast path first (see ordered.go),
@@ -268,7 +293,7 @@ func zjTryOrderedKeyPoint(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyPoint(name string) bool {
-	switch name {
+	switch zjFieldName_Point(name) {
 	case "x", "y", "name":
 		return true
 	}
@@ -288,6 +313,7 @@ func zjDecodeFallback_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_Point(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -298,7 +324,7 @@ func zjDecodeFallback_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "x":
 			v.X = int(l.ReadInt())
 		case "y":

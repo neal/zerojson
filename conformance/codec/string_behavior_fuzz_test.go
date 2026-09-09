@@ -18,7 +18,10 @@ func FuzzStringValueBehavior(f *testing.F) {
 		in = append(in, []byte(`"}`)...)
 		var std, zj Event
 		if err := json.Unmarshal(in, &std); err != nil {
-			return // declared-value grammar leniency is intentionally broader
+			if zj.UnmarshalZJSON(in) == nil {
+				t.Fatalf("zerojson accepted stdlib-rejected string input %q", in)
+			}
+			return
 		}
 		if err := zj.UnmarshalZJSON(in); err != nil {
 			t.Fatalf("zerojson rejected stdlib input %q: %v", in, err)

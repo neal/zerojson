@@ -1,6 +1,7 @@
 package p
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -11,8 +12,46 @@ import (
 // Observers retain the actual references, not snapshots of their values. A
 // later write through a stale arena cell is visible at the final comparison.
 type publicationObservation struct {
-	retained []any
-	events   []int
+	retained  []any
+	events    []int
+	snapshots [][]publicationValue
+}
+
+// Values observed by a callback must not change when retained references do.
+// These shapes contain only integer leaves, so copy explicitly rather than
+// invoking custom marshaling methods or sharing the campaign's decoder.
+type publicationValue struct {
+	Nil    bool
+	Number int64
+	Map    map[string]int64
+	Slice  []int64
+}
+
+func publicationSnapshot(r reflect.Value) []publicationValue {
+	out := make([]publicationValue, 0, 6)
+	for _, name := range []string{"P", "Q", "M", "N", "S", "T"} {
+		f := r.FieldByName(name)
+		v := publicationValue{Nil: f.IsNil()}
+		if !v.Nil {
+			switch f.Kind() {
+			case reflect.Pointer:
+				v.Number = f.Elem().Int()
+			case reflect.Map:
+				v.Map = make(map[string]int64, f.Len())
+				it := f.MapRange()
+				for it.Next() {
+					v.Map[it.Key().String()] = it.Value().Int()
+				}
+			case reflect.Slice:
+				v.Slice = make([]int64, f.Len())
+				for i := range v.Slice {
+					v.Slice[i] = f.Index(i).Int()
+				}
+			}
+		}
+		out = append(out, v)
+	}
+	return out
 }
 
 func publicationFields[T any](v *T, access string) reflect.Value {
@@ -24,6 +63,7 @@ func publicationFields[T any](v *T, access string) reflect.Value {
 }
 
 func publicationCapture(r reflect.Value, o *publicationObservation) {
+	o.snapshots = append(o.snapshots, publicationSnapshot(r))
 	for _, name := range []string{"P", "Q", "M", "N", "S", "T"} {
 		o.retained = append(o.retained, r.FieldByName(name).Interface())
 	}
@@ -79,7 +119,11 @@ func runPublicationCampaign[T any](t *testing.T, program []byte, access, key str
 		return s
 	}
 	install := func(v *T, o *publicationObservation) {
-		publicationReceiver = func(p any) { o.events = append(o.events, 100); o.retained = append(o.retained, p) }
+		publicationReceiver = func(p any) {
+			o.events = append(o.events, 100)
+			o.retained = append(o.retained, p)
+			o.snapshots = append(o.snapshots, publicationSnapshot(publicationFields(v, access)))
+		}
 		publicationCallback = func(action int) error {
 			o.events = append(o.events, action)
 			r := publicationFields(v, access)
@@ -170,9 +214,17 @@ func runPublicationCampaign[T any](t *testing.T, program []byte, access, key str
 		}
 		data := []byte("{" + strings.Join(members, ",") + "}")
 		install(&std, &so)
-		se := json.Unmarshal(data, &std)
+		stdInput := bytes.Clone(data)
+		se := json.Unmarshal(stdInput, &std)
+		if !bytes.Equal(stdInput, data) {
+			t.Fatal("stdlib mutated campaign input")
+		}
 		install(&zj, &zo)
-		ze := decode(data, &zj, pooled, borrow)
+		zjInput := bytes.Clone(data)
+		ze := decode(zjInput, &zj, pooled, borrow)
+		if !bytes.Equal(zjInput, data) {
+			t.Fatal("zerojson mutated campaign input")
+		}
 		if fault {
 			if se == nil || ze == nil || !reflect.DeepEqual(so.events, zo.events) {
 				t.Fatalf("publication error mismatch: program=%x document=%s errors=%v/%v events=%v/%v", program, data, se, ze, so.events, zo.events)
@@ -185,6 +237,9 @@ func runPublicationCampaign[T any](t *testing.T, program []byte, access, key str
 		}
 		publicationCapture(publicationFields(&std, access), &so)
 		publicationCapture(publicationFields(&zj, access), &zo)
+		if !reflect.DeepEqual(so.snapshots, zo.snapshots) {
+			t.Fatalf("publication campaign mismatch: callback snapshots: program=%x document=%s stdlib=%+v zerojson=%+v", program, data, so.snapshots, zo.snapshots)
+		}
 		if se != nil || ze != nil || !reflect.DeepEqual(std, zj) || !reflect.DeepEqual(so, zo) || !publicationTopology(so.retained, zo.retained) {
 			t.Fatalf("publication campaign mismatch: program=%x document=%s errors=%v/%v events=%v/%v retained=%v/%v", program, data, se, ze, so.events, zo.events, so.retained, zo.retained)
 		}
@@ -206,6 +261,28 @@ func TestPublicationCampaign(t *testing.T) {
 }
 
 func TestPublicationObservers(t *testing.T) {
+	// Calibrate callback-time snapshots separately from live-reference checks.
+	type fields struct {
+		P, Q *int
+		M, N map[string]int
+		S, T []int
+	}
+	n := 7
+	f := fields{P: &n, M: map[string]int{"x": 8}, S: []int{9}, T: []int{}}
+	var observation publicationObservation
+	publicationCapture(reflect.ValueOf(f), &observation)
+	if len(observation.snapshots) != 1 {
+		t.Fatal("callback snapshots missing")
+	}
+	want := []publicationValue{{Number: 7}, {Nil: true}, {Map: map[string]int64{"x": 8}}, {Nil: true}, {Slice: []int64{9}}, {Slice: []int64{}}}
+	n, f.M["x"], f.S[0] = 10, 11, 12
+	if !reflect.DeepEqual(observation.snapshots[0], want) {
+		t.Fatal("callback snapshot lost original values or nilness")
+	}
+	publicationCapture(reflect.ValueOf(f), &observation)
+	if reflect.DeepEqual(observation.snapshots[0], observation.snapshots[1]) {
+		t.Fatal("callback snapshot missed intermediate writes")
+	}
 	x, y := 1, 1
 	if publicationTopology([]any{&x, &x}, []any{&x, &y}) {
 		t.Fatal("topology observer ignored equal-valued distinct pointers")

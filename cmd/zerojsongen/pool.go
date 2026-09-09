@@ -33,6 +33,7 @@ func (g *generator) genPool(ti typeInfo) {
 		g.p("\tdefer d.busy.Store(false)")
 		g.p("\tvar zero %s", n)
 		g.p("\t*v = zero")
+		g.p("\tif err := zerojson.Valid(data); err != nil { return err }")
 		if ti.rootField == nil {
 			g.p("\td.a.beginDecode()")
 		}

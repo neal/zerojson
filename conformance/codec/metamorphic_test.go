@@ -427,18 +427,8 @@ func FuzzMetamorphicDuplicateKey(f *testing.F) {
 		if hugeExponent(data) {
 			return // json.Marshal expands decimal exponents into full digits
 		}
-		// Unlike the whitespace/key-order relations (which compare zerojson
-		// to ITSELF and so are immune to it), this relation compares against
-		// encoding/json, so it must first canonicalize the fuzzer's raw
-		// bytes through stdlib — exactly as FuzzDecodeAgainstStdlib does —
-		// to neutralize the documented case-sensitivity divergence
-		// (zerojson matches keys case-sensitively like easyjson/jsonv2;
-		// stdlib v1 matches case-insensitively). Without this, a fuzzer-
-		// mutated key like "Amount" is an unknown skipped field to zerojson
-		// but the amount field to stdlib — a by-design difference, not a
-		// last-wins bug. Canonicalizing yields declared, correctly-cased
-		// keys on which both agree, so the last-wins semantics are tested in
-		// isolation.
+		// Canonicalize to isolate the duplicate-member transformation.
+		// Original-byte fuzzers separately exercise spelling and grammar.
 		var seed Event
 		if json.Unmarshal(data, &seed) != nil {
 			return

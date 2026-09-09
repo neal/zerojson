@@ -9,6 +9,17 @@ import (
 	"time"
 )
 
+func TestLexerFinishRejectsTrailingData(t *testing.T) {
+	for _, data := range []string{"1 x", "1 true", "1]"} {
+		l := NewLexer([]byte(data), false)
+		l.ReadInt()
+		l.Finish()
+		if l.Err() == nil {
+			t.Fatalf("Finish accepted trailing data: %q", data)
+		}
+	}
+}
+
 // TestReadStringMatchesStdlib validates escape handling — including
 // UTF-16 surrogate pairs and lone surrogates — against encoding/json.
 func TestReadStringMatchesStdlib(t *testing.T) {

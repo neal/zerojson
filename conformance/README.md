@@ -44,6 +44,9 @@ divergences, the normal value and byte-identity comparisons still apply.
 
 Coverage and its oracles (extended campaigns run only when requested):
 
+See [coverage boundaries](COVERAGE.md) for what these checks do not establish
+and how to extend their observations without broadening exemptions.
+
 `TestIndependentChallenge` uses separate typed observations, without the schema
 campaign's graph cloners or allowlists. It covers overlapping slices, root
 collection aliases, nested callback replacement, and pooled error/panic recovery.
@@ -69,12 +72,9 @@ shadow generated code's identifiers. Curated mutants check the tests'
 sensitivity. Passing a family establishes coverage of its modeled dimensions,
 not of every possible callback or schema.
 
-Generated fuzzers compare the original input's zerojson result with a
-schema-aware stdlib projection: only case-fold-only struct members are removed
-for the oracle. Exact duplicate members stay in order, dictionaries and opaque
-codecs are untouched, and unrelated value errors remain checked. Negative
-tests inject a wrong-kind decoder to verify that this normalization cannot
-grant an unrelated failure an exemption.
+Generated fuzzers give both decoders the original input, including folded
+field names and duplicate members. Negative tests inject a wrong-kind decoder
+to verify that an unrelated value error cannot receive an exemption.
 
 | Property | Oracle(s) | Where |
 |---|---|---|
@@ -155,8 +155,9 @@ generator, and representative rows also seed `FuzzProductionCorpusShadow`.
 `Valid` targets `encoding/json.Valid` acceptance, including invalid UTF-8,
 unpaired Unicode escapes, and the 10,000-container depth limit. Boundary tests,
 JSONTestSuite, truncation sweeps, and `FuzzValidAgainstStdlib` check that
-contract. Decode-implies-valid tests cover keys, skipped values, and trailing
-data; ordinary value-reader leniency is outside that property.
+contract. Decode-implies-valid tests cover arbitrary complete inputs as well as
+structured mutations of keys, skipped values, and trailing data. Public decode
+entry points enforce this property for declared field values too.
 
 ## `encoding/json/v2` as a third oracle
 
@@ -167,7 +168,7 @@ an exhaustive inventory of v1/v2 behavior.
 
 | # | Divergence | v1 (`encoding/json`) | v2 (`encoding/json/v2`) | zerojson sides with | Test |
 |---|---|---|---|---|---|
-| 1 | Key matching case-sensitivity | Case-insensitive fallback when no exact match | Case-sensitive only (opt-in `MatchCaseInsensitiveNames` restores v1) | **v2** (documented in the top-level README's compatibility contract) | `TestKeyMatchingCaseSensitivityDivergesFromV1MatchesV2` |
+| 1 | Key matching case-sensitivity | Case-insensitive fallback when no exact match | Case-sensitive only (opt-in `MatchCaseInsensitiveNames` restores v1) | **v1** | `TestKeyMatchingCaseSensitivityMatchesV1` |
 | 2 | Duplicate object member names | Last occurrence wins | Rejected outright (`jsontext: duplicate object member name ...`) | **v1** (documented in `ordered_test.go`'s `orderedTrapSeeds`) | `TestDuplicateKeyLastWinsDivergesFromV2MatchesV1` |
 | 3 | `time.Duration` representation | None — it's a plain named `int64`, decodes as a bare number like any other integer | No default representation at all by design (open question upstream, [go.dev/issue/71631](https://go.dev/issue/71631)); requires an explicit format tag or a custom `Unmarshalers` override | **v1** (bare number, no special-casing) | `TestDurationRepresentationDivergesFromV1RequiresExplicitFormatInV2` |
 

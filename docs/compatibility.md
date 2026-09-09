@@ -29,21 +29,18 @@ properties each harness checks, not a mechanically generated copy of this table.
 
 | Difference | zerojson behavior | Comparison |
 |---|---|---|
-| Field-name matching | Case-sensitive only | Classic stdlib also tries case-insensitive matching |
 | Map ordering | Go range order | Stdlib sorts keys; easyjson uses range order |
 | Marshaler output | Validated, then appended verbatim | Stdlib also compacts and escapes HTML-sensitive characters and U+2028/U+2029 |
 | Float notation | Shortest `strconv` `'g'` spelling | Same parsed value, but notation thresholds differ from stdlib (`1e+09` vs `1000000000`) |
 | String escapes | Backspace/form-feed use `\u0008`/`\u000c` | Stdlib uses `\b`/`\f`; easyjson uses the long forms |
-| Ordinary value readers | May accept leading-zero numbers, raw controls, or invalid string escapes, including inside containers and fresh `any` values | Stdlib rejects malformed JSON. Keys, skipped values, and trailing content remain strict; call `Valid` for full grammar validation |
 | Quoted-int64 marker null | Leaves a value-typed marker unchanged | Its `UnmarshalJSON` is bypassed; stdlib would call it |
 | Registered leaf null | Leaves a non-pointer leaf unchanged, except the built-in Raw leaf | Registration overrides the type's JSON methods; see custom leaf rules |
-| Reused slice elements | Rebuilt from zero, including on duplicate slice members | Stdlib reuses elements: `[7,8,9]` followed by `[null,1]` becomes `[7,1]` there and `[0,1]` here |
+| Registered-leaf container reuse | Containers whose traversal contains an explicit leaf/marker override keep the generated reader's reset behavior | Ordinary containers use stdlib element reuse; extension contracts can override it |
 | Escaped direct-leaf strings | Timestamp, UUID, and quoted-int64 paths unescape before parsing; custom leaves follow their selected reader | Stdlib passes raw JSON to `UnmarshalJSON`, which may reject an escaped spelling |
 
-Duplicate members are applied in order. Objects can merge into reused structs
-and maps; duplicate slice members rebuild their elements. For example, decoding
-`[{"a":1}]` and then `[{"b":2}]` into the same slice field preserves both fields
-in stdlib's first element but only `b` in zerojson's.
+Duplicate members are applied in order. Objects merge into reused structs
+and maps; ordinary slices reuse their elements as stdlib does. Field lookup
+prefers exact names, then the first case-insensitive match in field order.
 
 Nil and empty `zerojson.Raw` values encode as `null`; stdlib rejects an empty
 non-nil `json.RawMessage`. Pooled decoding resets the destination instead of
@@ -142,16 +139,10 @@ acceptance of invalid UTF-8 and unpaired Unicode escapes inside strings and a
 limit of 10,000 nested containers. Error messages and offsets are not a stdlib
 compatibility guarantee.
 
-**Successful decoding is not a substitute for validation.** Object keys,
-unknown values, Raw/JSON callback spans, and trailing content are
-grammar-checked, but ordinary string and number readers retain the leniency
-listed in the compatibility table. That also applies inside containers and
-fresh `any` values.
-
-Call `Valid` before decoding when your boundary requires strict JSON grammar,
-or use it alone for opaque storage/passthrough. Skip the pre-pass only when the
-decoder's documented acceptance policy is suitable for the caller. A grammar
-check does not validate your schema, business rules, or resource limits.
+Public decode entry points validate complete JSON grammar before decoding.
+Use `Valid` alone for opaque storage/passthrough. Low-level Lexer methods
+remain building blocks, not whole-document validators. Syntax validation
+does not validate your schema, business rules, or resource limits.
 
 ## Caveats — read before production use
 
@@ -202,19 +193,25 @@ check does not validate your schema, business rules, or resource limits.
 
 ### Errors and callbacks
 
+- **Containers of custom JSON/Text values use stdlib traversal.** This
+  includes pointer elements and named collection roots. Custom methods see
+  the active container as stdlib publishes it, rather than a private arena
+  header published after the loop. These containers may allocate on each
+  pooled call; the pooled entry point still resets the destination first.
+  Borrow mode does not override the custom methods' own ownership behavior.
+
 - **Decoding is not transactional.** After an error, the target can be
   partially changed, and that partial state need not match stdlib. Treat it
   as failed output. A `Valid` pre-pass prevents syntax errors from reaching
-  callbacks, but not later type or custom-validation errors.
+  callbacks, but not later type or custom-validation errors. Public entry
+  points perform that syntax pre-pass automatically.
 
 - **Delegated `UnmarshalJSON`/`UnmarshalText` run only on a cleanly
   captured value.** If the value's own grammar walk fails, the decode
   error stands and the callback is not invoked with an empty or partial
   span — user code never sees a malformed value. Decoding is single-pass,
-  though, so a callback for a complete, valid value can run before a
-  *later* part of the document turns out to be malformed (stdlib scans
-  the whole document first); a callback with side effects should be
-  prepared for the enclosing decode to fail afterward.
+  after a whole-document syntax pre-pass at public entry points. A callback
+  can still run before a later type or custom-validation error, as in stdlib.
 
 - **Decode errors carry the field path and byte offset**: a
   `*zerojson.FieldError` such as `field legs.price: zerojson: expected

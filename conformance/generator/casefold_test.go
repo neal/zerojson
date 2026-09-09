@@ -55,15 +55,16 @@ type Index map[string]Child
 	}
 	write("testdata/fuzz/FuzzListZJSON/nested", "go test fuzz v1\n[]byte(\"[{\\\"X\\\":1,\\\"x\\\":2}]\")\n")
 	write("testdata/fuzz/FuzzIndexZJSON/nested", "go test fuzz v1\n[]byte(\"{\\\"X\\\":{\\\"X\\\":1,\\\"x\\\":2}}\")\n")
-	write("projection_test.go", strings.ReplaceAll(`package p
-import("encoding/json"; "testing")
-func TestProjection(t *testing.T) {
+	write("matching_test.go", strings.ReplaceAll(`package p
+import("encoding/json"; "reflect"; "testing")
+func TestMatching(t *testing.T) {
  input:=[]byte(~{"n":1,"N":2,"n":3,"child":{"X":1,"x":2},"unknown":{"N":7},"dict":{"N":8},"items":[{"X":1,"x":4}],"index":{"X":{"X":1,"x":5}}}~)
- got:=zjOracleData(input,zjOracleShapeRoot)
- want:=~{"n":1,"n":3,"child":{"x":2},"unknown":{"N":7},"dict":{"N":8},"items":[{"x":4}],"index":{"X":{"x":5}}}~
- if string(got)!=want {t.Fatalf("projection got=%s want=%s",got,want)}
+ var got, want Root
+ if err:=got.UnmarshalZJSON(input);err!=nil {t.Fatal(err)}
+ if err:=json.Unmarshal(input,&want);err!=nil {t.Fatal(err)}
+ if !reflect.DeepEqual(got,want) {t.Fatalf("matching got=%+v want=%+v",got,want)}
  var v Root
- err:=json.Unmarshal(zjOracleData([]byte(~{"unknown":{"N":1},"child":{"x":"bad"}}~),zjOracleShapeRoot),&v)
+ err:=json.Unmarshal([]byte(~{"unknown":{"N":1},"child":{"x":"bad"}}~),&v)
  if err==nil || !zjStdlibValueError(err) {t.Fatalf("unrelated value error suppressed: %v",err)}
 }
 `, "~", "`"))

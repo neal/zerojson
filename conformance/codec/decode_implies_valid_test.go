@@ -5,34 +5,9 @@ import (
 	"testing"
 )
 
-// decode_implies_valid_test.go pins this package's headline claim
-// precisely: trailing-data rejection and strict skip together mean a
-// successful decode implies unknown-field content and any trailing bytes
-// were grammar-valid JSON.
-//
-// This is deliberately narrower than "any successful decode implies
-// json.Valid(input) for arbitrary input": a known/declared field's own
-// VALUE still goes through the trusted-path's leaf readers —
-// readNumericBytes/readStringBytes — which remain lenient about a
-// leading zero in a bare number and a raw (unescaped) control byte or
-// invalid escape inside a string. Making those strict would cost a few
-// percent on the pooled-borrow decode benchmark, which this project's
-// "pinned benchmarks stay unchanged" rule rules out, so the leaf readers
-// stay lenient by design. FuzzDecodeImpliesValid therefore never mutates a
-// known field's own value — only unknown-member content, unknown KEYS,
-// and trailing bytes — so it tests exactly what this package guarantees
-// without spuriously tripping on that separate, documented exception (see
-// the README's validation composition story).
-//
-// The exception is scoped to known-field VALUES only: object keys are
-// grammar-strict on every decode path (see key_strict_test.go), so this
-// fuzzer also splices fuzzer-controlled bytes into a KEY position, and
-// decode success there too must imply json.Valid agrees.
-//
-// Both a full Event decode and an EventProjection decode (which skips
-// ~30 of Event's fields even before any fuzzer-injected noise) are
-// covered, through every entry point: plain, borrow, pooled copy, pooled
-// borrow.
+// Public decode success implies valid JSON, including declared field values.
+// Check arbitrary documents and structured mutations through copy, borrow,
+// pooled and projection entry points against encoding/json.Valid.
 
 // spliceUnknownMember inserts an extra, always-genuinely-unknown member
 // ("zzzunknown") as the last member of a compact JSON object, with value
@@ -81,13 +56,9 @@ func spliceUnknownKey(base, keyNoise []byte) []byte {
 	return out
 }
 
-// FuzzDecodeImpliesValid pins the headline claim: split the fuzzer's input
-// in half, use one half as an injected unknown object member's value and
-// the other half as trailing bytes appended after the top-level value,
-// then require: decode succeeds if and only if the resulting full document
-// is valid JSON (encoding/json.Valid as the oracle) — for both a full
-// Event decode and a EventProjection decode of the exact same bytes,
-// through every entry point.
+// FuzzDecodeImpliesValid checks arbitrary input and documents with injected
+// keys, values and suffixes. Success must imply json.Valid; the reverse is
+// not required because a syntactically valid document can violate the schema.
 func FuzzDecodeImpliesValid(f *testing.F) {
 	for _, tr := range variants() {
 		b, _ := tr.AppendZJSON(nil)
@@ -102,12 +73,6 @@ func FuzzDecodeImpliesValid(f *testing.F) {
 		if hugeExponent(valueNoise) || hugeExponent(trailingNoise) {
 			return
 		}
-		// base itself must already be a valid encode (from variants() or
-		// the seed corpus); if a mutation broke base's own shape, this
-		// isn't testing what it claims to, skip it.
-		if !json.Valid(base) {
-			return
-		}
 
 		// Splice fuzzer bytes into an unknown KEY and an unknown member's
 		// VALUE, then append trailing bytes — the three things strict key
@@ -115,37 +80,39 @@ func FuzzDecodeImpliesValid(f *testing.F) {
 		spliced := spliceUnknownMember(spliceUnknownKey(base, keyNoise), valueNoise)
 		full := append(append([]byte(nil), spliced...), trailingNoise...)
 
-		wantValid := json.Valid(full)
+		for _, full := range [][]byte{base, full} {
+			wantValid := json.Valid(full)
 
-		checkEntry := func(name string, err error) {
-			t.Helper()
-			gotOK := err == nil
-			if gotOK && !wantValid {
-				t.Fatalf("%s: decode succeeded on invalid JSON\ninput: %q", name, full)
+			checkEntry := func(name string, err error) {
+				t.Helper()
+				gotOK := err == nil
+				if gotOK && !wantValid {
+					t.Fatalf("%s: decode succeeded on invalid JSON\ninput: %q", name, full)
+				}
 			}
+
+			var a Event
+			checkEntry("Event.UnmarshalZJSON", a.UnmarshalZJSON(full))
+			var b Event
+			checkEntry("Event.UnmarshalZJSONBorrow", b.UnmarshalZJSONBorrow(full))
+			var dec EventDecoder
+			var c Event
+			checkEntry("EventDecoder.Decode", dec.Decode(full, &c))
+			var dec2 EventDecoder
+			var d Event
+			checkEntry("EventDecoder.DecodeBorrow", dec2.DecodeBorrow(full, &d))
+
+			var p1 EventProjection
+			checkEntry("EventProjection.UnmarshalZJSON", p1.UnmarshalZJSON(full))
+			var p2 EventProjection
+			checkEntry("EventProjection.UnmarshalZJSONBorrow", p2.UnmarshalZJSONBorrow(full))
+			var pdec EventProjectionDecoder
+			var p3 EventProjection
+			checkEntry("EventProjectionDecoder.Decode", pdec.Decode(full, &p3))
+			var pdec2 EventProjectionDecoder
+			var p4 EventProjection
+			checkEntry("EventProjectionDecoder.DecodeBorrow", pdec2.DecodeBorrow(full, &p4))
 		}
-
-		var a Event
-		checkEntry("Event.UnmarshalZJSON", a.UnmarshalZJSON(full))
-		var b Event
-		checkEntry("Event.UnmarshalZJSONBorrow", b.UnmarshalZJSONBorrow(full))
-		var dec EventDecoder
-		var c Event
-		checkEntry("EventDecoder.Decode", dec.Decode(full, &c))
-		var dec2 EventDecoder
-		var d Event
-		checkEntry("EventDecoder.DecodeBorrow", dec2.DecodeBorrow(full, &d))
-
-		var p1 EventProjection
-		checkEntry("EventProjection.UnmarshalZJSON", p1.UnmarshalZJSON(full))
-		var p2 EventProjection
-		checkEntry("EventProjection.UnmarshalZJSONBorrow", p2.UnmarshalZJSONBorrow(full))
-		var pdec EventProjectionDecoder
-		var p3 EventProjection
-		checkEntry("EventProjectionDecoder.Decode", pdec.Decode(full, &p3))
-		var pdec2 EventProjectionDecoder
-		var p4 EventProjection
-		checkEntry("EventProjectionDecoder.DecodeBorrow", pdec2.DecodeBorrow(full, &p4))
 	})
 }
 

@@ -63,8 +63,8 @@ func (l *Lexer) scanNumberRun() []byte {
 // (`.5`), and a '.' with no digit after it (`1.` / `1.e5`). Anything past
 // the first '.' or exponent marker is left to ParseFloat, which already
 // rejects a second '.', an empty exponent, and so on. A leading zero
-// (`007`) is deliberately still accepted — the documented declared-field
-// leniency (see the README's compatibility contract).
+// (`007`) is accepted by this low-level helper; generated public decodes
+// reject it in their whole-document syntax preflight.
 func bareFloatOK(b []byte) bool {
 	i := 0
 	if i < len(b) && b[i] == '-' {

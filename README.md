@@ -92,22 +92,14 @@ See [reusable decoders](docs/guide.md#reusable-decoders) for details.
 ## Compatibility and validation
 
 zerojson targets classic `encoding/json` semantics, but is not a universal
-drop-in replacement. Notable differences include case-sensitive field matching,
-unsorted map output, float notation, and slice-element reuse. Unsupported
+drop-in replacement. Notable differences include unsorted map output,
+float notation, and explicitly registered leaf behavior. Unsupported
 schemas are rejected during generation.
 
-**Decode success does not guarantee strict JSON grammar.** Ordinary value
-readers deliberately accept some malformed string and number spellings.
-If your boundary requires strict grammar, validate first:
-
-```go
-if err := zerojson.Valid(data); err != nil {
-    return err
-}
-if err := event.UnmarshalZJSON(data); err != nil {
-    return err
-}
-```
+Public decode methods validate the complete document before decoding or
+invoking custom methods. Field matching prefers exact names, then uses
+stdlib-style case-insensitive matching. `zerojson.Valid` remains available
+for checking opaque JSON without decoding it.
 
 Validation checks JSON syntax, not application rules or resource limits.
 Decode errors can leave the target partially changed.

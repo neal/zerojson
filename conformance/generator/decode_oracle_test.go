@@ -97,7 +97,7 @@ type Root struct {
 		return strings.ReplaceAll(original, old, new)
 	}
 	for _, m := range []struct{ name, src string }{
-		{"trailing data accepted (Finish dropped)", mutate("finish", "\tl.Finish()\n", "\n")},
+		{"trailing data accepted (both grammar guards dropped)", strings.ReplaceAll(mutate("finish", "\tl.Finish()\n", "\n"), "\tif err := zerojson.Valid(data); err != nil {\n\t\treturn err\n\t}\n", "")},
 		{"TextUnmarshaler error dropped", mutate("text", "if err := v.Day.UnmarshalText(txt); err != nil {\n\t\t\t\t\tl.AddError(err)\n\t\t\t\t}", "_ = v.Day.UnmarshalText(txt)")},
 		{"null not delivered to value Unmarshaler", mutate("null", "if err := v.Opt.UnmarshalJSON(l.NullBytes()); err != nil {\n\t\t\t\t\tl.AddError(err)\n\t\t\t\t}", "_ = l.NullBytes()")},
 	} {

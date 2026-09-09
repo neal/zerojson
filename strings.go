@@ -277,18 +277,15 @@ func validKeyString(data []byte, pos int) (int, bool, error) {
 // Escaped keys (rare: only keys containing quotes, control chars, or the
 // HTML set '<' '>' '&') take an allocating unescape path.
 //
-// Unlike a known/declared field's VALUE — which stays leniently parsed by
-// the trusted-path leaf readers (a bare number may have a leading zero, a
-// string a raw control byte or invalid escape) — an object KEY is grammar-
-// strict: a raw control byte or an invalid escape sequence in a key is
+// This low-level reader is grammar-strict: a raw control byte or an invalid
+// escape sequence in a key is
 // rejected, matching json.Valid / encoding/json. Keys are validated on
 // every path that reaches ReadKey (the general keyed fallback, map decode,
 // and the ordered decoder's skip of an unknown key); the ordered fast path
 // never reaches here for a declared key — it matches the exact declared-
 // name literal bytes, so an escaped or control-bearing key can never
 // satisfy that compare and always falls through to this strict reader.
-// (Values, unlike keys, are read leniently by the declared-field readers;
-// see Skip and the compatibility notes on declared-value leniency.)
+// Generated public decodes also validate the complete document up front.
 func (l *Lexer) ReadKey() []byte {
 	l.skipWS()
 	var b []byte

@@ -45,7 +45,7 @@ func TestIndependentChallenge(t *testing.T) {
 	if out, err := run(filepath.Join(root, "cmd", "zerojsongen"), "go", "build", "-o", bin, "."); err != nil {
 		t.Fatalf("candidate generator: %v\n%s", err, out)
 	}
-	for _, mode := range []string{"ordered", "fallback"} {
+	for _, mode := range []string{"ordered", "fallback", "compat"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := filepath.Join(base, mode)
 			if err := os.Mkdir(dir, 0o755); err != nil {
@@ -56,14 +56,22 @@ func TestIndependentChallenge(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			args := []string{bin, "-dir", dir, "-types", "Record,RootSlice,RootMap", "-pool"}
+			args := []string{bin, "-dir", dir, "-types", "Record,RootSlice,RootMap,CallbackView,ObservedList,ObservedIndex,Ordinary", "-pool"}
 			if mode == "fallback" {
 				args = append(args, "-no-ordered")
+			}
+			if mode == "compat" {
+				args = append(args, "-compat")
 			}
 			if out, err := run(dir, args...); err != nil {
 				t.Fatalf("challenge generation: %v\n%s", err, out)
 			}
 			args = []string{"go", "test", "-count=1", "-v", "-timeout=2m"}
+			// The ordinary challenge uses stdlib on the same types as its
+			// oracle. Compatibility wrappers would make that circular.
+			if mode == "compat" {
+				args = append(args, "-run", "^TestCompatContainerObservations$")
+			}
 			if os.Getenv("ZEROJSON_CHALLENGE_RACE") != "" {
 				args = append(args, "-race", "-gcflags=all=-d=checkptr=2")
 			}

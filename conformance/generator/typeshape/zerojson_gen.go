@@ -9,6 +9,7 @@ import (
 	zerojson "github.com/neal/zerojson"
 	"github.com/neal/zerojson/conformance/internal/testleaf"
 	reflect_ "reflect"
+	strings_ "strings"
 	"time"
 )
 
@@ -40,9 +41,10 @@ func (v *C_bytes) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_bytes) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -55,6 +57,9 @@ func (v *C_bytes) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_bytes) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_bytes{}
 	zjDecode_C_bytes(&l, v, a)
@@ -68,6 +73,16 @@ func (v *C_bytes) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_bytes) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_bytes{}
 	zjDecode_C_bytes(l, v, a)
+}
+func zjFieldName_C_bytes(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_bytes tries the speculative ordered fast path first (see ordered.go),
@@ -237,7 +252,7 @@ func zjTryOrderedKeyC_bytes(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_bytes(name string) bool {
-	switch name {
+	switch zjFieldName_C_bytes(name) {
 	case "f":
 		return true
 	}
@@ -257,8 +272,9 @@ func zjDecodeFallback_C_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) 
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_bytes(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -271,7 +287,7 @@ func zjDecodeFallback_C_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) 
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = []byte(l.ReadBytesBase64())
 		default:
@@ -315,9 +331,10 @@ func (v *C_bytes_named) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_bytes_named) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -330,6 +347,9 @@ func (v *C_bytes_named) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_bytes_named) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_bytes_named{}
 	zjDecode_C_bytes_named(&l, v, a)
@@ -343,6 +363,16 @@ func (v *C_bytes_named) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_bytes_named) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_bytes_named{}
 	zjDecode_C_bytes_named(l, v, a)
+}
+func zjFieldName_C_bytes_named(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_bytes_named tries the speculative ordered fast path first (see ordered.go),
@@ -512,7 +542,7 @@ func zjTryOrderedKeyC_bytes_named(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_bytes_named(name string) bool {
-	switch name {
+	switch zjFieldName_C_bytes_named(name) {
 	case "f":
 		return true
 	}
@@ -532,8 +562,9 @@ func zjDecodeFallback_C_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjAr
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_bytes_named(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -546,7 +577,7 @@ func zjDecodeFallback_C_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjAr
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = Blob(l.ReadBytesBase64())
 		default:
@@ -590,9 +621,10 @@ func (v *C_bytes_named_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_bytes_named_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -605,6 +637,9 @@ func (v *C_bytes_named_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_bytes_named_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_bytes_named_oe{}
 	zjDecode_C_bytes_named_oe(&l, v, a)
@@ -618,6 +653,16 @@ func (v *C_bytes_named_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_bytes_named_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_bytes_named_oe{}
 	zjDecode_C_bytes_named_oe(l, v, a)
+}
+func zjFieldName_C_bytes_named_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_bytes_named_oe tries the speculative ordered fast path first (see ordered.go),
@@ -787,7 +832,7 @@ func zjTryOrderedKeyC_bytes_named_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_bytes_named_oe(name string) bool {
-	switch name {
+	switch zjFieldName_C_bytes_named_oe(name) {
 	case "f":
 		return true
 	}
@@ -807,8 +852,9 @@ func zjDecodeFallback_C_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_bytes_named_oe(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -821,7 +867,7 @@ func zjDecodeFallback_C_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = Blob(l.ReadBytesBase64())
 		default:
@@ -880,9 +926,10 @@ func (v *C_bytes_nested_slice) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_bytes_nested_slice) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -895,6 +942,9 @@ func (v *C_bytes_nested_slice) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_bytes_nested_slice) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_bytes_nested_slice{}
 	zjDecode_C_bytes_nested_slice(&l, v, a)
@@ -908,6 +958,16 @@ func (v *C_bytes_nested_slice) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_bytes_nested_slice) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_bytes_nested_slice{}
 	zjDecode_C_bytes_nested_slice(l, v, a)
+}
+func zjFieldName_C_bytes_nested_slice(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_bytes_nested_slice tries the speculative ordered fast path first (see ordered.go),
@@ -1042,111 +1102,12 @@ func zjDecodeOrderedField_C_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nes
 	switch k {
 	case 0:
 		if v.F != nil {
-			a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
-			a.c0 = v.F
-		} else if a.slicePublished0 || a.sliceBorrowed0 {
-			a.c0 = nil
-			a.sliceBorrowed0 = false
-		}
-		a.slicePublished0 = true
-		a.c0 = a.c0[:0]
-		if l.EnterArray() {
-			for {
-				if len(a.c0) == cap(a.c0) {
-					var zjZero []byte
-					a.c0 = append(a.c0, zjZero)
-				} else {
-					a.c0 = a.c0[:len(a.c0)+1]
-					var zjZero []byte
-					a.c0[len(a.c0)-1] = zjZero
-				}
-				idx := len(a.c0) - 1
-				if !l.IsNull() {
-					a.c0[idx] = []byte(l.ReadBytesBase64())
-				}
-				if l.Err() != nil {
-					break
-				}
-				if !l.NextElem() {
-					break
+			if raw := l.RawValue(); l.Err() == nil {
+				if err := json_.Unmarshal(raw, &v.F); err != nil {
+					l.AddError(err)
 				}
 			}
-		}
-		if a.c0 == nil {
-			a.c0 = [][]byte{}
-		}
-		v.F = a.c0
-	}
-	if l.Err() != nil {
-		l.AnnotateFieldString(zjFieldNamesC_bytes_nested_slice[k])
-		return false
-	}
-	return true
-}
-
-// zjFieldNamesC_bytes_nested_slice are C_bytes_nested_slice's JSON field names by declared index, for error paths.
-var zjFieldNamesC_bytes_nested_slice = [...]string{
-	"f",
-}
-
-// zjTryOrderedKeyC_bytes_nested_slice matches and consumes the literal `"name":` for declared
-// field index k at l's current position (compact JSON only — any
-// whitespace simply fails the comparison). Leaves the position
-// unchanged on mismatch.
-func zjTryOrderedKeyC_bytes_nested_slice(l *zerojson.Lexer, k int) bool {
-	data, pos := l.DataAndPos()
-	n := len(data)
-	switch k {
-	case 0:
-		if n-pos < 4 {
-			return false
-		}
-		if binary.LittleEndian.Uint32(data[pos+0:]) != 0x3a226622 {
-			return false
-		}
-		l.SetPos(pos + 4)
-		return true
-	}
-	return false
-}
-
-func zjIsDeclaredKeyC_bytes_nested_slice(name string) bool {
-	switch name {
-	case "f":
-		return true
-	}
-	return false
-}
-
-// zjDecodeFallback_C_bytes_nested_slice is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It handles arbitrary
-// field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallback_C_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_slice, a *zjArenaC_bytes_nested_slice) {
-	_ = a
-	if !l.EnterObject() {
-		return
-	}
-	for {
-		key := l.ReadKey()
-		if l.Err() != nil {
-			return
-		}
-		if l.IsNull() {
-			switch string(key) {
-			case "f":
-				v.F = nil
-			}
-			if l.Err() != nil {
-				l.AnnotateField(key)
-				return
-			}
-			if !l.NextMember() {
-				break
-			}
-			continue
-		}
-		switch string(key) {
-		case "f":
+		} else {
 			if v.F != nil {
 				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
@@ -1182,6 +1143,122 @@ func zjDecodeFallback_C_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_
 				a.c0 = [][]byte{}
 			}
 			v.F = a.c0
+		}
+	}
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_bytes_nested_slice[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_bytes_nested_slice are C_bytes_nested_slice's JSON field names by declared index, for error paths.
+var zjFieldNamesC_bytes_nested_slice = [...]string{
+	"f",
+}
+
+// zjTryOrderedKeyC_bytes_nested_slice matches and consumes the literal `"name":` for declared
+// field index k at l's current position (compact JSON only — any
+// whitespace simply fails the comparison). Leaves the position
+// unchanged on mismatch.
+func zjTryOrderedKeyC_bytes_nested_slice(l *zerojson.Lexer, k int) bool {
+	data, pos := l.DataAndPos()
+	n := len(data)
+	switch k {
+	case 0:
+		if n-pos < 4 {
+			return false
+		}
+		if binary.LittleEndian.Uint32(data[pos+0:]) != 0x3a226622 {
+			return false
+		}
+		l.SetPos(pos + 4)
+		return true
+	}
+	return false
+}
+
+func zjIsDeclaredKeyC_bytes_nested_slice(name string) bool {
+	switch zjFieldName_C_bytes_nested_slice(name) {
+	case "f":
+		return true
+	}
+	return false
+}
+
+// zjDecodeFallback_C_bytes_nested_slice is the general keyed decoder: every member is read via
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
+func zjDecodeFallback_C_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_slice, a *zjArenaC_bytes_nested_slice) {
+	_ = a
+	if !l.EnterObject() {
+		return
+	}
+	for {
+		key := l.ReadKey()
+		if l.Err() != nil {
+			return
+		}
+		name := zjFieldName_C_bytes_nested_slice(string(key))
+		if l.IsNull() {
+			switch name {
+			case "f":
+				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
+			if !l.NextMember() {
+				break
+			}
+			continue
+		}
+		switch name {
+		case "f":
+			if v.F != nil {
+				if raw := l.RawValue(); l.Err() == nil {
+					if err := json_.Unmarshal(raw, &v.F); err != nil {
+						l.AddError(err)
+					}
+				}
+			} else {
+				if v.F != nil {
+					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
+					a.c0 = v.F
+				} else if a.slicePublished0 || a.sliceBorrowed0 {
+					a.c0 = nil
+					a.sliceBorrowed0 = false
+				}
+				a.slicePublished0 = true
+				a.c0 = a.c0[:0]
+				if l.EnterArray() {
+					for {
+						if len(a.c0) == cap(a.c0) {
+							var zjZero []byte
+							a.c0 = append(a.c0, zjZero)
+						} else {
+							a.c0 = a.c0[:len(a.c0)+1]
+							var zjZero []byte
+							a.c0[len(a.c0)-1] = zjZero
+						}
+						idx := len(a.c0) - 1
+						if !l.IsNull() {
+							a.c0[idx] = []byte(l.ReadBytesBase64())
+						}
+						if l.Err() != nil {
+							break
+						}
+						if !l.NextElem() {
+							break
+						}
+					}
+				}
+				if a.c0 == nil {
+					a.c0 = [][]byte{}
+				}
+				v.F = a.c0
+			}
 		default:
 			l.Skip()
 		}
@@ -1238,9 +1315,10 @@ func (v *C_bytes_nested_slice_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_bytes_nested_slice_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -1253,6 +1331,9 @@ func (v *C_bytes_nested_slice_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_bytes_nested_slice_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_bytes_nested_slice_oe{}
 	zjDecode_C_bytes_nested_slice_oe(&l, v, a)
@@ -1266,6 +1347,16 @@ func (v *C_bytes_nested_slice_oe) unmarshalZJSON(data []byte, borrow bool) error
 func (v *C_bytes_nested_slice_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_bytes_nested_slice_oe{}
 	zjDecode_C_bytes_nested_slice_oe(l, v, a)
+}
+func zjFieldName_C_bytes_nested_slice_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_bytes_nested_slice_oe tries the speculative ordered fast path first (see ordered.go),
@@ -1400,111 +1491,12 @@ func zjDecodeOrderedField_C_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_
 	switch k {
 	case 0:
 		if v.F != nil {
-			a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
-			a.c0 = v.F
-		} else if a.slicePublished0 || a.sliceBorrowed0 {
-			a.c0 = nil
-			a.sliceBorrowed0 = false
-		}
-		a.slicePublished0 = true
-		a.c0 = a.c0[:0]
-		if l.EnterArray() {
-			for {
-				if len(a.c0) == cap(a.c0) {
-					var zjZero []byte
-					a.c0 = append(a.c0, zjZero)
-				} else {
-					a.c0 = a.c0[:len(a.c0)+1]
-					var zjZero []byte
-					a.c0[len(a.c0)-1] = zjZero
-				}
-				idx := len(a.c0) - 1
-				if !l.IsNull() {
-					a.c0[idx] = []byte(l.ReadBytesBase64())
-				}
-				if l.Err() != nil {
-					break
-				}
-				if !l.NextElem() {
-					break
+			if raw := l.RawValue(); l.Err() == nil {
+				if err := json_.Unmarshal(raw, &v.F); err != nil {
+					l.AddError(err)
 				}
 			}
-		}
-		if a.c0 == nil {
-			a.c0 = [][]byte{}
-		}
-		v.F = a.c0
-	}
-	if l.Err() != nil {
-		l.AnnotateFieldString(zjFieldNamesC_bytes_nested_slice_oe[k])
-		return false
-	}
-	return true
-}
-
-// zjFieldNamesC_bytes_nested_slice_oe are C_bytes_nested_slice_oe's JSON field names by declared index, for error paths.
-var zjFieldNamesC_bytes_nested_slice_oe = [...]string{
-	"f",
-}
-
-// zjTryOrderedKeyC_bytes_nested_slice_oe matches and consumes the literal `"name":` for declared
-// field index k at l's current position (compact JSON only — any
-// whitespace simply fails the comparison). Leaves the position
-// unchanged on mismatch.
-func zjTryOrderedKeyC_bytes_nested_slice_oe(l *zerojson.Lexer, k int) bool {
-	data, pos := l.DataAndPos()
-	n := len(data)
-	switch k {
-	case 0:
-		if n-pos < 4 {
-			return false
-		}
-		if binary.LittleEndian.Uint32(data[pos+0:]) != 0x3a226622 {
-			return false
-		}
-		l.SetPos(pos + 4)
-		return true
-	}
-	return false
-}
-
-func zjIsDeclaredKeyC_bytes_nested_slice_oe(name string) bool {
-	switch name {
-	case "f":
-		return true
-	}
-	return false
-}
-
-// zjDecodeFallback_C_bytes_nested_slice_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It handles arbitrary
-// field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallback_C_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested_slice_oe, a *zjArenaC_bytes_nested_slice_oe) {
-	_ = a
-	if !l.EnterObject() {
-		return
-	}
-	for {
-		key := l.ReadKey()
-		if l.Err() != nil {
-			return
-		}
-		if l.IsNull() {
-			switch string(key) {
-			case "f":
-				v.F = nil
-			}
-			if l.Err() != nil {
-				l.AnnotateField(key)
-				return
-			}
-			if !l.NextMember() {
-				break
-			}
-			continue
-		}
-		switch string(key) {
-		case "f":
+		} else {
 			if v.F != nil {
 				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
@@ -1540,6 +1532,122 @@ func zjDecodeFallback_C_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nest
 				a.c0 = [][]byte{}
 			}
 			v.F = a.c0
+		}
+	}
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_bytes_nested_slice_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_bytes_nested_slice_oe are C_bytes_nested_slice_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesC_bytes_nested_slice_oe = [...]string{
+	"f",
+}
+
+// zjTryOrderedKeyC_bytes_nested_slice_oe matches and consumes the literal `"name":` for declared
+// field index k at l's current position (compact JSON only — any
+// whitespace simply fails the comparison). Leaves the position
+// unchanged on mismatch.
+func zjTryOrderedKeyC_bytes_nested_slice_oe(l *zerojson.Lexer, k int) bool {
+	data, pos := l.DataAndPos()
+	n := len(data)
+	switch k {
+	case 0:
+		if n-pos < 4 {
+			return false
+		}
+		if binary.LittleEndian.Uint32(data[pos+0:]) != 0x3a226622 {
+			return false
+		}
+		l.SetPos(pos + 4)
+		return true
+	}
+	return false
+}
+
+func zjIsDeclaredKeyC_bytes_nested_slice_oe(name string) bool {
+	switch zjFieldName_C_bytes_nested_slice_oe(name) {
+	case "f":
+		return true
+	}
+	return false
+}
+
+// zjDecodeFallback_C_bytes_nested_slice_oe is the general keyed decoder: every member is read via
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
+func zjDecodeFallback_C_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested_slice_oe, a *zjArenaC_bytes_nested_slice_oe) {
+	_ = a
+	if !l.EnterObject() {
+		return
+	}
+	for {
+		key := l.ReadKey()
+		if l.Err() != nil {
+			return
+		}
+		name := zjFieldName_C_bytes_nested_slice_oe(string(key))
+		if l.IsNull() {
+			switch name {
+			case "f":
+				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
+			if !l.NextMember() {
+				break
+			}
+			continue
+		}
+		switch name {
+		case "f":
+			if v.F != nil {
+				if raw := l.RawValue(); l.Err() == nil {
+					if err := json_.Unmarshal(raw, &v.F); err != nil {
+						l.AddError(err)
+					}
+				}
+			} else {
+				if v.F != nil {
+					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
+					a.c0 = v.F
+				} else if a.slicePublished0 || a.sliceBorrowed0 {
+					a.c0 = nil
+					a.sliceBorrowed0 = false
+				}
+				a.slicePublished0 = true
+				a.c0 = a.c0[:0]
+				if l.EnterArray() {
+					for {
+						if len(a.c0) == cap(a.c0) {
+							var zjZero []byte
+							a.c0 = append(a.c0, zjZero)
+						} else {
+							a.c0 = a.c0[:len(a.c0)+1]
+							var zjZero []byte
+							a.c0[len(a.c0)-1] = zjZero
+						}
+						idx := len(a.c0) - 1
+						if !l.IsNull() {
+							a.c0[idx] = []byte(l.ReadBytesBase64())
+						}
+						if l.Err() != nil {
+							break
+						}
+						if !l.NextElem() {
+							break
+						}
+					}
+				}
+				if a.c0 == nil {
+					a.c0 = [][]byte{}
+				}
+				v.F = a.c0
+			}
 		default:
 			l.Skip()
 		}
@@ -1581,9 +1689,10 @@ func (v *C_bytes_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_bytes_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -1596,6 +1705,9 @@ func (v *C_bytes_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_bytes_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_bytes_oe{}
 	zjDecode_C_bytes_oe(&l, v, a)
@@ -1609,6 +1721,16 @@ func (v *C_bytes_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_bytes_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_bytes_oe{}
 	zjDecode_C_bytes_oe(l, v, a)
+}
+func zjFieldName_C_bytes_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_bytes_oe tries the speculative ordered fast path first (see ordered.go),
@@ -1778,7 +1900,7 @@ func zjTryOrderedKeyC_bytes_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_bytes_oe(name string) bool {
-	switch name {
+	switch zjFieldName_C_bytes_oe(name) {
 	case "f":
 		return true
 	}
@@ -1798,8 +1920,9 @@ func zjDecodeFallback_C_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_b
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_bytes_oe(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -1812,7 +1935,7 @@ func zjDecodeFallback_C_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_b
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = []byte(l.ReadBytesBase64())
 		default:
@@ -1863,9 +1986,10 @@ func (v *C_bytes_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_bytes_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -1878,6 +2002,9 @@ func (v *C_bytes_ptr) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_bytes_ptr) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_bytes_ptr{}
 	zjDecode_C_bytes_ptr(&l, v, a)
@@ -1891,6 +2018,16 @@ func (v *C_bytes_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_bytes_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_bytes_ptr{}
 	zjDecode_C_bytes_ptr(l, v, a)
+}
+func zjFieldName_C_bytes_ptr(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_bytes_ptr tries the speculative ordered fast path first (see ordered.go),
@@ -2074,7 +2211,7 @@ func zjTryOrderedKeyC_bytes_ptr(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_bytes_ptr(name string) bool {
-	switch name {
+	switch zjFieldName_C_bytes_ptr(name) {
 	case "f":
 		return true
 	}
@@ -2094,8 +2231,9 @@ func zjDecodeFallback_C_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_bytes_ptr(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -2108,7 +2246,7 @@ func zjDecodeFallback_C_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F == nil {
 				if a.published0 {
@@ -2181,9 +2319,10 @@ func (v *C_map_bytes) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_map_bytes) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -2196,6 +2335,9 @@ func (v *C_map_bytes) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_map_bytes) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_bytes{}
 	zjDecode_C_map_bytes(&l, v, a)
@@ -2209,6 +2351,16 @@ func (v *C_map_bytes) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_map_bytes) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_bytes{}
 	zjDecode_C_map_bytes(l, v, a)
+}
+func zjFieldName_C_map_bytes(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_map_bytes tries the speculative ordered fast path first (see ordered.go),
@@ -2406,7 +2558,7 @@ func zjTryOrderedKeyC_map_bytes(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_map_bytes(name string) bool {
-	switch name {
+	switch zjFieldName_C_map_bytes(name) {
 	case "f":
 		return true
 	}
@@ -2426,8 +2578,9 @@ func zjDecodeFallback_C_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_map_bytes(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -2440,7 +2593,7 @@ func zjDecodeFallback_C_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			{
 				if v.F != nil {
@@ -2531,9 +2684,10 @@ func (v *C_map_bytes_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_map_bytes_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -2546,6 +2700,9 @@ func (v *C_map_bytes_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_map_bytes_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_bytes_oe{}
 	zjDecode_C_map_bytes_oe(&l, v, a)
@@ -2559,6 +2716,16 @@ func (v *C_map_bytes_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_map_bytes_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_bytes_oe{}
 	zjDecode_C_map_bytes_oe(l, v, a)
+}
+func zjFieldName_C_map_bytes_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_map_bytes_oe tries the speculative ordered fast path first (see ordered.go),
@@ -2756,7 +2923,7 @@ func zjTryOrderedKeyC_map_bytes_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_map_bytes_oe(name string) bool {
-	switch name {
+	switch zjFieldName_C_map_bytes_oe(name) {
 	case "f":
 		return true
 	}
@@ -2776,8 +2943,9 @@ func zjDecodeFallback_C_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zj
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_map_bytes_oe(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -2790,7 +2958,7 @@ func zjDecodeFallback_C_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zj
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			{
 				if v.F != nil {
@@ -2881,9 +3049,10 @@ func (v *C_map_decimal) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_map_decimal) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -2896,6 +3065,9 @@ func (v *C_map_decimal) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_map_decimal) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_decimal{}
 	zjDecode_C_map_decimal(&l, v, a)
@@ -2909,6 +3081,16 @@ func (v *C_map_decimal) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_map_decimal) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_decimal{}
 	zjDecode_C_map_decimal(l, v, a)
+}
+func zjFieldName_C_map_decimal(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_map_decimal tries the speculative ordered fast path first (see ordered.go),
@@ -3106,7 +3288,7 @@ func zjTryOrderedKeyC_map_decimal(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_map_decimal(name string) bool {
-	switch name {
+	switch zjFieldName_C_map_decimal(name) {
 	case "f":
 		return true
 	}
@@ -3126,8 +3308,9 @@ func zjDecodeFallback_C_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjAr
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_map_decimal(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -3140,7 +3323,7 @@ func zjDecodeFallback_C_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjAr
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			{
 				if v.F != nil {
@@ -3231,9 +3414,10 @@ func (v *C_map_decimal_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_map_decimal_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -3246,6 +3430,9 @@ func (v *C_map_decimal_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_map_decimal_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_decimal_oe{}
 	zjDecode_C_map_decimal_oe(&l, v, a)
@@ -3259,6 +3446,16 @@ func (v *C_map_decimal_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_map_decimal_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_decimal_oe{}
 	zjDecode_C_map_decimal_oe(l, v, a)
+}
+func zjFieldName_C_map_decimal_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_map_decimal_oe tries the speculative ordered fast path first (see ordered.go),
@@ -3456,7 +3653,7 @@ func zjTryOrderedKeyC_map_decimal_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_map_decimal_oe(name string) bool {
-	switch name {
+	switch zjFieldName_C_map_decimal_oe(name) {
 	case "f":
 		return true
 	}
@@ -3476,8 +3673,9 @@ func zjDecodeFallback_C_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_map_decimal_oe(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -3490,7 +3688,7 @@ func zjDecodeFallback_C_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			{
 				if v.F != nil {
@@ -3581,9 +3779,10 @@ func (v *C_map_int) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_map_int) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -3596,6 +3795,9 @@ func (v *C_map_int) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_map_int) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_int{}
 	zjDecode_C_map_int(&l, v, a)
@@ -3609,6 +3811,16 @@ func (v *C_map_int) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_map_int) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_int{}
 	zjDecode_C_map_int(l, v, a)
+}
+func zjFieldName_C_map_int(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_map_int tries the speculative ordered fast path first (see ordered.go),
@@ -3806,7 +4018,7 @@ func zjTryOrderedKeyC_map_int(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_map_int(name string) bool {
-	switch name {
+	switch zjFieldName_C_map_int(name) {
 	case "f":
 		return true
 	}
@@ -3826,8 +4038,9 @@ func zjDecodeFallback_C_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_map_int(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -3840,7 +4053,7 @@ func zjDecodeFallback_C_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			{
 				if v.F != nil {
@@ -3931,9 +4144,10 @@ func (v *C_map_int_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_map_int_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -3946,6 +4160,9 @@ func (v *C_map_int_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_map_int_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_int_oe{}
 	zjDecode_C_map_int_oe(&l, v, a)
@@ -3959,6 +4176,16 @@ func (v *C_map_int_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_map_int_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_int_oe{}
 	zjDecode_C_map_int_oe(l, v, a)
+}
+func zjFieldName_C_map_int_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_map_int_oe tries the speculative ordered fast path first (see ordered.go),
@@ -4156,7 +4383,7 @@ func zjTryOrderedKeyC_map_int_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_map_int_oe(name string) bool {
-	switch name {
+	switch zjFieldName_C_map_int_oe(name) {
 	case "f":
 		return true
 	}
@@ -4176,8 +4403,9 @@ func zjDecodeFallback_C_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjAren
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_map_int_oe(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -4190,7 +4418,7 @@ func zjDecodeFallback_C_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjAren
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			{
 				if v.F != nil {
@@ -4282,9 +4510,10 @@ func (v *C_map_set) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_map_set) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -4297,6 +4526,9 @@ func (v *C_map_set) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_map_set) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_set{}
 	zjDecode_C_map_set(&l, v, a)
@@ -4310,6 +4542,16 @@ func (v *C_map_set) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_map_set) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_set{}
 	zjDecode_C_map_set(l, v, a)
+}
+func zjFieldName_C_map_set(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_map_set tries the speculative ordered fast path first (see ordered.go),
@@ -4507,7 +4749,7 @@ func zjTryOrderedKeyC_map_set(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_map_set(name string) bool {
-	switch name {
+	switch zjFieldName_C_map_set(name) {
 	case "f":
 		return true
 	}
@@ -4527,8 +4769,9 @@ func zjDecodeFallback_C_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_map_set(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -4541,7 +4784,7 @@ func zjDecodeFallback_C_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			{
 				if v.F != nil {
@@ -4633,9 +4876,10 @@ func (v *C_map_set_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_map_set_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -4648,6 +4892,9 @@ func (v *C_map_set_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_map_set_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_set_oe{}
 	zjDecode_C_map_set_oe(&l, v, a)
@@ -4661,6 +4908,16 @@ func (v *C_map_set_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_map_set_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_set_oe{}
 	zjDecode_C_map_set_oe(l, v, a)
+}
+func zjFieldName_C_map_set_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_map_set_oe tries the speculative ordered fast path first (see ordered.go),
@@ -4858,7 +5115,7 @@ func zjTryOrderedKeyC_map_set_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_map_set_oe(name string) bool {
-	switch name {
+	switch zjFieldName_C_map_set_oe(name) {
 	case "f":
 		return true
 	}
@@ -4878,8 +5135,9 @@ func zjDecodeFallback_C_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjAren
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_map_set_oe(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -4892,7 +5150,7 @@ func zjDecodeFallback_C_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjAren
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			{
 				if v.F != nil {
@@ -4987,9 +5245,10 @@ func (v *C_map_struct) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_map_struct) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -5002,6 +5261,9 @@ func (v *C_map_struct) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_map_struct) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_struct{}
 	zjDecode_C_map_struct(&l, v, a)
@@ -5015,6 +5277,16 @@ func (v *C_map_struct) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_map_struct) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_struct{}
 	zjDecode_C_map_struct(l, v, a)
+}
+func zjFieldName_C_map_struct(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_map_struct tries the speculative ordered fast path first (see ordered.go),
@@ -5213,7 +5485,7 @@ func zjTryOrderedKeyC_map_struct(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_map_struct(name string) bool {
-	switch name {
+	switch zjFieldName_C_map_struct(name) {
 	case "f":
 		return true
 	}
@@ -5233,8 +5505,9 @@ func zjDecodeFallback_C_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjAren
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_map_struct(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -5247,7 +5520,7 @@ func zjDecodeFallback_C_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjAren
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			{
 				if v.F != nil {
@@ -5343,9 +5616,10 @@ func (v *C_map_struct_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_map_struct_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -5358,6 +5632,9 @@ func (v *C_map_struct_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_map_struct_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_map_struct_oe{}
 	zjDecode_C_map_struct_oe(&l, v, a)
@@ -5371,6 +5648,16 @@ func (v *C_map_struct_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_map_struct_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_map_struct_oe{}
 	zjDecode_C_map_struct_oe(l, v, a)
+}
+func zjFieldName_C_map_struct_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_map_struct_oe tries the speculative ordered fast path first (see ordered.go),
@@ -5569,7 +5856,7 @@ func zjTryOrderedKeyC_map_struct_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_map_struct_oe(name string) bool {
-	switch name {
+	switch zjFieldName_C_map_struct_oe(name) {
 	case "f":
 		return true
 	}
@@ -5589,8 +5876,9 @@ func zjDecodeFallback_C_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_map_struct_oe(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -5603,7 +5891,7 @@ func zjDecodeFallback_C_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			{
 				if v.F != nil {
@@ -5691,9 +5979,10 @@ func (v *C_slice_decimal) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_slice_decimal) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -5706,6 +5995,9 @@ func (v *C_slice_decimal) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_slice_decimal) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_decimal{}
 	zjDecode_C_slice_decimal(&l, v, a)
@@ -5719,6 +6011,16 @@ func (v *C_slice_decimal) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_slice_decimal) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_decimal{}
 	zjDecode_C_slice_decimal(l, v, a)
+}
+func zjFieldName_C_slice_decimal(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_slice_decimal tries the speculative ordered fast path first (see ordered.go),
@@ -5922,7 +6224,7 @@ func zjTryOrderedKeyC_slice_decimal(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_slice_decimal(name string) bool {
-	switch name {
+	switch zjFieldName_C_slice_decimal(name) {
 	case "f":
 		return true
 	}
@@ -5942,8 +6244,9 @@ func zjDecodeFallback_C_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_slice_decimal(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -5956,7 +6259,7 @@ func zjDecodeFallback_C_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F != nil {
 				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
@@ -6049,9 +6352,10 @@ func (v *C_slice_decimal_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_slice_decimal_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -6064,6 +6368,9 @@ func (v *C_slice_decimal_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_slice_decimal_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_decimal_oe{}
 	zjDecode_C_slice_decimal_oe(&l, v, a)
@@ -6077,6 +6384,16 @@ func (v *C_slice_decimal_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_slice_decimal_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_decimal_oe{}
 	zjDecode_C_slice_decimal_oe(l, v, a)
+}
+func zjFieldName_C_slice_decimal_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_slice_decimal_oe tries the speculative ordered fast path first (see ordered.go),
@@ -6280,7 +6597,7 @@ func zjTryOrderedKeyC_slice_decimal_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_slice_decimal_oe(name string) bool {
-	switch name {
+	switch zjFieldName_C_slice_decimal_oe(name) {
 	case "f":
 		return true
 	}
@@ -6300,8 +6617,9 @@ func zjDecodeFallback_C_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_o
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_slice_decimal_oe(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -6314,7 +6632,7 @@ func zjDecodeFallback_C_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_o
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F != nil {
 				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
@@ -6407,9 +6725,10 @@ func (v *C_slice_int) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_slice_int) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -6422,6 +6741,9 @@ func (v *C_slice_int) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_slice_int) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_int{}
 	zjDecode_C_slice_int(&l, v, a)
@@ -6435,6 +6757,16 @@ func (v *C_slice_int) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_slice_int) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_int{}
 	zjDecode_C_slice_int(l, v, a)
+}
+func zjFieldName_C_slice_int(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_slice_int tries the speculative ordered fast path first (see ordered.go),
@@ -6569,111 +6901,12 @@ func zjDecodeOrderedField_C_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjAr
 	switch k {
 	case 0:
 		if v.F != nil {
-			a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
-			a.c0 = v.F
-		} else if a.slicePublished0 || a.sliceBorrowed0 {
-			a.c0 = nil
-			a.sliceBorrowed0 = false
-		}
-		a.slicePublished0 = true
-		a.c0 = a.c0[:0]
-		if l.EnterArray() {
-			for {
-				if len(a.c0) == cap(a.c0) {
-					var zjZero int
-					a.c0 = append(a.c0, zjZero)
-				} else {
-					a.c0 = a.c0[:len(a.c0)+1]
-					var zjZero int
-					a.c0[len(a.c0)-1] = zjZero
-				}
-				idx := len(a.c0) - 1
-				if !l.IsNull() {
-					a.c0[idx] = int(l.ReadInt())
-				}
-				if l.Err() != nil {
-					break
-				}
-				if !l.NextElem() {
-					break
+			if raw := l.RawValue(); l.Err() == nil {
+				if err := json_.Unmarshal(raw, &v.F); err != nil {
+					l.AddError(err)
 				}
 			}
-		}
-		if a.c0 == nil {
-			a.c0 = []int{}
-		}
-		v.F = a.c0
-	}
-	if l.Err() != nil {
-		l.AnnotateFieldString(zjFieldNamesC_slice_int[k])
-		return false
-	}
-	return true
-}
-
-// zjFieldNamesC_slice_int are C_slice_int's JSON field names by declared index, for error paths.
-var zjFieldNamesC_slice_int = [...]string{
-	"f",
-}
-
-// zjTryOrderedKeyC_slice_int matches and consumes the literal `"name":` for declared
-// field index k at l's current position (compact JSON only — any
-// whitespace simply fails the comparison). Leaves the position
-// unchanged on mismatch.
-func zjTryOrderedKeyC_slice_int(l *zerojson.Lexer, k int) bool {
-	data, pos := l.DataAndPos()
-	n := len(data)
-	switch k {
-	case 0:
-		if n-pos < 4 {
-			return false
-		}
-		if binary.LittleEndian.Uint32(data[pos+0:]) != 0x3a226622 {
-			return false
-		}
-		l.SetPos(pos + 4)
-		return true
-	}
-	return false
-}
-
-func zjIsDeclaredKeyC_slice_int(name string) bool {
-	switch name {
-	case "f":
-		return true
-	}
-	return false
-}
-
-// zjDecodeFallback_C_slice_int is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It handles arbitrary
-// field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallback_C_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_slice_int) {
-	_ = a
-	if !l.EnterObject() {
-		return
-	}
-	for {
-		key := l.ReadKey()
-		if l.Err() != nil {
-			return
-		}
-		if l.IsNull() {
-			switch string(key) {
-			case "f":
-				v.F = nil
-			}
-			if l.Err() != nil {
-				l.AnnotateField(key)
-				return
-			}
-			if !l.NextMember() {
-				break
-			}
-			continue
-		}
-		switch string(key) {
-		case "f":
+		} else {
 			if v.F != nil {
 				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
@@ -6709,6 +6942,122 @@ func zjDecodeFallback_C_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC
 				a.c0 = []int{}
 			}
 			v.F = a.c0
+		}
+	}
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_slice_int[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_slice_int are C_slice_int's JSON field names by declared index, for error paths.
+var zjFieldNamesC_slice_int = [...]string{
+	"f",
+}
+
+// zjTryOrderedKeyC_slice_int matches and consumes the literal `"name":` for declared
+// field index k at l's current position (compact JSON only — any
+// whitespace simply fails the comparison). Leaves the position
+// unchanged on mismatch.
+func zjTryOrderedKeyC_slice_int(l *zerojson.Lexer, k int) bool {
+	data, pos := l.DataAndPos()
+	n := len(data)
+	switch k {
+	case 0:
+		if n-pos < 4 {
+			return false
+		}
+		if binary.LittleEndian.Uint32(data[pos+0:]) != 0x3a226622 {
+			return false
+		}
+		l.SetPos(pos + 4)
+		return true
+	}
+	return false
+}
+
+func zjIsDeclaredKeyC_slice_int(name string) bool {
+	switch zjFieldName_C_slice_int(name) {
+	case "f":
+		return true
+	}
+	return false
+}
+
+// zjDecodeFallback_C_slice_int is the general keyed decoder: every member is read via
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
+func zjDecodeFallback_C_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_slice_int) {
+	_ = a
+	if !l.EnterObject() {
+		return
+	}
+	for {
+		key := l.ReadKey()
+		if l.Err() != nil {
+			return
+		}
+		name := zjFieldName_C_slice_int(string(key))
+		if l.IsNull() {
+			switch name {
+			case "f":
+				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
+			if !l.NextMember() {
+				break
+			}
+			continue
+		}
+		switch name {
+		case "f":
+			if v.F != nil {
+				if raw := l.RawValue(); l.Err() == nil {
+					if err := json_.Unmarshal(raw, &v.F); err != nil {
+						l.AddError(err)
+					}
+				}
+			} else {
+				if v.F != nil {
+					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
+					a.c0 = v.F
+				} else if a.slicePublished0 || a.sliceBorrowed0 {
+					a.c0 = nil
+					a.sliceBorrowed0 = false
+				}
+				a.slicePublished0 = true
+				a.c0 = a.c0[:0]
+				if l.EnterArray() {
+					for {
+						if len(a.c0) == cap(a.c0) {
+							var zjZero int
+							a.c0 = append(a.c0, zjZero)
+						} else {
+							a.c0 = a.c0[:len(a.c0)+1]
+							var zjZero int
+							a.c0[len(a.c0)-1] = zjZero
+						}
+						idx := len(a.c0) - 1
+						if !l.IsNull() {
+							a.c0[idx] = int(l.ReadInt())
+						}
+						if l.Err() != nil {
+							break
+						}
+						if !l.NextElem() {
+							break
+						}
+					}
+				}
+				if a.c0 == nil {
+					a.c0 = []int{}
+				}
+				v.F = a.c0
+			}
 		default:
 			l.Skip()
 		}
@@ -6765,9 +7114,10 @@ func (v *C_slice_int_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_slice_int_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -6780,6 +7130,9 @@ func (v *C_slice_int_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_slice_int_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_int_oe{}
 	zjDecode_C_slice_int_oe(&l, v, a)
@@ -6793,6 +7146,16 @@ func (v *C_slice_int_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_slice_int_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_int_oe{}
 	zjDecode_C_slice_int_oe(l, v, a)
+}
+func zjFieldName_C_slice_int_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_slice_int_oe tries the speculative ordered fast path first (see ordered.go),
@@ -6927,111 +7290,12 @@ func zjDecodeOrderedField_C_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a
 	switch k {
 	case 0:
 		if v.F != nil {
-			a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
-			a.c0 = v.F
-		} else if a.slicePublished0 || a.sliceBorrowed0 {
-			a.c0 = nil
-			a.sliceBorrowed0 = false
-		}
-		a.slicePublished0 = true
-		a.c0 = a.c0[:0]
-		if l.EnterArray() {
-			for {
-				if len(a.c0) == cap(a.c0) {
-					var zjZero int
-					a.c0 = append(a.c0, zjZero)
-				} else {
-					a.c0 = a.c0[:len(a.c0)+1]
-					var zjZero int
-					a.c0[len(a.c0)-1] = zjZero
-				}
-				idx := len(a.c0) - 1
-				if !l.IsNull() {
-					a.c0[idx] = int(l.ReadInt())
-				}
-				if l.Err() != nil {
-					break
-				}
-				if !l.NextElem() {
-					break
+			if raw := l.RawValue(); l.Err() == nil {
+				if err := json_.Unmarshal(raw, &v.F); err != nil {
+					l.AddError(err)
 				}
 			}
-		}
-		if a.c0 == nil {
-			a.c0 = []int{}
-		}
-		v.F = a.c0
-	}
-	if l.Err() != nil {
-		l.AnnotateFieldString(zjFieldNamesC_slice_int_oe[k])
-		return false
-	}
-	return true
-}
-
-// zjFieldNamesC_slice_int_oe are C_slice_int_oe's JSON field names by declared index, for error paths.
-var zjFieldNamesC_slice_int_oe = [...]string{
-	"f",
-}
-
-// zjTryOrderedKeyC_slice_int_oe matches and consumes the literal `"name":` for declared
-// field index k at l's current position (compact JSON only — any
-// whitespace simply fails the comparison). Leaves the position
-// unchanged on mismatch.
-func zjTryOrderedKeyC_slice_int_oe(l *zerojson.Lexer, k int) bool {
-	data, pos := l.DataAndPos()
-	n := len(data)
-	switch k {
-	case 0:
-		if n-pos < 4 {
-			return false
-		}
-		if binary.LittleEndian.Uint32(data[pos+0:]) != 0x3a226622 {
-			return false
-		}
-		l.SetPos(pos + 4)
-		return true
-	}
-	return false
-}
-
-func zjIsDeclaredKeyC_slice_int_oe(name string) bool {
-	switch name {
-	case "f":
-		return true
-	}
-	return false
-}
-
-// zjDecodeFallback_C_slice_int_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It handles arbitrary
-// field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallback_C_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjArenaC_slice_int_oe) {
-	_ = a
-	if !l.EnterObject() {
-		return
-	}
-	for {
-		key := l.ReadKey()
-		if l.Err() != nil {
-			return
-		}
-		if l.IsNull() {
-			switch string(key) {
-			case "f":
-				v.F = nil
-			}
-			if l.Err() != nil {
-				l.AnnotateField(key)
-				return
-			}
-			if !l.NextMember() {
-				break
-			}
-			continue
-		}
-		switch string(key) {
-		case "f":
+		} else {
 			if v.F != nil {
 				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
@@ -7067,6 +7331,122 @@ func zjDecodeFallback_C_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zj
 				a.c0 = []int{}
 			}
 			v.F = a.c0
+		}
+	}
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_slice_int_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_slice_int_oe are C_slice_int_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesC_slice_int_oe = [...]string{
+	"f",
+}
+
+// zjTryOrderedKeyC_slice_int_oe matches and consumes the literal `"name":` for declared
+// field index k at l's current position (compact JSON only — any
+// whitespace simply fails the comparison). Leaves the position
+// unchanged on mismatch.
+func zjTryOrderedKeyC_slice_int_oe(l *zerojson.Lexer, k int) bool {
+	data, pos := l.DataAndPos()
+	n := len(data)
+	switch k {
+	case 0:
+		if n-pos < 4 {
+			return false
+		}
+		if binary.LittleEndian.Uint32(data[pos+0:]) != 0x3a226622 {
+			return false
+		}
+		l.SetPos(pos + 4)
+		return true
+	}
+	return false
+}
+
+func zjIsDeclaredKeyC_slice_int_oe(name string) bool {
+	switch zjFieldName_C_slice_int_oe(name) {
+	case "f":
+		return true
+	}
+	return false
+}
+
+// zjDecodeFallback_C_slice_int_oe is the general keyed decoder: every member is read via
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
+func zjDecodeFallback_C_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjArenaC_slice_int_oe) {
+	_ = a
+	if !l.EnterObject() {
+		return
+	}
+	for {
+		key := l.ReadKey()
+		if l.Err() != nil {
+			return
+		}
+		name := zjFieldName_C_slice_int_oe(string(key))
+		if l.IsNull() {
+			switch name {
+			case "f":
+				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
+			if !l.NextMember() {
+				break
+			}
+			continue
+		}
+		switch name {
+		case "f":
+			if v.F != nil {
+				if raw := l.RawValue(); l.Err() == nil {
+					if err := json_.Unmarshal(raw, &v.F); err != nil {
+						l.AddError(err)
+					}
+				}
+			} else {
+				if v.F != nil {
+					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
+					a.c0 = v.F
+				} else if a.slicePublished0 || a.sliceBorrowed0 {
+					a.c0 = nil
+					a.sliceBorrowed0 = false
+				}
+				a.slicePublished0 = true
+				a.c0 = a.c0[:0]
+				if l.EnterArray() {
+					for {
+						if len(a.c0) == cap(a.c0) {
+							var zjZero int
+							a.c0 = append(a.c0, zjZero)
+						} else {
+							a.c0 = a.c0[:len(a.c0)+1]
+							var zjZero int
+							a.c0[len(a.c0)-1] = zjZero
+						}
+						idx := len(a.c0) - 1
+						if !l.IsNull() {
+							a.c0[idx] = int(l.ReadInt())
+						}
+						if l.Err() != nil {
+							break
+						}
+						if !l.NextElem() {
+							break
+						}
+					}
+				}
+				if a.c0 == nil {
+					a.c0 = []int{}
+				}
+				v.F = a.c0
+			}
 		default:
 			l.Skip()
 		}
@@ -7131,9 +7511,10 @@ func (v *C_slice_ptrstruct) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_slice_ptrstruct) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -7146,6 +7527,9 @@ func (v *C_slice_ptrstruct) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_slice_ptrstruct) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_ptrstruct{}
 	zjDecode_C_slice_ptrstruct(&l, v, a)
@@ -7159,6 +7543,16 @@ func (v *C_slice_ptrstruct) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_slice_ptrstruct) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_ptrstruct{}
 	zjDecode_C_slice_ptrstruct(l, v, a)
+}
+func zjFieldName_C_slice_ptrstruct(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_slice_ptrstruct tries the speculative ordered fast path first (see ordered.go),
@@ -7293,111 +7687,12 @@ func zjDecodeOrderedField_C_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstr
 	switch k {
 	case 0:
 		if v.F != nil {
-			a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
-			a.c0 = v.F
-		} else if a.slicePublished0 || a.sliceBorrowed0 {
-			a.c0 = nil
-			a.sliceBorrowed0 = false
-		}
-		a.slicePublished0 = true
-		a.c0 = a.c0[:0]
-		if l.EnterArray() {
-			for {
-				if len(a.c0) == cap(a.c0) {
-					a.c0 = append(a.c0, nil)
-				} else {
-					a.c0 = a.c0[:len(a.c0)+1]
-					a.c0[len(a.c0)-1] = nil
-				}
-				if !l.IsNull() {
-					e := new(Inner)
-					var ea zjArenaInner
-					zjDecode_Inner(l, e, &ea)
-					a.c0[len(a.c0)-1] = e
-				}
-				if l.Err() != nil {
-					break
-				}
-				if !l.NextElem() {
-					break
+			if raw := l.RawValue(); l.Err() == nil {
+				if err := json_.Unmarshal(raw, &v.F); err != nil {
+					l.AddError(err)
 				}
 			}
-		}
-		if a.c0 == nil {
-			a.c0 = []*Inner{}
-		}
-		v.F = a.c0
-	}
-	if l.Err() != nil {
-		l.AnnotateFieldString(zjFieldNamesC_slice_ptrstruct[k])
-		return false
-	}
-	return true
-}
-
-// zjFieldNamesC_slice_ptrstruct are C_slice_ptrstruct's JSON field names by declared index, for error paths.
-var zjFieldNamesC_slice_ptrstruct = [...]string{
-	"f",
-}
-
-// zjTryOrderedKeyC_slice_ptrstruct matches and consumes the literal `"name":` for declared
-// field index k at l's current position (compact JSON only — any
-// whitespace simply fails the comparison). Leaves the position
-// unchanged on mismatch.
-func zjTryOrderedKeyC_slice_ptrstruct(l *zerojson.Lexer, k int) bool {
-	data, pos := l.DataAndPos()
-	n := len(data)
-	switch k {
-	case 0:
-		if n-pos < 4 {
-			return false
-		}
-		if binary.LittleEndian.Uint32(data[pos+0:]) != 0x3a226622 {
-			return false
-		}
-		l.SetPos(pos + 4)
-		return true
-	}
-	return false
-}
-
-func zjIsDeclaredKeyC_slice_ptrstruct(name string) bool {
-	switch name {
-	case "f":
-		return true
-	}
-	return false
-}
-
-// zjDecodeFallback_C_slice_ptrstruct is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It handles arbitrary
-// field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallback_C_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a *zjArenaC_slice_ptrstruct) {
-	_ = a
-	if !l.EnterObject() {
-		return
-	}
-	for {
-		key := l.ReadKey()
-		if l.Err() != nil {
-			return
-		}
-		if l.IsNull() {
-			switch string(key) {
-			case "f":
-				v.F = nil
-			}
-			if l.Err() != nil {
-				l.AnnotateField(key)
-				return
-			}
-			if !l.NextMember() {
-				break
-			}
-			continue
-		}
-		switch string(key) {
-		case "f":
+		} else {
 			if v.F != nil {
 				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
@@ -7433,6 +7728,122 @@ func zjDecodeFallback_C_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct,
 				a.c0 = []*Inner{}
 			}
 			v.F = a.c0
+		}
+	}
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_slice_ptrstruct[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_slice_ptrstruct are C_slice_ptrstruct's JSON field names by declared index, for error paths.
+var zjFieldNamesC_slice_ptrstruct = [...]string{
+	"f",
+}
+
+// zjTryOrderedKeyC_slice_ptrstruct matches and consumes the literal `"name":` for declared
+// field index k at l's current position (compact JSON only — any
+// whitespace simply fails the comparison). Leaves the position
+// unchanged on mismatch.
+func zjTryOrderedKeyC_slice_ptrstruct(l *zerojson.Lexer, k int) bool {
+	data, pos := l.DataAndPos()
+	n := len(data)
+	switch k {
+	case 0:
+		if n-pos < 4 {
+			return false
+		}
+		if binary.LittleEndian.Uint32(data[pos+0:]) != 0x3a226622 {
+			return false
+		}
+		l.SetPos(pos + 4)
+		return true
+	}
+	return false
+}
+
+func zjIsDeclaredKeyC_slice_ptrstruct(name string) bool {
+	switch zjFieldName_C_slice_ptrstruct(name) {
+	case "f":
+		return true
+	}
+	return false
+}
+
+// zjDecodeFallback_C_slice_ptrstruct is the general keyed decoder: every member is read via
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
+func zjDecodeFallback_C_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a *zjArenaC_slice_ptrstruct) {
+	_ = a
+	if !l.EnterObject() {
+		return
+	}
+	for {
+		key := l.ReadKey()
+		if l.Err() != nil {
+			return
+		}
+		name := zjFieldName_C_slice_ptrstruct(string(key))
+		if l.IsNull() {
+			switch name {
+			case "f":
+				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
+			if !l.NextMember() {
+				break
+			}
+			continue
+		}
+		switch name {
+		case "f":
+			if v.F != nil {
+				if raw := l.RawValue(); l.Err() == nil {
+					if err := json_.Unmarshal(raw, &v.F); err != nil {
+						l.AddError(err)
+					}
+				}
+			} else {
+				if v.F != nil {
+					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
+					a.c0 = v.F
+				} else if a.slicePublished0 || a.sliceBorrowed0 {
+					a.c0 = nil
+					a.sliceBorrowed0 = false
+				}
+				a.slicePublished0 = true
+				a.c0 = a.c0[:0]
+				if l.EnterArray() {
+					for {
+						if len(a.c0) == cap(a.c0) {
+							a.c0 = append(a.c0, nil)
+						} else {
+							a.c0 = a.c0[:len(a.c0)+1]
+							a.c0[len(a.c0)-1] = nil
+						}
+						if !l.IsNull() {
+							e := new(Inner)
+							var ea zjArenaInner
+							zjDecode_Inner(l, e, &ea)
+							a.c0[len(a.c0)-1] = e
+						}
+						if l.Err() != nil {
+							break
+						}
+						if !l.NextElem() {
+							break
+						}
+					}
+				}
+				if a.c0 == nil {
+					a.c0 = []*Inner{}
+				}
+				v.F = a.c0
+			}
 		default:
 			l.Skip()
 		}
@@ -7497,9 +7908,10 @@ func (v *C_slice_ptrstruct_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_slice_ptrstruct_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -7512,6 +7924,9 @@ func (v *C_slice_ptrstruct_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_slice_ptrstruct_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_ptrstruct_oe{}
 	zjDecode_C_slice_ptrstruct_oe(&l, v, a)
@@ -7525,6 +7940,16 @@ func (v *C_slice_ptrstruct_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_slice_ptrstruct_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_ptrstruct_oe{}
 	zjDecode_C_slice_ptrstruct_oe(l, v, a)
+}
+func zjFieldName_C_slice_ptrstruct_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_slice_ptrstruct_oe tries the speculative ordered fast path first (see ordered.go),
@@ -7659,111 +8084,12 @@ func zjDecodeOrderedField_C_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptr
 	switch k {
 	case 0:
 		if v.F != nil {
-			a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
-			a.c0 = v.F
-		} else if a.slicePublished0 || a.sliceBorrowed0 {
-			a.c0 = nil
-			a.sliceBorrowed0 = false
-		}
-		a.slicePublished0 = true
-		a.c0 = a.c0[:0]
-		if l.EnterArray() {
-			for {
-				if len(a.c0) == cap(a.c0) {
-					a.c0 = append(a.c0, nil)
-				} else {
-					a.c0 = a.c0[:len(a.c0)+1]
-					a.c0[len(a.c0)-1] = nil
-				}
-				if !l.IsNull() {
-					e := new(Inner)
-					var ea zjArenaInner
-					zjDecode_Inner(l, e, &ea)
-					a.c0[len(a.c0)-1] = e
-				}
-				if l.Err() != nil {
-					break
-				}
-				if !l.NextElem() {
-					break
+			if raw := l.RawValue(); l.Err() == nil {
+				if err := json_.Unmarshal(raw, &v.F); err != nil {
+					l.AddError(err)
 				}
 			}
-		}
-		if a.c0 == nil {
-			a.c0 = []*Inner{}
-		}
-		v.F = a.c0
-	}
-	if l.Err() != nil {
-		l.AnnotateFieldString(zjFieldNamesC_slice_ptrstruct_oe[k])
-		return false
-	}
-	return true
-}
-
-// zjFieldNamesC_slice_ptrstruct_oe are C_slice_ptrstruct_oe's JSON field names by declared index, for error paths.
-var zjFieldNamesC_slice_ptrstruct_oe = [...]string{
-	"f",
-}
-
-// zjTryOrderedKeyC_slice_ptrstruct_oe matches and consumes the literal `"name":` for declared
-// field index k at l's current position (compact JSON only — any
-// whitespace simply fails the comparison). Leaves the position
-// unchanged on mismatch.
-func zjTryOrderedKeyC_slice_ptrstruct_oe(l *zerojson.Lexer, k int) bool {
-	data, pos := l.DataAndPos()
-	n := len(data)
-	switch k {
-	case 0:
-		if n-pos < 4 {
-			return false
-		}
-		if binary.LittleEndian.Uint32(data[pos+0:]) != 0x3a226622 {
-			return false
-		}
-		l.SetPos(pos + 4)
-		return true
-	}
-	return false
-}
-
-func zjIsDeclaredKeyC_slice_ptrstruct_oe(name string) bool {
-	switch name {
-	case "f":
-		return true
-	}
-	return false
-}
-
-// zjDecodeFallback_C_slice_ptrstruct_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It handles arbitrary
-// field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallback_C_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct_oe, a *zjArenaC_slice_ptrstruct_oe) {
-	_ = a
-	if !l.EnterObject() {
-		return
-	}
-	for {
-		key := l.ReadKey()
-		if l.Err() != nil {
-			return
-		}
-		if l.IsNull() {
-			switch string(key) {
-			case "f":
-				v.F = nil
-			}
-			if l.Err() != nil {
-				l.AnnotateField(key)
-				return
-			}
-			if !l.NextMember() {
-				break
-			}
-			continue
-		}
-		switch string(key) {
-		case "f":
+		} else {
 			if v.F != nil {
 				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
@@ -7799,6 +8125,122 @@ func zjDecodeFallback_C_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstru
 				a.c0 = []*Inner{}
 			}
 			v.F = a.c0
+		}
+	}
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_slice_ptrstruct_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_slice_ptrstruct_oe are C_slice_ptrstruct_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesC_slice_ptrstruct_oe = [...]string{
+	"f",
+}
+
+// zjTryOrderedKeyC_slice_ptrstruct_oe matches and consumes the literal `"name":` for declared
+// field index k at l's current position (compact JSON only — any
+// whitespace simply fails the comparison). Leaves the position
+// unchanged on mismatch.
+func zjTryOrderedKeyC_slice_ptrstruct_oe(l *zerojson.Lexer, k int) bool {
+	data, pos := l.DataAndPos()
+	n := len(data)
+	switch k {
+	case 0:
+		if n-pos < 4 {
+			return false
+		}
+		if binary.LittleEndian.Uint32(data[pos+0:]) != 0x3a226622 {
+			return false
+		}
+		l.SetPos(pos + 4)
+		return true
+	}
+	return false
+}
+
+func zjIsDeclaredKeyC_slice_ptrstruct_oe(name string) bool {
+	switch zjFieldName_C_slice_ptrstruct_oe(name) {
+	case "f":
+		return true
+	}
+	return false
+}
+
+// zjDecodeFallback_C_slice_ptrstruct_oe is the general keyed decoder: every member is read via
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
+func zjDecodeFallback_C_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct_oe, a *zjArenaC_slice_ptrstruct_oe) {
+	_ = a
+	if !l.EnterObject() {
+		return
+	}
+	for {
+		key := l.ReadKey()
+		if l.Err() != nil {
+			return
+		}
+		name := zjFieldName_C_slice_ptrstruct_oe(string(key))
+		if l.IsNull() {
+			switch name {
+			case "f":
+				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
+			if !l.NextMember() {
+				break
+			}
+			continue
+		}
+		switch name {
+		case "f":
+			if v.F != nil {
+				if raw := l.RawValue(); l.Err() == nil {
+					if err := json_.Unmarshal(raw, &v.F); err != nil {
+						l.AddError(err)
+					}
+				}
+			} else {
+				if v.F != nil {
+					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
+					a.c0 = v.F
+				} else if a.slicePublished0 || a.sliceBorrowed0 {
+					a.c0 = nil
+					a.sliceBorrowed0 = false
+				}
+				a.slicePublished0 = true
+				a.c0 = a.c0[:0]
+				if l.EnterArray() {
+					for {
+						if len(a.c0) == cap(a.c0) {
+							a.c0 = append(a.c0, nil)
+						} else {
+							a.c0 = a.c0[:len(a.c0)+1]
+							a.c0[len(a.c0)-1] = nil
+						}
+						if !l.IsNull() {
+							e := new(Inner)
+							var ea zjArenaInner
+							zjDecode_Inner(l, e, &ea)
+							a.c0[len(a.c0)-1] = e
+						}
+						if l.Err() != nil {
+							break
+						}
+						if !l.NextElem() {
+							break
+						}
+					}
+				}
+				if a.c0 == nil {
+					a.c0 = []*Inner{}
+				}
+				v.F = a.c0
+			}
 		default:
 			l.Skip()
 		}
@@ -7855,9 +8297,10 @@ func (v *C_slice_string) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_slice_string) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -7870,6 +8313,9 @@ func (v *C_slice_string) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_slice_string) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_string{}
 	zjDecode_C_slice_string(&l, v, a)
@@ -7883,6 +8329,16 @@ func (v *C_slice_string) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_slice_string) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_string{}
 	zjDecode_C_slice_string(l, v, a)
+}
+func zjFieldName_C_slice_string(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_slice_string tries the speculative ordered fast path first (see ordered.go),
@@ -8017,111 +8473,12 @@ func zjDecodeOrderedField_C_slice_string(l *zerojson.Lexer, v *C_slice_string, a
 	switch k {
 	case 0:
 		if v.F != nil {
-			a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
-			a.c0 = v.F
-		} else if a.slicePublished0 || a.sliceBorrowed0 {
-			a.c0 = nil
-			a.sliceBorrowed0 = false
-		}
-		a.slicePublished0 = true
-		a.c0 = a.c0[:0]
-		if l.EnterArray() {
-			for {
-				if len(a.c0) == cap(a.c0) {
-					var zjZero string
-					a.c0 = append(a.c0, zjZero)
-				} else {
-					a.c0 = a.c0[:len(a.c0)+1]
-					var zjZero string
-					a.c0[len(a.c0)-1] = zjZero
-				}
-				idx := len(a.c0) - 1
-				if !l.IsNull() {
-					a.c0[idx] = l.ReadString()
-				}
-				if l.Err() != nil {
-					break
-				}
-				if !l.NextElem() {
-					break
+			if raw := l.RawValue(); l.Err() == nil {
+				if err := json_.Unmarshal(raw, &v.F); err != nil {
+					l.AddError(err)
 				}
 			}
-		}
-		if a.c0 == nil {
-			a.c0 = []string{}
-		}
-		v.F = a.c0
-	}
-	if l.Err() != nil {
-		l.AnnotateFieldString(zjFieldNamesC_slice_string[k])
-		return false
-	}
-	return true
-}
-
-// zjFieldNamesC_slice_string are C_slice_string's JSON field names by declared index, for error paths.
-var zjFieldNamesC_slice_string = [...]string{
-	"f",
-}
-
-// zjTryOrderedKeyC_slice_string matches and consumes the literal `"name":` for declared
-// field index k at l's current position (compact JSON only — any
-// whitespace simply fails the comparison). Leaves the position
-// unchanged on mismatch.
-func zjTryOrderedKeyC_slice_string(l *zerojson.Lexer, k int) bool {
-	data, pos := l.DataAndPos()
-	n := len(data)
-	switch k {
-	case 0:
-		if n-pos < 4 {
-			return false
-		}
-		if binary.LittleEndian.Uint32(data[pos+0:]) != 0x3a226622 {
-			return false
-		}
-		l.SetPos(pos + 4)
-		return true
-	}
-	return false
-}
-
-func zjIsDeclaredKeyC_slice_string(name string) bool {
-	switch name {
-	case "f":
-		return true
-	}
-	return false
-}
-
-// zjDecodeFallback_C_slice_string is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It handles arbitrary
-// field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallback_C_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjArenaC_slice_string) {
-	_ = a
-	if !l.EnterObject() {
-		return
-	}
-	for {
-		key := l.ReadKey()
-		if l.Err() != nil {
-			return
-		}
-		if l.IsNull() {
-			switch string(key) {
-			case "f":
-				v.F = nil
-			}
-			if l.Err() != nil {
-				l.AnnotateField(key)
-				return
-			}
-			if !l.NextMember() {
-				break
-			}
-			continue
-		}
-		switch string(key) {
-		case "f":
+		} else {
 			if v.F != nil {
 				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
@@ -8157,6 +8514,122 @@ func zjDecodeFallback_C_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zj
 				a.c0 = []string{}
 			}
 			v.F = a.c0
+		}
+	}
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_slice_string[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_slice_string are C_slice_string's JSON field names by declared index, for error paths.
+var zjFieldNamesC_slice_string = [...]string{
+	"f",
+}
+
+// zjTryOrderedKeyC_slice_string matches and consumes the literal `"name":` for declared
+// field index k at l's current position (compact JSON only — any
+// whitespace simply fails the comparison). Leaves the position
+// unchanged on mismatch.
+func zjTryOrderedKeyC_slice_string(l *zerojson.Lexer, k int) bool {
+	data, pos := l.DataAndPos()
+	n := len(data)
+	switch k {
+	case 0:
+		if n-pos < 4 {
+			return false
+		}
+		if binary.LittleEndian.Uint32(data[pos+0:]) != 0x3a226622 {
+			return false
+		}
+		l.SetPos(pos + 4)
+		return true
+	}
+	return false
+}
+
+func zjIsDeclaredKeyC_slice_string(name string) bool {
+	switch zjFieldName_C_slice_string(name) {
+	case "f":
+		return true
+	}
+	return false
+}
+
+// zjDecodeFallback_C_slice_string is the general keyed decoder: every member is read via
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
+func zjDecodeFallback_C_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjArenaC_slice_string) {
+	_ = a
+	if !l.EnterObject() {
+		return
+	}
+	for {
+		key := l.ReadKey()
+		if l.Err() != nil {
+			return
+		}
+		name := zjFieldName_C_slice_string(string(key))
+		if l.IsNull() {
+			switch name {
+			case "f":
+				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
+			if !l.NextMember() {
+				break
+			}
+			continue
+		}
+		switch name {
+		case "f":
+			if v.F != nil {
+				if raw := l.RawValue(); l.Err() == nil {
+					if err := json_.Unmarshal(raw, &v.F); err != nil {
+						l.AddError(err)
+					}
+				}
+			} else {
+				if v.F != nil {
+					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
+					a.c0 = v.F
+				} else if a.slicePublished0 || a.sliceBorrowed0 {
+					a.c0 = nil
+					a.sliceBorrowed0 = false
+				}
+				a.slicePublished0 = true
+				a.c0 = a.c0[:0]
+				if l.EnterArray() {
+					for {
+						if len(a.c0) == cap(a.c0) {
+							var zjZero string
+							a.c0 = append(a.c0, zjZero)
+						} else {
+							a.c0 = a.c0[:len(a.c0)+1]
+							var zjZero string
+							a.c0[len(a.c0)-1] = zjZero
+						}
+						idx := len(a.c0) - 1
+						if !l.IsNull() {
+							a.c0[idx] = l.ReadString()
+						}
+						if l.Err() != nil {
+							break
+						}
+						if !l.NextElem() {
+							break
+						}
+					}
+				}
+				if a.c0 == nil {
+					a.c0 = []string{}
+				}
+				v.F = a.c0
+			}
 		default:
 			l.Skip()
 		}
@@ -8213,9 +8686,10 @@ func (v *C_slice_string_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_slice_string_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -8228,6 +8702,9 @@ func (v *C_slice_string_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_slice_string_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_string_oe{}
 	zjDecode_C_slice_string_oe(&l, v, a)
@@ -8241,6 +8718,16 @@ func (v *C_slice_string_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_slice_string_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_string_oe{}
 	zjDecode_C_slice_string_oe(l, v, a)
+}
+func zjFieldName_C_slice_string_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_slice_string_oe tries the speculative ordered fast path first (see ordered.go),
@@ -8375,111 +8862,12 @@ func zjDecodeOrderedField_C_slice_string_oe(l *zerojson.Lexer, v *C_slice_string
 	switch k {
 	case 0:
 		if v.F != nil {
-			a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
-			a.c0 = v.F
-		} else if a.slicePublished0 || a.sliceBorrowed0 {
-			a.c0 = nil
-			a.sliceBorrowed0 = false
-		}
-		a.slicePublished0 = true
-		a.c0 = a.c0[:0]
-		if l.EnterArray() {
-			for {
-				if len(a.c0) == cap(a.c0) {
-					var zjZero string
-					a.c0 = append(a.c0, zjZero)
-				} else {
-					a.c0 = a.c0[:len(a.c0)+1]
-					var zjZero string
-					a.c0[len(a.c0)-1] = zjZero
-				}
-				idx := len(a.c0) - 1
-				if !l.IsNull() {
-					a.c0[idx] = l.ReadString()
-				}
-				if l.Err() != nil {
-					break
-				}
-				if !l.NextElem() {
-					break
+			if raw := l.RawValue(); l.Err() == nil {
+				if err := json_.Unmarshal(raw, &v.F); err != nil {
+					l.AddError(err)
 				}
 			}
-		}
-		if a.c0 == nil {
-			a.c0 = []string{}
-		}
-		v.F = a.c0
-	}
-	if l.Err() != nil {
-		l.AnnotateFieldString(zjFieldNamesC_slice_string_oe[k])
-		return false
-	}
-	return true
-}
-
-// zjFieldNamesC_slice_string_oe are C_slice_string_oe's JSON field names by declared index, for error paths.
-var zjFieldNamesC_slice_string_oe = [...]string{
-	"f",
-}
-
-// zjTryOrderedKeyC_slice_string_oe matches and consumes the literal `"name":` for declared
-// field index k at l's current position (compact JSON only — any
-// whitespace simply fails the comparison). Leaves the position
-// unchanged on mismatch.
-func zjTryOrderedKeyC_slice_string_oe(l *zerojson.Lexer, k int) bool {
-	data, pos := l.DataAndPos()
-	n := len(data)
-	switch k {
-	case 0:
-		if n-pos < 4 {
-			return false
-		}
-		if binary.LittleEndian.Uint32(data[pos+0:]) != 0x3a226622 {
-			return false
-		}
-		l.SetPos(pos + 4)
-		return true
-	}
-	return false
-}
-
-func zjIsDeclaredKeyC_slice_string_oe(name string) bool {
-	switch name {
-	case "f":
-		return true
-	}
-	return false
-}
-
-// zjDecodeFallback_C_slice_string_oe is the general keyed decoder: every member is read via
-// ReadKey and dispatched by a string switch. It handles arbitrary
-// field order and is the fallback for structural ordered-path mismatches.
-func zjDecodeFallback_C_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a *zjArenaC_slice_string_oe) {
-	_ = a
-	if !l.EnterObject() {
-		return
-	}
-	for {
-		key := l.ReadKey()
-		if l.Err() != nil {
-			return
-		}
-		if l.IsNull() {
-			switch string(key) {
-			case "f":
-				v.F = nil
-			}
-			if l.Err() != nil {
-				l.AnnotateField(key)
-				return
-			}
-			if !l.NextMember() {
-				break
-			}
-			continue
-		}
-		switch string(key) {
-		case "f":
+		} else {
 			if v.F != nil {
 				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
@@ -8515,6 +8903,122 @@ func zjDecodeFallback_C_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe,
 				a.c0 = []string{}
 			}
 			v.F = a.c0
+		}
+	}
+	if l.Err() != nil {
+		l.AnnotateFieldString(zjFieldNamesC_slice_string_oe[k])
+		return false
+	}
+	return true
+}
+
+// zjFieldNamesC_slice_string_oe are C_slice_string_oe's JSON field names by declared index, for error paths.
+var zjFieldNamesC_slice_string_oe = [...]string{
+	"f",
+}
+
+// zjTryOrderedKeyC_slice_string_oe matches and consumes the literal `"name":` for declared
+// field index k at l's current position (compact JSON only — any
+// whitespace simply fails the comparison). Leaves the position
+// unchanged on mismatch.
+func zjTryOrderedKeyC_slice_string_oe(l *zerojson.Lexer, k int) bool {
+	data, pos := l.DataAndPos()
+	n := len(data)
+	switch k {
+	case 0:
+		if n-pos < 4 {
+			return false
+		}
+		if binary.LittleEndian.Uint32(data[pos+0:]) != 0x3a226622 {
+			return false
+		}
+		l.SetPos(pos + 4)
+		return true
+	}
+	return false
+}
+
+func zjIsDeclaredKeyC_slice_string_oe(name string) bool {
+	switch zjFieldName_C_slice_string_oe(name) {
+	case "f":
+		return true
+	}
+	return false
+}
+
+// zjDecodeFallback_C_slice_string_oe is the general keyed decoder: every member is read via
+// ReadKey and dispatched by a string switch. It handles arbitrary
+// field order and is the fallback for structural ordered-path mismatches.
+func zjDecodeFallback_C_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a *zjArenaC_slice_string_oe) {
+	_ = a
+	if !l.EnterObject() {
+		return
+	}
+	for {
+		key := l.ReadKey()
+		if l.Err() != nil {
+			return
+		}
+		name := zjFieldName_C_slice_string_oe(string(key))
+		if l.IsNull() {
+			switch name {
+			case "f":
+				v.F = nil
+			}
+			if l.Err() != nil {
+				l.AnnotateField(key)
+				return
+			}
+			if !l.NextMember() {
+				break
+			}
+			continue
+		}
+		switch name {
+		case "f":
+			if v.F != nil {
+				if raw := l.RawValue(); l.Err() == nil {
+					if err := json_.Unmarshal(raw, &v.F); err != nil {
+						l.AddError(err)
+					}
+				}
+			} else {
+				if v.F != nil {
+					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
+					a.c0 = v.F
+				} else if a.slicePublished0 || a.sliceBorrowed0 {
+					a.c0 = nil
+					a.sliceBorrowed0 = false
+				}
+				a.slicePublished0 = true
+				a.c0 = a.c0[:0]
+				if l.EnterArray() {
+					for {
+						if len(a.c0) == cap(a.c0) {
+							var zjZero string
+							a.c0 = append(a.c0, zjZero)
+						} else {
+							a.c0 = a.c0[:len(a.c0)+1]
+							var zjZero string
+							a.c0[len(a.c0)-1] = zjZero
+						}
+						idx := len(a.c0) - 1
+						if !l.IsNull() {
+							a.c0[idx] = l.ReadString()
+						}
+						if l.Err() != nil {
+							break
+						}
+						if !l.NextElem() {
+							break
+						}
+					}
+				}
+				if a.c0 == nil {
+					a.c0 = []string{}
+				}
+				v.F = a.c0
+			}
 		default:
 			l.Skip()
 		}
@@ -8575,9 +9079,10 @@ func (v *C_slice_struct) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_slice_struct) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -8590,6 +9095,9 @@ func (v *C_slice_struct) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_slice_struct) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_struct{}
 	zjDecode_C_slice_struct(&l, v, a)
@@ -8603,6 +9111,16 @@ func (v *C_slice_struct) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_slice_struct) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_struct{}
 	zjDecode_C_slice_struct(l, v, a)
+}
+func zjFieldName_C_slice_struct(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_slice_struct tries the speculative ordered fast path first (see ordered.go),
@@ -8737,38 +9255,46 @@ func zjDecodeOrderedField_C_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a
 	switch k {
 	case 0:
 		if v.F != nil {
-			a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
-			a.c0 = v.F
-		} else if a.slicePublished0 || a.sliceBorrowed0 {
-			a.c0 = nil
-			a.sliceBorrowed0 = false
-		}
-		a.slicePublished0 = true
-		a.c0 = a.c0[:0]
-		if l.EnterArray() {
-			for {
-				if len(a.c0) == cap(a.c0) {
-					a.c0 = append(a.c0, Inner{})
-				} else {
-					a.c0 = a.c0[:len(a.c0)+1]
-					a.c0[len(a.c0)-1] = Inner{}
-				}
-				if !l.IsNull() {
-					var ea zjArenaInner
-					zjDecode_Inner(l, &a.c0[len(a.c0)-1], &ea)
-				}
-				if l.Err() != nil {
-					break
-				}
-				if !l.NextElem() {
-					break
+			if raw := l.RawValue(); l.Err() == nil {
+				if err := json_.Unmarshal(raw, &v.F); err != nil {
+					l.AddError(err)
 				}
 			}
+		} else {
+			if v.F != nil {
+				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
+				a.c0 = v.F
+			} else if a.slicePublished0 || a.sliceBorrowed0 {
+				a.c0 = nil
+				a.sliceBorrowed0 = false
+			}
+			a.slicePublished0 = true
+			a.c0 = a.c0[:0]
+			if l.EnterArray() {
+				for {
+					if len(a.c0) == cap(a.c0) {
+						a.c0 = append(a.c0, Inner{})
+					} else {
+						a.c0 = a.c0[:len(a.c0)+1]
+						a.c0[len(a.c0)-1] = Inner{}
+					}
+					if !l.IsNull() {
+						var ea zjArenaInner
+						zjDecode_Inner(l, &a.c0[len(a.c0)-1], &ea)
+					}
+					if l.Err() != nil {
+						break
+					}
+					if !l.NextElem() {
+						break
+					}
+				}
+			}
+			if a.c0 == nil {
+				a.c0 = []Inner{}
+			}
+			v.F = a.c0
 		}
-		if a.c0 == nil {
-			a.c0 = []Inner{}
-		}
-		v.F = a.c0
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesC_slice_struct[k])
@@ -8804,7 +9330,7 @@ func zjTryOrderedKeyC_slice_struct(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_slice_struct(name string) bool {
-	switch name {
+	switch zjFieldName_C_slice_struct(name) {
 	case "f":
 		return true
 	}
@@ -8824,8 +9350,9 @@ func zjDecodeFallback_C_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zj
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_slice_struct(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -8838,41 +9365,49 @@ func zjDecodeFallback_C_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zj
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F != nil {
-				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
-				a.c0 = v.F
-			} else if a.slicePublished0 || a.sliceBorrowed0 {
-				a.c0 = nil
-				a.sliceBorrowed0 = false
-			}
-			a.slicePublished0 = true
-			a.c0 = a.c0[:0]
-			if l.EnterArray() {
-				for {
-					if len(a.c0) == cap(a.c0) {
-						a.c0 = append(a.c0, Inner{})
-					} else {
-						a.c0 = a.c0[:len(a.c0)+1]
-						a.c0[len(a.c0)-1] = Inner{}
-					}
-					if !l.IsNull() {
-						var ea zjArenaInner
-						zjDecode_Inner(l, &a.c0[len(a.c0)-1], &ea)
-					}
-					if l.Err() != nil {
-						break
-					}
-					if !l.NextElem() {
-						break
+				if raw := l.RawValue(); l.Err() == nil {
+					if err := json_.Unmarshal(raw, &v.F); err != nil {
+						l.AddError(err)
 					}
 				}
+			} else {
+				if v.F != nil {
+					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
+					a.c0 = v.F
+				} else if a.slicePublished0 || a.sliceBorrowed0 {
+					a.c0 = nil
+					a.sliceBorrowed0 = false
+				}
+				a.slicePublished0 = true
+				a.c0 = a.c0[:0]
+				if l.EnterArray() {
+					for {
+						if len(a.c0) == cap(a.c0) {
+							a.c0 = append(a.c0, Inner{})
+						} else {
+							a.c0 = a.c0[:len(a.c0)+1]
+							a.c0[len(a.c0)-1] = Inner{}
+						}
+						if !l.IsNull() {
+							var ea zjArenaInner
+							zjDecode_Inner(l, &a.c0[len(a.c0)-1], &ea)
+						}
+						if l.Err() != nil {
+							break
+						}
+						if !l.NextElem() {
+							break
+						}
+					}
+				}
+				if a.c0 == nil {
+					a.c0 = []Inner{}
+				}
+				v.F = a.c0
 			}
-			if a.c0 == nil {
-				a.c0 = []Inner{}
-			}
-			v.F = a.c0
 		default:
 			l.Skip()
 		}
@@ -8933,9 +9468,10 @@ func (v *C_slice_struct_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *C_slice_struct_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -8948,6 +9484,9 @@ func (v *C_slice_struct_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *C_slice_struct_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaC_slice_struct_oe{}
 	zjDecode_C_slice_struct_oe(&l, v, a)
@@ -8961,6 +9500,16 @@ func (v *C_slice_struct_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *C_slice_struct_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaC_slice_struct_oe{}
 	zjDecode_C_slice_struct_oe(l, v, a)
+}
+func zjFieldName_C_slice_struct_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_C_slice_struct_oe tries the speculative ordered fast path first (see ordered.go),
@@ -9095,38 +9644,46 @@ func zjDecodeOrderedField_C_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct
 	switch k {
 	case 0:
 		if v.F != nil {
-			a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
-			a.c0 = v.F
-		} else if a.slicePublished0 || a.sliceBorrowed0 {
-			a.c0 = nil
-			a.sliceBorrowed0 = false
-		}
-		a.slicePublished0 = true
-		a.c0 = a.c0[:0]
-		if l.EnterArray() {
-			for {
-				if len(a.c0) == cap(a.c0) {
-					a.c0 = append(a.c0, Inner{})
-				} else {
-					a.c0 = a.c0[:len(a.c0)+1]
-					a.c0[len(a.c0)-1] = Inner{}
-				}
-				if !l.IsNull() {
-					var ea zjArenaInner
-					zjDecode_Inner(l, &a.c0[len(a.c0)-1], &ea)
-				}
-				if l.Err() != nil {
-					break
-				}
-				if !l.NextElem() {
-					break
+			if raw := l.RawValue(); l.Err() == nil {
+				if err := json_.Unmarshal(raw, &v.F); err != nil {
+					l.AddError(err)
 				}
 			}
+		} else {
+			if v.F != nil {
+				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
+				a.c0 = v.F
+			} else if a.slicePublished0 || a.sliceBorrowed0 {
+				a.c0 = nil
+				a.sliceBorrowed0 = false
+			}
+			a.slicePublished0 = true
+			a.c0 = a.c0[:0]
+			if l.EnterArray() {
+				for {
+					if len(a.c0) == cap(a.c0) {
+						a.c0 = append(a.c0, Inner{})
+					} else {
+						a.c0 = a.c0[:len(a.c0)+1]
+						a.c0[len(a.c0)-1] = Inner{}
+					}
+					if !l.IsNull() {
+						var ea zjArenaInner
+						zjDecode_Inner(l, &a.c0[len(a.c0)-1], &ea)
+					}
+					if l.Err() != nil {
+						break
+					}
+					if !l.NextElem() {
+						break
+					}
+				}
+			}
+			if a.c0 == nil {
+				a.c0 = []Inner{}
+			}
+			v.F = a.c0
 		}
-		if a.c0 == nil {
-			a.c0 = []Inner{}
-		}
-		v.F = a.c0
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesC_slice_struct_oe[k])
@@ -9162,7 +9719,7 @@ func zjTryOrderedKeyC_slice_struct_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyC_slice_struct_oe(name string) bool {
-	switch name {
+	switch zjFieldName_C_slice_struct_oe(name) {
 	case "f":
 		return true
 	}
@@ -9182,8 +9739,9 @@ func zjDecodeFallback_C_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe,
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_C_slice_struct_oe(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -9196,41 +9754,49 @@ func zjDecodeFallback_C_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe,
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F != nil {
-				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
-				a.c0 = v.F
-			} else if a.slicePublished0 || a.sliceBorrowed0 {
-				a.c0 = nil
-				a.sliceBorrowed0 = false
-			}
-			a.slicePublished0 = true
-			a.c0 = a.c0[:0]
-			if l.EnterArray() {
-				for {
-					if len(a.c0) == cap(a.c0) {
-						a.c0 = append(a.c0, Inner{})
-					} else {
-						a.c0 = a.c0[:len(a.c0)+1]
-						a.c0[len(a.c0)-1] = Inner{}
-					}
-					if !l.IsNull() {
-						var ea zjArenaInner
-						zjDecode_Inner(l, &a.c0[len(a.c0)-1], &ea)
-					}
-					if l.Err() != nil {
-						break
-					}
-					if !l.NextElem() {
-						break
+				if raw := l.RawValue(); l.Err() == nil {
+					if err := json_.Unmarshal(raw, &v.F); err != nil {
+						l.AddError(err)
 					}
 				}
+			} else {
+				if v.F != nil {
+					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
+					a.c0 = v.F
+				} else if a.slicePublished0 || a.sliceBorrowed0 {
+					a.c0 = nil
+					a.sliceBorrowed0 = false
+				}
+				a.slicePublished0 = true
+				a.c0 = a.c0[:0]
+				if l.EnterArray() {
+					for {
+						if len(a.c0) == cap(a.c0) {
+							a.c0 = append(a.c0, Inner{})
+						} else {
+							a.c0 = a.c0[:len(a.c0)+1]
+							a.c0[len(a.c0)-1] = Inner{}
+						}
+						if !l.IsNull() {
+							var ea zjArenaInner
+							zjDecode_Inner(l, &a.c0[len(a.c0)-1], &ea)
+						}
+						if l.Err() != nil {
+							break
+						}
+						if !l.NextElem() {
+							break
+						}
+					}
+				}
+				if a.c0 == nil {
+					a.c0 = []Inner{}
+				}
+				v.F = a.c0
 			}
-			if a.c0 == nil {
-				a.c0 = []Inner{}
-			}
-			v.F = a.c0
 		default:
 			l.Skip()
 		}
@@ -9286,9 +9852,10 @@ func (v *E_embed_first) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *E_embed_first) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -9301,6 +9868,9 @@ func (v *E_embed_first) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *E_embed_first) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaE_embed_first{}
 	zjDecode_E_embed_first(&l, v, a)
@@ -9314,6 +9884,26 @@ func (v *E_embed_first) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *E_embed_first) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaE_embed_first{}
 	zjDecode_E_embed_first(l, v, a)
+}
+func zjFieldName_E_embed_first(name string) string {
+	switch name {
+	case "created_by":
+		return name
+	case "version":
+		return name
+	case "last":
+		return name
+	}
+	if strings_.EqualFold(name, "created_by") {
+		return "created_by"
+	}
+	if strings_.EqualFold(name, "version") {
+		return "version"
+	}
+	if strings_.EqualFold(name, "last") {
+		return "last"
+	}
+	return name
 }
 
 // zjDecode_E_embed_first tries the speculative ordered fast path first (see ordered.go),
@@ -9503,7 +10093,7 @@ func zjTryOrderedKeyE_embed_first(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyE_embed_first(name string) bool {
-	switch name {
+	switch zjFieldName_E_embed_first(name) {
 	case "created_by", "version", "last":
 		return true
 	}
@@ -9523,6 +10113,7 @@ func zjDecodeFallback_E_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjAr
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_E_embed_first(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -9533,7 +10124,7 @@ func zjDecodeFallback_E_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjAr
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "created_by":
 			v.Audit.CreatedBy = l.ReadString()
 		case "version":
@@ -9595,9 +10186,10 @@ func (v *E_embed_last) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *E_embed_last) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -9610,6 +10202,9 @@ func (v *E_embed_last) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *E_embed_last) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaE_embed_last{}
 	zjDecode_E_embed_last(&l, v, a)
@@ -9623,6 +10218,26 @@ func (v *E_embed_last) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *E_embed_last) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaE_embed_last{}
 	zjDecode_E_embed_last(l, v, a)
+}
+func zjFieldName_E_embed_last(name string) string {
+	switch name {
+	case "first":
+		return name
+	case "created_by":
+		return name
+	case "version":
+		return name
+	}
+	if strings_.EqualFold(name, "first") {
+		return "first"
+	}
+	if strings_.EqualFold(name, "created_by") {
+		return "created_by"
+	}
+	if strings_.EqualFold(name, "version") {
+		return "version"
+	}
+	return name
 }
 
 // zjDecode_E_embed_last tries the speculative ordered fast path first (see ordered.go),
@@ -9812,7 +10427,7 @@ func zjTryOrderedKeyE_embed_last(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyE_embed_last(name string) bool {
-	switch name {
+	switch zjFieldName_E_embed_last(name) {
 	case "first", "created_by", "version":
 		return true
 	}
@@ -9832,6 +10447,7 @@ func zjDecodeFallback_E_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjAren
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_E_embed_last(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -9842,7 +10458,7 @@ func zjDecodeFallback_E_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjAren
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "first":
 			v.First = l.ReadString()
 		case "created_by":
@@ -9897,9 +10513,10 @@ func (v *E_embed_unexported) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *E_embed_unexported) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -9912,6 +10529,9 @@ func (v *E_embed_unexported) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *E_embed_unexported) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaE_embed_unexported{}
 	zjDecode_E_embed_unexported(&l, v, a)
@@ -9925,6 +10545,21 @@ func (v *E_embed_unexported) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *E_embed_unexported) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaE_embed_unexported{}
 	zjDecode_E_embed_unexported(l, v, a)
+}
+func zjFieldName_E_embed_unexported(name string) string {
+	switch name {
+	case "visible":
+		return name
+	case "own":
+		return name
+	}
+	if strings_.EqualFold(name, "visible") {
+		return "visible"
+	}
+	if strings_.EqualFold(name, "own") {
+		return "own"
+	}
+	return name
 }
 
 // zjDecode_E_embed_unexported tries the speculative ordered fast path first (see ordered.go),
@@ -10102,7 +10737,7 @@ func zjTryOrderedKeyE_embed_unexported(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyE_embed_unexported(name string) bool {
-	switch name {
+	switch zjFieldName_E_embed_unexported(name) {
 	case "visible", "own":
 		return true
 	}
@@ -10122,6 +10757,7 @@ func zjDecodeFallback_E_embed_unexported(l *zerojson.Lexer, v *E_embed_unexporte
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_E_embed_unexported(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -10132,7 +10768,7 @@ func zjDecodeFallback_E_embed_unexported(l *zerojson.Lexer, v *E_embed_unexporte
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "visible":
 			v.hidden.Visible = int(l.ReadInt())
 		case "own":
@@ -10182,9 +10818,10 @@ func (v *L_appender) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_appender) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -10197,6 +10834,9 @@ func (v *L_appender) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_appender) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_appender{}
 	zjDecode_L_appender(&l, v, a)
@@ -10210,6 +10850,16 @@ func (v *L_appender) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_appender) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_appender{}
 	zjDecode_L_appender(l, v, a)
+}
+func zjFieldName_L_appender(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_appender tries the speculative ordered fast path first (see ordered.go),
@@ -10237,8 +10887,9 @@ func zjDecodeFallback_L_appender(l *zerojson.Lexer, v *L_appender, a *zjArenaL_a
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_appender(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				if err := v.F.UnmarshalJSON(l.NullBytes()); err != nil {
 					l.AddError(err)
@@ -10253,7 +10904,7 @@ func zjDecodeFallback_L_appender(l *zerojson.Lexer, v *L_appender, a *zjArenaL_a
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			(&v.F).ReadZJSON(l)
 		default:
@@ -10301,9 +10952,10 @@ func (v *L_appender_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_appender_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -10316,6 +10968,9 @@ func (v *L_appender_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_appender_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_appender_oe{}
 	zjDecode_L_appender_oe(&l, v, a)
@@ -10329,6 +10984,16 @@ func (v *L_appender_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_appender_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_appender_oe{}
 	zjDecode_L_appender_oe(l, v, a)
+}
+func zjFieldName_L_appender_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_appender_oe tries the speculative ordered fast path first (see ordered.go),
@@ -10356,8 +11021,9 @@ func zjDecodeFallback_L_appender_oe(l *zerojson.Lexer, v *L_appender_oe, a *zjAr
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_appender_oe(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				if err := v.F.UnmarshalJSON(l.NullBytes()); err != nil {
 					l.AddError(err)
@@ -10372,7 +11038,7 @@ func zjDecodeFallback_L_appender_oe(l *zerojson.Lexer, v *L_appender_oe, a *zjAr
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			(&v.F).ReadZJSON(l)
 		default:
@@ -10427,9 +11093,10 @@ func (v *L_appender_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_appender_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -10442,6 +11109,9 @@ func (v *L_appender_ptr) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_appender_ptr) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_appender_ptr{}
 	zjDecode_L_appender_ptr(&l, v, a)
@@ -10455,6 +11125,16 @@ func (v *L_appender_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_appender_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_appender_ptr{}
 	zjDecode_L_appender_ptr(l, v, a)
+}
+func zjFieldName_L_appender_ptr(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_appender_ptr tries the speculative ordered fast path first (see ordered.go),
@@ -10482,8 +11162,9 @@ func zjDecodeFallback_L_appender_ptr(l *zerojson.Lexer, v *L_appender_ptr, a *zj
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_appender_ptr(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -10496,7 +11177,7 @@ func zjDecodeFallback_L_appender_ptr(l *zerojson.Lexer, v *L_appender_ptr, a *zj
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F == nil {
 				if a.published0 {
@@ -10550,9 +11231,10 @@ func (v *L_bool) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_bool) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -10565,6 +11247,9 @@ func (v *L_bool) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_bool) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_bool{}
 	zjDecode_L_bool(&l, v, a)
@@ -10578,6 +11263,16 @@ func (v *L_bool) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_bool) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_bool{}
 	zjDecode_L_bool(l, v, a)
+}
+func zjFieldName_L_bool(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_bool tries the speculative ordered fast path first (see ordered.go),
@@ -10743,7 +11438,7 @@ func zjTryOrderedKeyL_bool(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_bool(name string) bool {
-	switch name {
+	switch zjFieldName_L_bool(name) {
 	case "f":
 		return true
 	}
@@ -10763,6 +11458,7 @@ func zjDecodeFallback_L_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) {
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_bool(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -10773,7 +11469,7 @@ func zjDecodeFallback_L_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) {
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = bool(l.ReadBool())
 		default:
@@ -10817,9 +11513,10 @@ func (v *L_bool_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_bool_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -10832,6 +11529,9 @@ func (v *L_bool_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_bool_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_bool_oe{}
 	zjDecode_L_bool_oe(&l, v, a)
@@ -10845,6 +11545,16 @@ func (v *L_bool_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_bool_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_bool_oe{}
 	zjDecode_L_bool_oe(l, v, a)
+}
+func zjFieldName_L_bool_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_bool_oe tries the speculative ordered fast path first (see ordered.go),
@@ -11010,7 +11720,7 @@ func zjTryOrderedKeyL_bool_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_bool_oe(name string) bool {
-	switch name {
+	switch zjFieldName_L_bool_oe(name) {
 	case "f":
 		return true
 	}
@@ -11030,6 +11740,7 @@ func zjDecodeFallback_L_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_boo
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_bool_oe(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -11040,7 +11751,7 @@ func zjDecodeFallback_L_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_boo
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = bool(l.ReadBool())
 		default:
@@ -11091,9 +11802,10 @@ func (v *L_bool_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_bool_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -11106,6 +11818,9 @@ func (v *L_bool_ptr) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_bool_ptr) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_bool_ptr{}
 	zjDecode_L_bool_ptr(&l, v, a)
@@ -11119,6 +11834,16 @@ func (v *L_bool_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_bool_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_bool_ptr{}
 	zjDecode_L_bool_ptr(l, v, a)
+}
+func zjFieldName_L_bool_ptr(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_bool_ptr tries the speculative ordered fast path first (see ordered.go),
@@ -11302,7 +12027,7 @@ func zjTryOrderedKeyL_bool_ptr(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_bool_ptr(name string) bool {
-	switch name {
+	switch zjFieldName_L_bool_ptr(name) {
 	case "f":
 		return true
 	}
@@ -11322,8 +12047,9 @@ func zjDecodeFallback_L_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_b
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_bool_ptr(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -11336,7 +12062,7 @@ func zjDecodeFallback_L_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_b
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F == nil {
 				if a.published0 {
@@ -11390,9 +12116,10 @@ func (v *L_decimal) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_decimal) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -11405,6 +12132,9 @@ func (v *L_decimal) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_decimal) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_decimal{}
 	zjDecode_L_decimal(&l, v, a)
@@ -11418,6 +12148,16 @@ func (v *L_decimal) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_decimal) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_decimal{}
 	zjDecode_L_decimal(l, v, a)
+}
+func zjFieldName_L_decimal(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_decimal tries the speculative ordered fast path first (see ordered.go),
@@ -11583,7 +12323,7 @@ func zjTryOrderedKeyL_decimal(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_decimal(name string) bool {
-	switch name {
+	switch zjFieldName_L_decimal(name) {
 	case "f":
 		return true
 	}
@@ -11603,6 +12343,7 @@ func zjDecodeFallback_L_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_dec
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_decimal(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -11613,7 +12354,7 @@ func zjDecodeFallback_L_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_dec
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			testleaf.Read(l, &v.F)
 		default:
@@ -11657,9 +12398,10 @@ func (v *L_decimal_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_decimal_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -11672,6 +12414,9 @@ func (v *L_decimal_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_decimal_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_decimal_oe{}
 	zjDecode_L_decimal_oe(&l, v, a)
@@ -11685,6 +12430,16 @@ func (v *L_decimal_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_decimal_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_decimal_oe{}
 	zjDecode_L_decimal_oe(l, v, a)
+}
+func zjFieldName_L_decimal_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_decimal_oe tries the speculative ordered fast path first (see ordered.go),
@@ -11850,7 +12605,7 @@ func zjTryOrderedKeyL_decimal_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_decimal_oe(name string) bool {
-	switch name {
+	switch zjFieldName_L_decimal_oe(name) {
 	case "f":
 		return true
 	}
@@ -11870,6 +12625,7 @@ func zjDecodeFallback_L_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjAren
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_decimal_oe(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -11880,7 +12636,7 @@ func zjDecodeFallback_L_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjAren
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			testleaf.Read(l, &v.F)
 		default:
@@ -11931,9 +12687,10 @@ func (v *L_decimal_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_decimal_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -11946,6 +12703,9 @@ func (v *L_decimal_ptr) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_decimal_ptr) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_decimal_ptr{}
 	zjDecode_L_decimal_ptr(&l, v, a)
@@ -11959,6 +12719,16 @@ func (v *L_decimal_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_decimal_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_decimal_ptr{}
 	zjDecode_L_decimal_ptr(l, v, a)
+}
+func zjFieldName_L_decimal_ptr(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_decimal_ptr tries the speculative ordered fast path first (see ordered.go),
@@ -12142,7 +12912,7 @@ func zjTryOrderedKeyL_decimal_ptr(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_decimal_ptr(name string) bool {
-	switch name {
+	switch zjFieldName_L_decimal_ptr(name) {
 	case "f":
 		return true
 	}
@@ -12162,8 +12932,9 @@ func zjDecodeFallback_L_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjAr
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_decimal_ptr(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -12176,7 +12947,7 @@ func zjDecodeFallback_L_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjAr
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F == nil {
 				if a.published0 {
@@ -12230,9 +13001,10 @@ func (v *L_enum) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_enum) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -12245,6 +13017,9 @@ func (v *L_enum) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_enum) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_enum{}
 	zjDecode_L_enum(&l, v, a)
@@ -12258,6 +13033,16 @@ func (v *L_enum) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_enum) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_enum{}
 	zjDecode_L_enum(l, v, a)
+}
+func zjFieldName_L_enum(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_enum tries the speculative ordered fast path first (see ordered.go),
@@ -12428,7 +13213,7 @@ func zjTryOrderedKeyL_enum(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_enum(name string) bool {
-	switch name {
+	switch zjFieldName_L_enum(name) {
 	case "f":
 		return true
 	}
@@ -12448,6 +13233,7 @@ func zjDecodeFallback_L_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) {
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_enum(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -12458,7 +13244,7 @@ func zjDecodeFallback_L_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) {
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			switch b := l.ReadEnumBytes(); string(b) {
 			case "up":
@@ -12507,9 +13293,10 @@ func (v *L_enum_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_enum_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -12522,6 +13309,9 @@ func (v *L_enum_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_enum_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_enum_oe{}
 	zjDecode_L_enum_oe(&l, v, a)
@@ -12535,6 +13325,16 @@ func (v *L_enum_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_enum_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_enum_oe{}
 	zjDecode_L_enum_oe(l, v, a)
+}
+func zjFieldName_L_enum_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_enum_oe tries the speculative ordered fast path first (see ordered.go),
@@ -12705,7 +13505,7 @@ func zjTryOrderedKeyL_enum_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_enum_oe(name string) bool {
-	switch name {
+	switch zjFieldName_L_enum_oe(name) {
 	case "f":
 		return true
 	}
@@ -12725,6 +13525,7 @@ func zjDecodeFallback_L_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enu
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_enum_oe(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -12735,7 +13536,7 @@ func zjDecodeFallback_L_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enu
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			switch b := l.ReadEnumBytes(); string(b) {
 			case "up":
@@ -12791,9 +13592,10 @@ func (v *L_enum_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_enum_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -12806,6 +13608,9 @@ func (v *L_enum_ptr) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_enum_ptr) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_enum_ptr{}
 	zjDecode_L_enum_ptr(&l, v, a)
@@ -12819,6 +13624,16 @@ func (v *L_enum_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_enum_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_enum_ptr{}
 	zjDecode_L_enum_ptr(l, v, a)
+}
+func zjFieldName_L_enum_ptr(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_enum_ptr tries the speculative ordered fast path first (see ordered.go),
@@ -13007,7 +13822,7 @@ func zjTryOrderedKeyL_enum_ptr(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_enum_ptr(name string) bool {
-	switch name {
+	switch zjFieldName_L_enum_ptr(name) {
 	case "f":
 		return true
 	}
@@ -13027,8 +13842,9 @@ func zjDecodeFallback_L_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_e
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_enum_ptr(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -13041,7 +13857,7 @@ func zjDecodeFallback_L_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_e
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F == nil {
 				if a.published0 {
@@ -13104,9 +13920,10 @@ func (v *L_float32) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_float32) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -13119,6 +13936,9 @@ func (v *L_float32) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_float32) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_float32{}
 	zjDecode_L_float32(&l, v, a)
@@ -13132,6 +13952,16 @@ func (v *L_float32) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_float32) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_float32{}
 	zjDecode_L_float32(l, v, a)
+}
+func zjFieldName_L_float32(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_float32 tries the speculative ordered fast path first (see ordered.go),
@@ -13297,7 +14127,7 @@ func zjTryOrderedKeyL_float32(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_float32(name string) bool {
-	switch name {
+	switch zjFieldName_L_float32(name) {
 	case "f":
 		return true
 	}
@@ -13317,6 +14147,7 @@ func zjDecodeFallback_L_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_flo
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_float32(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -13327,7 +14158,7 @@ func zjDecodeFallback_L_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_flo
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = float32(l.ReadFloat32())
 		default:
@@ -13375,9 +14206,10 @@ func (v *L_float32_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_float32_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -13390,6 +14222,9 @@ func (v *L_float32_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_float32_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_float32_oe{}
 	zjDecode_L_float32_oe(&l, v, a)
@@ -13403,6 +14238,16 @@ func (v *L_float32_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_float32_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_float32_oe{}
 	zjDecode_L_float32_oe(l, v, a)
+}
+func zjFieldName_L_float32_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_float32_oe tries the speculative ordered fast path first (see ordered.go),
@@ -13568,7 +14413,7 @@ func zjTryOrderedKeyL_float32_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_float32_oe(name string) bool {
-	switch name {
+	switch zjFieldName_L_float32_oe(name) {
 	case "f":
 		return true
 	}
@@ -13588,6 +14433,7 @@ func zjDecodeFallback_L_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjAren
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_float32_oe(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -13598,7 +14444,7 @@ func zjDecodeFallback_L_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjAren
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = float32(l.ReadFloat32())
 		default:
@@ -13653,9 +14499,10 @@ func (v *L_float32_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_float32_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -13668,6 +14515,9 @@ func (v *L_float32_ptr) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_float32_ptr) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_float32_ptr{}
 	zjDecode_L_float32_ptr(&l, v, a)
@@ -13681,6 +14531,16 @@ func (v *L_float32_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_float32_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_float32_ptr{}
 	zjDecode_L_float32_ptr(l, v, a)
+}
+func zjFieldName_L_float32_ptr(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_float32_ptr tries the speculative ordered fast path first (see ordered.go),
@@ -13864,7 +14724,7 @@ func zjTryOrderedKeyL_float32_ptr(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_float32_ptr(name string) bool {
-	switch name {
+	switch zjFieldName_L_float32_ptr(name) {
 	case "f":
 		return true
 	}
@@ -13884,8 +14744,9 @@ func zjDecodeFallback_L_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjAr
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_float32_ptr(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -13898,7 +14759,7 @@ func zjDecodeFallback_L_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjAr
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F == nil {
 				if a.published0 {
@@ -13956,9 +14817,10 @@ func (v *L_float64) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_float64) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -13971,6 +14833,9 @@ func (v *L_float64) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_float64) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_float64{}
 	zjDecode_L_float64(&l, v, a)
@@ -13984,6 +14849,16 @@ func (v *L_float64) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_float64) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_float64{}
 	zjDecode_L_float64(l, v, a)
+}
+func zjFieldName_L_float64(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_float64 tries the speculative ordered fast path first (see ordered.go),
@@ -14149,7 +15024,7 @@ func zjTryOrderedKeyL_float64(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_float64(name string) bool {
-	switch name {
+	switch zjFieldName_L_float64(name) {
 	case "f":
 		return true
 	}
@@ -14169,6 +15044,7 @@ func zjDecodeFallback_L_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_flo
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_float64(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -14179,7 +15055,7 @@ func zjDecodeFallback_L_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_flo
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = float64(l.ReadFloat64())
 		default:
@@ -14227,9 +15103,10 @@ func (v *L_float64_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_float64_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -14242,6 +15119,9 @@ func (v *L_float64_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_float64_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_float64_oe{}
 	zjDecode_L_float64_oe(&l, v, a)
@@ -14255,6 +15135,16 @@ func (v *L_float64_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_float64_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_float64_oe{}
 	zjDecode_L_float64_oe(l, v, a)
+}
+func zjFieldName_L_float64_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_float64_oe tries the speculative ordered fast path first (see ordered.go),
@@ -14420,7 +15310,7 @@ func zjTryOrderedKeyL_float64_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_float64_oe(name string) bool {
-	switch name {
+	switch zjFieldName_L_float64_oe(name) {
 	case "f":
 		return true
 	}
@@ -14440,6 +15330,7 @@ func zjDecodeFallback_L_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjAren
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_float64_oe(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -14450,7 +15341,7 @@ func zjDecodeFallback_L_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjAren
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = float64(l.ReadFloat64())
 		default:
@@ -14505,9 +15396,10 @@ func (v *L_float64_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_float64_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -14520,6 +15412,9 @@ func (v *L_float64_ptr) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_float64_ptr) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_float64_ptr{}
 	zjDecode_L_float64_ptr(&l, v, a)
@@ -14533,6 +15428,16 @@ func (v *L_float64_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_float64_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_float64_ptr{}
 	zjDecode_L_float64_ptr(l, v, a)
+}
+func zjFieldName_L_float64_ptr(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_float64_ptr tries the speculative ordered fast path first (see ordered.go),
@@ -14716,7 +15621,7 @@ func zjTryOrderedKeyL_float64_ptr(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_float64_ptr(name string) bool {
-	switch name {
+	switch zjFieldName_L_float64_ptr(name) {
 	case "f":
 		return true
 	}
@@ -14736,8 +15641,9 @@ func zjDecodeFallback_L_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjAr
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_float64_ptr(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -14750,7 +15656,7 @@ func zjDecodeFallback_L_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjAr
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F == nil {
 				if a.published0 {
@@ -14804,9 +15710,10 @@ func (v *L_int) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_int) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -14819,6 +15726,9 @@ func (v *L_int) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_int) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_int{}
 	zjDecode_L_int(&l, v, a)
@@ -14832,6 +15742,16 @@ func (v *L_int) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_int) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_int{}
 	zjDecode_L_int(l, v, a)
+}
+func zjFieldName_L_int(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_int tries the speculative ordered fast path first (see ordered.go),
@@ -14997,7 +15917,7 @@ func zjTryOrderedKeyL_int(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_int(name string) bool {
-	switch name {
+	switch zjFieldName_L_int(name) {
 	case "f":
 		return true
 	}
@@ -15017,6 +15937,7 @@ func zjDecodeFallback_L_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) {
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_int(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -15027,7 +15948,7 @@ func zjDecodeFallback_L_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) {
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = int(l.ReadInt())
 		default:
@@ -15071,9 +15992,10 @@ func (v *L_int32) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_int32) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -15086,6 +16008,9 @@ func (v *L_int32) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_int32) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_int32{}
 	zjDecode_L_int32(&l, v, a)
@@ -15099,6 +16024,16 @@ func (v *L_int32) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_int32) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_int32{}
 	zjDecode_L_int32(l, v, a)
+}
+func zjFieldName_L_int32(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_int32 tries the speculative ordered fast path first (see ordered.go),
@@ -15264,7 +16199,7 @@ func zjTryOrderedKeyL_int32(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_int32(name string) bool {
-	switch name {
+	switch zjFieldName_L_int32(name) {
 	case "f":
 		return true
 	}
@@ -15284,6 +16219,7 @@ func zjDecodeFallback_L_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) 
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_int32(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -15294,7 +16230,7 @@ func zjDecodeFallback_L_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) 
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = int32(l.ReadInt32())
 		default:
@@ -15338,9 +16274,10 @@ func (v *L_int32_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_int32_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -15353,6 +16290,9 @@ func (v *L_int32_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_int32_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_int32_oe{}
 	zjDecode_L_int32_oe(&l, v, a)
@@ -15366,6 +16306,16 @@ func (v *L_int32_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_int32_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_int32_oe{}
 	zjDecode_L_int32_oe(l, v, a)
+}
+func zjFieldName_L_int32_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_int32_oe tries the speculative ordered fast path first (see ordered.go),
@@ -15531,7 +16481,7 @@ func zjTryOrderedKeyL_int32_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_int32_oe(name string) bool {
-	switch name {
+	switch zjFieldName_L_int32_oe(name) {
 	case "f":
 		return true
 	}
@@ -15551,6 +16501,7 @@ func zjDecodeFallback_L_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_i
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_int32_oe(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -15561,7 +16512,7 @@ func zjDecodeFallback_L_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_i
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = int32(l.ReadInt32())
 		default:
@@ -15612,9 +16563,10 @@ func (v *L_int32_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_int32_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -15627,6 +16579,9 @@ func (v *L_int32_ptr) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_int32_ptr) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_int32_ptr{}
 	zjDecode_L_int32_ptr(&l, v, a)
@@ -15640,6 +16595,16 @@ func (v *L_int32_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_int32_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_int32_ptr{}
 	zjDecode_L_int32_ptr(l, v, a)
+}
+func zjFieldName_L_int32_ptr(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_int32_ptr tries the speculative ordered fast path first (see ordered.go),
@@ -15823,7 +16788,7 @@ func zjTryOrderedKeyL_int32_ptr(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_int32_ptr(name string) bool {
-	switch name {
+	switch zjFieldName_L_int32_ptr(name) {
 	case "f":
 		return true
 	}
@@ -15843,8 +16808,9 @@ func zjDecodeFallback_L_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_int32_ptr(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -15857,7 +16823,7 @@ func zjDecodeFallback_L_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F == nil {
 				if a.published0 {
@@ -15911,9 +16877,10 @@ func (v *L_int_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_int_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -15926,6 +16893,9 @@ func (v *L_int_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_int_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_int_oe{}
 	zjDecode_L_int_oe(&l, v, a)
@@ -15939,6 +16909,16 @@ func (v *L_int_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_int_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_int_oe{}
 	zjDecode_L_int_oe(l, v, a)
+}
+func zjFieldName_L_int_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_int_oe tries the speculative ordered fast path first (see ordered.go),
@@ -16104,7 +17084,7 @@ func zjTryOrderedKeyL_int_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_int_oe(name string) bool {
-	switch name {
+	switch zjFieldName_L_int_oe(name) {
 	case "f":
 		return true
 	}
@@ -16124,6 +17104,7 @@ func zjDecodeFallback_L_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_o
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_int_oe(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -16134,7 +17115,7 @@ func zjDecodeFallback_L_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_o
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = int(l.ReadInt())
 		default:
@@ -16185,9 +17166,10 @@ func (v *L_int_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_int_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -16200,6 +17182,9 @@ func (v *L_int_ptr) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_int_ptr) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_int_ptr{}
 	zjDecode_L_int_ptr(&l, v, a)
@@ -16213,6 +17198,16 @@ func (v *L_int_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_int_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_int_ptr{}
 	zjDecode_L_int_ptr(l, v, a)
+}
+func zjFieldName_L_int_ptr(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_int_ptr tries the speculative ordered fast path first (see ordered.go),
@@ -16396,7 +17391,7 @@ func zjTryOrderedKeyL_int_ptr(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_int_ptr(name string) bool {
-	switch name {
+	switch zjFieldName_L_int_ptr(name) {
 	case "f":
 		return true
 	}
@@ -16416,8 +17411,9 @@ func zjDecodeFallback_L_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_int_ptr(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -16430,7 +17426,7 @@ func zjDecodeFallback_L_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F == nil {
 				if a.published0 {
@@ -16491,9 +17487,10 @@ func (v *L_marshaler) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_marshaler) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -16506,6 +17503,9 @@ func (v *L_marshaler) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_marshaler) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_marshaler{}
 	zjDecode_L_marshaler(&l, v, a)
@@ -16519,6 +17519,16 @@ func (v *L_marshaler) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_marshaler) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_marshaler{}
 	zjDecode_L_marshaler(l, v, a)
+}
+func zjFieldName_L_marshaler(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_marshaler tries the speculative ordered fast path first (see ordered.go),
@@ -16546,8 +17556,9 @@ func zjDecodeFallback_L_marshaler(l *zerojson.Lexer, v *L_marshaler, a *zjArenaL
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_marshaler(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				if err := v.F.UnmarshalJSON(l.NullBytes()); err != nil {
 					l.AddError(err)
@@ -16562,7 +17573,7 @@ func zjDecodeFallback_L_marshaler(l *zerojson.Lexer, v *L_marshaler, a *zjArenaL
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if raw := l.RawValue(); l.Err() == nil {
 				if err := v.F.UnmarshalJSON(raw); err != nil {
@@ -16617,9 +17628,10 @@ func (v *L_marshaler_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_marshaler_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -16632,6 +17644,9 @@ func (v *L_marshaler_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_marshaler_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_marshaler_oe{}
 	zjDecode_L_marshaler_oe(&l, v, a)
@@ -16645,6 +17660,16 @@ func (v *L_marshaler_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_marshaler_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_marshaler_oe{}
 	zjDecode_L_marshaler_oe(l, v, a)
+}
+func zjFieldName_L_marshaler_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_marshaler_oe tries the speculative ordered fast path first (see ordered.go),
@@ -16672,8 +17697,9 @@ func zjDecodeFallback_L_marshaler_oe(l *zerojson.Lexer, v *L_marshaler_oe, a *zj
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_marshaler_oe(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				if err := v.F.UnmarshalJSON(l.NullBytes()); err != nil {
 					l.AddError(err)
@@ -16688,7 +17714,7 @@ func zjDecodeFallback_L_marshaler_oe(l *zerojson.Lexer, v *L_marshaler_oe, a *zj
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if raw := l.RawValue(); l.Err() == nil {
 				if err := v.F.UnmarshalJSON(raw); err != nil {
@@ -16750,9 +17776,10 @@ func (v *L_marshaler_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_marshaler_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -16765,6 +17792,9 @@ func (v *L_marshaler_ptr) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_marshaler_ptr) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_marshaler_ptr{}
 	zjDecode_L_marshaler_ptr(&l, v, a)
@@ -16778,6 +17808,16 @@ func (v *L_marshaler_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_marshaler_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_marshaler_ptr{}
 	zjDecode_L_marshaler_ptr(l, v, a)
+}
+func zjFieldName_L_marshaler_ptr(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_marshaler_ptr tries the speculative ordered fast path first (see ordered.go),
@@ -16805,8 +17845,9 @@ func zjDecodeFallback_L_marshaler_ptr(l *zerojson.Lexer, v *L_marshaler_ptr, a *
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_marshaler_ptr(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -16819,7 +17860,7 @@ func zjDecodeFallback_L_marshaler_ptr(l *zerojson.Lexer, v *L_marshaler_ptr, a *
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F == nil {
 				if a.published0 {
@@ -16877,9 +17918,10 @@ func (v *L_quotedint) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_quotedint) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -16892,6 +17934,9 @@ func (v *L_quotedint) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_quotedint) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_quotedint{}
 	zjDecode_L_quotedint(&l, v, a)
@@ -16905,6 +17950,16 @@ func (v *L_quotedint) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_quotedint) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_quotedint{}
 	zjDecode_L_quotedint(l, v, a)
+}
+func zjFieldName_L_quotedint(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_quotedint tries the speculative ordered fast path first (see ordered.go),
@@ -17070,7 +18125,7 @@ func zjTryOrderedKeyL_quotedint(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_quotedint(name string) bool {
-	switch name {
+	switch zjFieldName_L_quotedint(name) {
 	case "f":
 		return true
 	}
@@ -17090,6 +18145,7 @@ func zjDecodeFallback_L_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_quotedint(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -17100,7 +18156,7 @@ func zjDecodeFallback_L_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = StrInt64(l.ReadQuotedOrBareInt64())
 		default:
@@ -17144,9 +18200,10 @@ func (v *L_quotedint_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_quotedint_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -17159,6 +18216,9 @@ func (v *L_quotedint_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_quotedint_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_quotedint_oe{}
 	zjDecode_L_quotedint_oe(&l, v, a)
@@ -17172,6 +18232,16 @@ func (v *L_quotedint_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_quotedint_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_quotedint_oe{}
 	zjDecode_L_quotedint_oe(l, v, a)
+}
+func zjFieldName_L_quotedint_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_quotedint_oe tries the speculative ordered fast path first (see ordered.go),
@@ -17337,7 +18407,7 @@ func zjTryOrderedKeyL_quotedint_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_quotedint_oe(name string) bool {
-	switch name {
+	switch zjFieldName_L_quotedint_oe(name) {
 	case "f":
 		return true
 	}
@@ -17357,6 +18427,7 @@ func zjDecodeFallback_L_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zj
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_quotedint_oe(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -17367,7 +18438,7 @@ func zjDecodeFallback_L_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zj
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = StrInt64(l.ReadQuotedOrBareInt64())
 		default:
@@ -17418,9 +18489,10 @@ func (v *L_quotedint_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_quotedint_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -17433,6 +18505,9 @@ func (v *L_quotedint_ptr) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_quotedint_ptr) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_quotedint_ptr{}
 	zjDecode_L_quotedint_ptr(&l, v, a)
@@ -17446,6 +18521,16 @@ func (v *L_quotedint_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_quotedint_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_quotedint_ptr{}
 	zjDecode_L_quotedint_ptr(l, v, a)
+}
+func zjFieldName_L_quotedint_ptr(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_quotedint_ptr tries the speculative ordered fast path first (see ordered.go),
@@ -17629,7 +18714,7 @@ func zjTryOrderedKeyL_quotedint_ptr(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_quotedint_ptr(name string) bool {
-	switch name {
+	switch zjFieldName_L_quotedint_ptr(name) {
 	case "f":
 		return true
 	}
@@ -17649,8 +18734,9 @@ func zjDecodeFallback_L_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_quotedint_ptr(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -17663,7 +18749,7 @@ func zjDecodeFallback_L_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F == nil {
 				if a.published0 {
@@ -17717,9 +18803,10 @@ func (v *L_string) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_string) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -17732,6 +18819,9 @@ func (v *L_string) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_string) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_string{}
 	zjDecode_L_string(&l, v, a)
@@ -17745,6 +18835,16 @@ func (v *L_string) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_string) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_string{}
 	zjDecode_L_string(l, v, a)
+}
+func zjFieldName_L_string(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_string tries the speculative ordered fast path first (see ordered.go),
@@ -17910,7 +19010,7 @@ func zjTryOrderedKeyL_string(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_string(name string) bool {
-	switch name {
+	switch zjFieldName_L_string(name) {
 	case "f":
 		return true
 	}
@@ -17930,6 +19030,7 @@ func zjDecodeFallback_L_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_strin
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_string(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -17940,7 +19041,7 @@ func zjDecodeFallback_L_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_strin
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = l.ReadString()
 		default:
@@ -17984,9 +19085,10 @@ func (v *L_string_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_string_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -17999,6 +19101,9 @@ func (v *L_string_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_string_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_string_oe{}
 	zjDecode_L_string_oe(&l, v, a)
@@ -18012,6 +19117,16 @@ func (v *L_string_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_string_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_string_oe{}
 	zjDecode_L_string_oe(l, v, a)
+}
+func zjFieldName_L_string_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_string_oe tries the speculative ordered fast path first (see ordered.go),
@@ -18177,7 +19292,7 @@ func zjTryOrderedKeyL_string_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_string_oe(name string) bool {
-	switch name {
+	switch zjFieldName_L_string_oe(name) {
 	case "f":
 		return true
 	}
@@ -18197,6 +19312,7 @@ func zjDecodeFallback_L_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_string_oe(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -18207,7 +19323,7 @@ func zjDecodeFallback_L_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = l.ReadString()
 		default:
@@ -18258,9 +19374,10 @@ func (v *L_string_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_string_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -18273,6 +19390,9 @@ func (v *L_string_ptr) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_string_ptr) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_string_ptr{}
 	zjDecode_L_string_ptr(&l, v, a)
@@ -18286,6 +19406,16 @@ func (v *L_string_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_string_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_string_ptr{}
 	zjDecode_L_string_ptr(l, v, a)
+}
+func zjFieldName_L_string_ptr(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_string_ptr tries the speculative ordered fast path first (see ordered.go),
@@ -18469,7 +19599,7 @@ func zjTryOrderedKeyL_string_ptr(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_string_ptr(name string) bool {
-	switch name {
+	switch zjFieldName_L_string_ptr(name) {
 	case "f":
 		return true
 	}
@@ -18489,8 +19619,9 @@ func zjDecodeFallback_L_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjAren
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_string_ptr(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -18503,7 +19634,7 @@ func zjDecodeFallback_L_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjAren
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F == nil {
 				if a.published0 {
@@ -18561,9 +19692,10 @@ func (v *L_text) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_text) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -18576,6 +19708,9 @@ func (v *L_text) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_text) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_text{}
 	zjDecode_L_text(&l, v, a)
@@ -18589,6 +19724,16 @@ func (v *L_text) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_text) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_text{}
 	zjDecode_L_text(l, v, a)
+}
+func zjFieldName_L_text(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_text tries the speculative ordered fast path first (see ordered.go),
@@ -18616,6 +19761,7 @@ func zjDecodeFallback_L_text(l *zerojson.Lexer, v *L_text, a *zjArenaL_text) {
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_text(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -18626,7 +19772,7 @@ func zjDecodeFallback_L_text(l *zerojson.Lexer, v *L_text, a *zjArenaL_text) {
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if txt := l.ReadTextBytes(); l.Err() == nil {
 				if err := v.F.UnmarshalText(txt); err != nil {
@@ -18678,9 +19824,10 @@ func (v *L_text_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_text_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -18693,6 +19840,9 @@ func (v *L_text_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_text_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_text_oe{}
 	zjDecode_L_text_oe(&l, v, a)
@@ -18706,6 +19856,16 @@ func (v *L_text_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_text_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_text_oe{}
 	zjDecode_L_text_oe(l, v, a)
+}
+func zjFieldName_L_text_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_text_oe tries the speculative ordered fast path first (see ordered.go),
@@ -18733,6 +19893,7 @@ func zjDecodeFallback_L_text_oe(l *zerojson.Lexer, v *L_text_oe, a *zjArenaL_tex
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_text_oe(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -18743,7 +19904,7 @@ func zjDecodeFallback_L_text_oe(l *zerojson.Lexer, v *L_text_oe, a *zjArenaL_tex
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if txt := l.ReadTextBytes(); l.Err() == nil {
 				if err := v.F.UnmarshalText(txt); err != nil {
@@ -18802,9 +19963,10 @@ func (v *L_text_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_text_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -18817,6 +19979,9 @@ func (v *L_text_ptr) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_text_ptr) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_text_ptr{}
 	zjDecode_L_text_ptr(&l, v, a)
@@ -18830,6 +19995,16 @@ func (v *L_text_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_text_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_text_ptr{}
 	zjDecode_L_text_ptr(l, v, a)
+}
+func zjFieldName_L_text_ptr(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_text_ptr tries the speculative ordered fast path first (see ordered.go),
@@ -18857,8 +20032,9 @@ func zjDecodeFallback_L_text_ptr(l *zerojson.Lexer, v *L_text_ptr, a *zjArenaL_t
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_text_ptr(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -18871,7 +20047,7 @@ func zjDecodeFallback_L_text_ptr(l *zerojson.Lexer, v *L_text_ptr, a *zjArenaL_t
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F == nil {
 				if a.published0 {
@@ -18933,9 +20109,10 @@ func (v *L_time) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_time) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -18948,6 +20125,9 @@ func (v *L_time) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_time) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_time{}
 	zjDecode_L_time(&l, v, a)
@@ -18961,6 +20141,16 @@ func (v *L_time) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_time) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_time{}
 	zjDecode_L_time(l, v, a)
+}
+func zjFieldName_L_time(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_time tries the speculative ordered fast path first (see ordered.go),
@@ -19126,7 +20316,7 @@ func zjTryOrderedKeyL_time(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_time(name string) bool {
-	switch name {
+	switch zjFieldName_L_time(name) {
 	case "f":
 		return true
 	}
@@ -19146,6 +20336,7 @@ func zjDecodeFallback_L_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) {
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_time(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -19156,7 +20347,7 @@ func zjDecodeFallback_L_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) {
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = l.ReadTime()
 		default:
@@ -19204,9 +20395,10 @@ func (v *L_time_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_time_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -19219,6 +20411,9 @@ func (v *L_time_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_time_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_time_oe{}
 	zjDecode_L_time_oe(&l, v, a)
@@ -19232,6 +20427,16 @@ func (v *L_time_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_time_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_time_oe{}
 	zjDecode_L_time_oe(l, v, a)
+}
+func zjFieldName_L_time_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_time_oe tries the speculative ordered fast path first (see ordered.go),
@@ -19397,7 +20602,7 @@ func zjTryOrderedKeyL_time_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_time_oe(name string) bool {
-	switch name {
+	switch zjFieldName_L_time_oe(name) {
 	case "f":
 		return true
 	}
@@ -19417,6 +20622,7 @@ func zjDecodeFallback_L_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_tim
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_time_oe(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -19427,7 +20633,7 @@ func zjDecodeFallback_L_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_tim
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = l.ReadTime()
 		default:
@@ -19482,9 +20688,10 @@ func (v *L_time_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_time_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -19497,6 +20704,9 @@ func (v *L_time_ptr) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_time_ptr) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_time_ptr{}
 	zjDecode_L_time_ptr(&l, v, a)
@@ -19510,6 +20720,16 @@ func (v *L_time_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_time_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_time_ptr{}
 	zjDecode_L_time_ptr(l, v, a)
+}
+func zjFieldName_L_time_ptr(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_time_ptr tries the speculative ordered fast path first (see ordered.go),
@@ -19693,7 +20913,7 @@ func zjTryOrderedKeyL_time_ptr(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_time_ptr(name string) bool {
-	switch name {
+	switch zjFieldName_L_time_ptr(name) {
 	case "f":
 		return true
 	}
@@ -19713,8 +20933,9 @@ func zjDecodeFallback_L_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_t
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_time_ptr(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -19727,7 +20948,7 @@ func zjDecodeFallback_L_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_t
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F == nil {
 				if a.published0 {
@@ -19781,9 +21002,10 @@ func (v *L_uint16) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_uint16) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -19796,6 +21018,9 @@ func (v *L_uint16) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_uint16) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_uint16{}
 	zjDecode_L_uint16(&l, v, a)
@@ -19809,6 +21034,16 @@ func (v *L_uint16) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_uint16) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_uint16{}
 	zjDecode_L_uint16(l, v, a)
+}
+func zjFieldName_L_uint16(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_uint16 tries the speculative ordered fast path first (see ordered.go),
@@ -19974,7 +21209,7 @@ func zjTryOrderedKeyL_uint16(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_uint16(name string) bool {
-	switch name {
+	switch zjFieldName_L_uint16(name) {
 	case "f":
 		return true
 	}
@@ -19994,6 +21229,7 @@ func zjDecodeFallback_L_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint1
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_uint16(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -20004,7 +21240,7 @@ func zjDecodeFallback_L_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint1
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = uint16(l.ReadUint16())
 		default:
@@ -20048,9 +21284,10 @@ func (v *L_uint16_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_uint16_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -20063,6 +21300,9 @@ func (v *L_uint16_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_uint16_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_uint16_oe{}
 	zjDecode_L_uint16_oe(&l, v, a)
@@ -20076,6 +21316,16 @@ func (v *L_uint16_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_uint16_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_uint16_oe{}
 	zjDecode_L_uint16_oe(l, v, a)
+}
+func zjFieldName_L_uint16_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_uint16_oe tries the speculative ordered fast path first (see ordered.go),
@@ -20241,7 +21491,7 @@ func zjTryOrderedKeyL_uint16_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_uint16_oe(name string) bool {
-	switch name {
+	switch zjFieldName_L_uint16_oe(name) {
 	case "f":
 		return true
 	}
@@ -20261,6 +21511,7 @@ func zjDecodeFallback_L_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_uint16_oe(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -20271,7 +21522,7 @@ func zjDecodeFallback_L_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = uint16(l.ReadUint16())
 		default:
@@ -20322,9 +21573,10 @@ func (v *L_uint16_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_uint16_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -20337,6 +21589,9 @@ func (v *L_uint16_ptr) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_uint16_ptr) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_uint16_ptr{}
 	zjDecode_L_uint16_ptr(&l, v, a)
@@ -20350,6 +21605,16 @@ func (v *L_uint16_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_uint16_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_uint16_ptr{}
 	zjDecode_L_uint16_ptr(l, v, a)
+}
+func zjFieldName_L_uint16_ptr(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_uint16_ptr tries the speculative ordered fast path first (see ordered.go),
@@ -20533,7 +21798,7 @@ func zjTryOrderedKeyL_uint16_ptr(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_uint16_ptr(name string) bool {
-	switch name {
+	switch zjFieldName_L_uint16_ptr(name) {
 	case "f":
 		return true
 	}
@@ -20553,8 +21818,9 @@ func zjDecodeFallback_L_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjAren
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_uint16_ptr(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -20567,7 +21833,7 @@ func zjDecodeFallback_L_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjAren
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F == nil {
 				if a.published0 {
@@ -20621,9 +21887,10 @@ func (v *L_uuid) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_uuid) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -20636,6 +21903,9 @@ func (v *L_uuid) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_uuid) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_uuid{}
 	zjDecode_L_uuid(&l, v, a)
@@ -20649,6 +21919,16 @@ func (v *L_uuid) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_uuid) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_uuid{}
 	zjDecode_L_uuid(l, v, a)
+}
+func zjFieldName_L_uuid(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_uuid tries the speculative ordered fast path first (see ordered.go),
@@ -20814,7 +22094,7 @@ func zjTryOrderedKeyL_uuid(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_uuid(name string) bool {
-	switch name {
+	switch zjFieldName_L_uuid(name) {
 	case "f":
 		return true
 	}
@@ -20834,6 +22114,7 @@ func zjDecodeFallback_L_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) {
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_uuid(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -20844,7 +22125,7 @@ func zjDecodeFallback_L_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) {
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = uuid.UUID(l.ReadUUIDBytes())
 		default:
@@ -20888,9 +22169,10 @@ func (v *L_uuid_oe) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_uuid_oe) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -20903,6 +22185,9 @@ func (v *L_uuid_oe) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_uuid_oe) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_uuid_oe{}
 	zjDecode_L_uuid_oe(&l, v, a)
@@ -20916,6 +22201,16 @@ func (v *L_uuid_oe) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_uuid_oe) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_uuid_oe{}
 	zjDecode_L_uuid_oe(l, v, a)
+}
+func zjFieldName_L_uuid_oe(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_uuid_oe tries the speculative ordered fast path first (see ordered.go),
@@ -21081,7 +22376,7 @@ func zjTryOrderedKeyL_uuid_oe(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_uuid_oe(name string) bool {
-	switch name {
+	switch zjFieldName_L_uuid_oe(name) {
 	case "f":
 		return true
 	}
@@ -21101,6 +22396,7 @@ func zjDecodeFallback_L_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uui
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_uuid_oe(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -21111,7 +22407,7 @@ func zjDecodeFallback_L_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uui
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			v.F = uuid.UUID(l.ReadUUIDBytes())
 		default:
@@ -21162,9 +22458,10 @@ func (v *L_uuid_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *L_uuid_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -21177,6 +22474,9 @@ func (v *L_uuid_ptr) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *L_uuid_ptr) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaL_uuid_ptr{}
 	zjDecode_L_uuid_ptr(&l, v, a)
@@ -21190,6 +22490,16 @@ func (v *L_uuid_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *L_uuid_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaL_uuid_ptr{}
 	zjDecode_L_uuid_ptr(l, v, a)
+}
+func zjFieldName_L_uuid_ptr(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_L_uuid_ptr tries the speculative ordered fast path first (see ordered.go),
@@ -21373,7 +22683,7 @@ func zjTryOrderedKeyL_uuid_ptr(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyL_uuid_ptr(name string) bool {
-	switch name {
+	switch zjFieldName_L_uuid_ptr(name) {
 	case "f":
 		return true
 	}
@@ -21393,8 +22703,9 @@ func zjDecodeFallback_L_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_u
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_L_uuid_ptr(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -21407,7 +22718,7 @@ func zjDecodeFallback_L_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_u
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F == nil {
 				if a.published0 {
@@ -21465,9 +22776,10 @@ func (v *N_any) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *N_any) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -21480,6 +22792,9 @@ func (v *N_any) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *N_any) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaN_any{}
 	zjDecode_N_any(&l, v, a)
@@ -21493,6 +22808,16 @@ func (v *N_any) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *N_any) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaN_any{}
 	zjDecode_N_any(l, v, a)
+}
+func zjFieldName_N_any(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_N_any tries the speculative ordered fast path first (see ordered.go),
@@ -21676,7 +23001,7 @@ func zjTryOrderedKeyN_any(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyN_any(name string) bool {
-	switch name {
+	switch zjFieldName_N_any(name) {
 	case "f":
 		return true
 	}
@@ -21696,8 +23021,9 @@ func zjDecodeFallback_N_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) {
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_N_any(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				if v.F != nil {
 					l.AddError(json_.Unmarshal(l.NullBytes(), &v.F))
@@ -21712,7 +23038,7 @@ func zjDecodeFallback_N_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) {
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F == nil {
 				v.F = l.ReadInterface()
@@ -21771,9 +23097,10 @@ func (v *N_rawmsg) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *N_rawmsg) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -21786,6 +23113,9 @@ func (v *N_rawmsg) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *N_rawmsg) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaN_rawmsg{}
 	zjDecode_N_rawmsg(&l, v, a)
@@ -21799,6 +23129,16 @@ func (v *N_rawmsg) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *N_rawmsg) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaN_rawmsg{}
 	zjDecode_N_rawmsg(l, v, a)
+}
+func zjFieldName_N_rawmsg(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_N_rawmsg tries the speculative ordered fast path first (see ordered.go),
@@ -21826,8 +23166,9 @@ func zjDecodeFallback_N_rawmsg(l *zerojson.Lexer, v *N_rawmsg, a *zjArenaN_rawms
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_N_rawmsg(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				if err := v.F.UnmarshalJSON(l.NullBytes()); err != nil {
 					l.AddError(err)
@@ -21842,7 +23183,7 @@ func zjDecodeFallback_N_rawmsg(l *zerojson.Lexer, v *N_rawmsg, a *zjArenaN_rawms
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if raw := l.RawValue(); l.Err() == nil {
 				if err := v.F.UnmarshalJSON(raw); err != nil {
@@ -21896,9 +23237,10 @@ func (v *N_struct) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *N_struct) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -21911,6 +23253,9 @@ func (v *N_struct) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *N_struct) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaN_struct{}
 	zjDecode_N_struct(&l, v, a)
@@ -21924,6 +23269,16 @@ func (v *N_struct) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *N_struct) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaN_struct{}
 	zjDecode_N_struct(l, v, a)
+}
+func zjFieldName_N_struct(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_N_struct tries the speculative ordered fast path first (see ordered.go),
@@ -22092,7 +23447,7 @@ func zjTryOrderedKeyN_struct(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyN_struct(name string) bool {
-	switch name {
+	switch zjFieldName_N_struct(name) {
 	case "f":
 		return true
 	}
@@ -22112,6 +23467,7 @@ func zjDecodeFallback_N_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struc
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_N_struct(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -22122,7 +23478,7 @@ func zjDecodeFallback_N_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struc
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			zjDecode_Inner(l, &v.F, &a.a0)
 		default:
@@ -22179,9 +23535,10 @@ func (v *N_struct_ptr) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *N_struct_ptr) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -22194,6 +23551,9 @@ func (v *N_struct_ptr) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *N_struct_ptr) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaN_struct_ptr{}
 	zjDecode_N_struct_ptr(&l, v, a)
@@ -22207,6 +23567,16 @@ func (v *N_struct_ptr) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *N_struct_ptr) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaN_struct_ptr{}
 	zjDecode_N_struct_ptr(l, v, a)
+}
+func zjFieldName_N_struct_ptr(name string) string {
+	switch name {
+	case "f":
+		return name
+	}
+	if strings_.EqualFold(name, "f") {
+		return "f"
+	}
+	return name
 }
 
 // zjDecode_N_struct_ptr tries the speculative ordered fast path first (see ordered.go),
@@ -22393,7 +23763,7 @@ func zjTryOrderedKeyN_struct_ptr(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyN_struct_ptr(name string) bool {
-	switch name {
+	switch zjFieldName_N_struct_ptr(name) {
 	case "f":
 		return true
 	}
@@ -22413,8 +23783,9 @@ func zjDecodeFallback_N_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjAren
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_N_struct_ptr(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "f":
 				v.F = nil
 			}
@@ -22427,7 +23798,7 @@ func zjDecodeFallback_N_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjAren
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "f":
 			if v.F == nil {
 				if a.published0 {
@@ -22488,9 +23859,10 @@ func (v *T_invalid_tagname) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *T_invalid_tagname) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -22503,6 +23875,9 @@ func (v *T_invalid_tagname) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *T_invalid_tagname) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaT_invalid_tagname{}
 	zjDecode_T_invalid_tagname(&l, v, a)
@@ -22516,6 +23891,21 @@ func (v *T_invalid_tagname) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *T_invalid_tagname) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaT_invalid_tagname{}
 	zjDecode_T_invalid_tagname(l, v, a)
+}
+func zjFieldName_T_invalid_tagname(name string) string {
+	switch name {
+	case "A":
+		return name
+	case "ok":
+		return name
+	}
+	if strings_.EqualFold(name, "A") {
+		return "A"
+	}
+	if strings_.EqualFold(name, "ok") {
+		return "ok"
+	}
+	return name
 }
 
 // zjDecode_T_invalid_tagname tries the speculative ordered fast path first (see ordered.go),
@@ -22693,7 +24083,7 @@ func zjTryOrderedKeyT_invalid_tagname(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyT_invalid_tagname(name string) bool {
-	switch name {
+	switch zjFieldName_T_invalid_tagname(name) {
 	case "A", "ok":
 		return true
 	}
@@ -22713,6 +24103,7 @@ func zjDecodeFallback_T_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname,
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_T_invalid_tagname(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -22723,7 +24114,7 @@ func zjDecodeFallback_T_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname,
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "A":
 			v.A = int(l.ReadInt())
 		case "ok":
@@ -22776,9 +24167,10 @@ func (v *T_string_opt) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *T_string_opt) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -22791,6 +24183,9 @@ func (v *T_string_opt) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *T_string_opt) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaT_string_opt{}
 	zjDecode_T_string_opt(&l, v, a)
@@ -22804,6 +24199,21 @@ func (v *T_string_opt) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *T_string_opt) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaT_string_opt{}
 	zjDecode_T_string_opt(l, v, a)
+}
+func zjFieldName_T_string_opt(name string) string {
+	switch name {
+	case "c":
+		return name
+	case "a":
+		return name
+	}
+	if strings_.EqualFold(name, "c") {
+		return "c"
+	}
+	if strings_.EqualFold(name, "a") {
+		return "a"
+	}
+	return name
 }
 
 // zjDecode_T_string_opt tries the speculative ordered fast path first (see ordered.go),
@@ -22987,7 +24397,7 @@ func zjTryOrderedKeyT_string_opt(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyT_string_opt(name string) bool {
-	switch name {
+	switch zjFieldName_T_string_opt(name) {
 	case "c", "a":
 		return true
 	}
@@ -23007,6 +24417,7 @@ func zjDecodeFallback_T_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjAren
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_T_string_opt(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -23017,7 +24428,7 @@ func zjDecodeFallback_T_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjAren
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "c":
 			if l.IsQuotedNull() {
 			} else {
@@ -23102,9 +24513,10 @@ func (v *Z_omitzero) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *Z_omitzero) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -23117,6 +24529,9 @@ func (v *Z_omitzero) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *Z_omitzero) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaZ_omitzero{}
 	zjDecode_Z_omitzero(&l, v, a)
@@ -23130,6 +24545,26 @@ func (v *Z_omitzero) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *Z_omitzero) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaZ_omitzero{}
 	zjDecode_Z_omitzero(l, v, a)
+}
+func zjFieldName_Z_omitzero(name string) string {
+	switch name {
+	case "w":
+		return name
+	case "es":
+		return name
+	case "n":
+		return name
+	}
+	if strings_.EqualFold(name, "w") {
+		return "w"
+	}
+	if strings_.EqualFold(name, "es") {
+		return "es"
+	}
+	if strings_.EqualFold(name, "n") {
+		return "n"
+	}
+	return name
 }
 
 // zjDecode_Z_omitzero tries the speculative ordered fast path first (see ordered.go),
@@ -23266,40 +24701,48 @@ func zjDecodeOrderedField_Z_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjAren
 		v.W = l.ReadTime()
 	case 1:
 		if v.ES != nil {
-			a.sliceBorrowed1 = a.sliceBorrowed1 || !zerojson.SameBacking(v.ES, a.c1)
-			a.c1 = v.ES
-		} else if a.slicePublished1 || a.sliceBorrowed1 {
-			a.c1 = nil
-			a.sliceBorrowed1 = false
-		}
-		a.slicePublished1 = true
-		a.c1 = a.c1[:0]
-		if l.EnterArray() {
-			for {
-				if len(a.c1) == cap(a.c1) {
-					var zjZero string
-					a.c1 = append(a.c1, zjZero)
-				} else {
-					a.c1 = a.c1[:len(a.c1)+1]
-					var zjZero string
-					a.c1[len(a.c1)-1] = zjZero
-				}
-				idx := len(a.c1) - 1
-				if !l.IsNull() {
-					a.c1[idx] = l.ReadString()
-				}
-				if l.Err() != nil {
-					break
-				}
-				if !l.NextElem() {
-					break
+			if raw := l.RawValue(); l.Err() == nil {
+				if err := json_.Unmarshal(raw, &v.ES); err != nil {
+					l.AddError(err)
 				}
 			}
+		} else {
+			if v.ES != nil {
+				a.sliceBorrowed1 = a.sliceBorrowed1 || !zerojson.SameBacking(v.ES, a.c1)
+				a.c1 = v.ES
+			} else if a.slicePublished1 || a.sliceBorrowed1 {
+				a.c1 = nil
+				a.sliceBorrowed1 = false
+			}
+			a.slicePublished1 = true
+			a.c1 = a.c1[:0]
+			if l.EnterArray() {
+				for {
+					if len(a.c1) == cap(a.c1) {
+						var zjZero string
+						a.c1 = append(a.c1, zjZero)
+					} else {
+						a.c1 = a.c1[:len(a.c1)+1]
+						var zjZero string
+						a.c1[len(a.c1)-1] = zjZero
+					}
+					idx := len(a.c1) - 1
+					if !l.IsNull() {
+						a.c1[idx] = l.ReadString()
+					}
+					if l.Err() != nil {
+						break
+					}
+					if !l.NextElem() {
+						break
+					}
+				}
+			}
+			if a.c1 == nil {
+				a.c1 = []string{}
+			}
+			v.ES = a.c1
 		}
-		if a.c1 == nil {
-			a.c1 = []string{}
-		}
-		v.ES = a.c1
 	case 2:
 		v.N = int(l.ReadInt())
 	}
@@ -23357,7 +24800,7 @@ func zjTryOrderedKeyZ_omitzero(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyZ_omitzero(name string) bool {
-	switch name {
+	switch zjFieldName_Z_omitzero(name) {
 	case "w", "es", "n":
 		return true
 	}
@@ -23377,8 +24820,9 @@ func zjDecodeFallback_Z_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_o
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_Z_omitzero(string(key))
 		if l.IsNull() {
-			switch string(key) {
+			switch name {
 			case "es":
 				v.ES = nil
 			}
@@ -23391,45 +24835,53 @@ func zjDecodeFallback_Z_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_o
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "w":
 			v.W = l.ReadTime()
 		case "es":
 			if v.ES != nil {
-				a.sliceBorrowed1 = a.sliceBorrowed1 || !zerojson.SameBacking(v.ES, a.c1)
-				a.c1 = v.ES
-			} else if a.slicePublished1 || a.sliceBorrowed1 {
-				a.c1 = nil
-				a.sliceBorrowed1 = false
-			}
-			a.slicePublished1 = true
-			a.c1 = a.c1[:0]
-			if l.EnterArray() {
-				for {
-					if len(a.c1) == cap(a.c1) {
-						var zjZero string
-						a.c1 = append(a.c1, zjZero)
-					} else {
-						a.c1 = a.c1[:len(a.c1)+1]
-						var zjZero string
-						a.c1[len(a.c1)-1] = zjZero
-					}
-					idx := len(a.c1) - 1
-					if !l.IsNull() {
-						a.c1[idx] = l.ReadString()
-					}
-					if l.Err() != nil {
-						break
-					}
-					if !l.NextElem() {
-						break
+				if raw := l.RawValue(); l.Err() == nil {
+					if err := json_.Unmarshal(raw, &v.ES); err != nil {
+						l.AddError(err)
 					}
 				}
+			} else {
+				if v.ES != nil {
+					a.sliceBorrowed1 = a.sliceBorrowed1 || !zerojson.SameBacking(v.ES, a.c1)
+					a.c1 = v.ES
+				} else if a.slicePublished1 || a.sliceBorrowed1 {
+					a.c1 = nil
+					a.sliceBorrowed1 = false
+				}
+				a.slicePublished1 = true
+				a.c1 = a.c1[:0]
+				if l.EnterArray() {
+					for {
+						if len(a.c1) == cap(a.c1) {
+							var zjZero string
+							a.c1 = append(a.c1, zjZero)
+						} else {
+							a.c1 = a.c1[:len(a.c1)+1]
+							var zjZero string
+							a.c1[len(a.c1)-1] = zjZero
+						}
+						idx := len(a.c1) - 1
+						if !l.IsNull() {
+							a.c1[idx] = l.ReadString()
+						}
+						if l.Err() != nil {
+							break
+						}
+						if !l.NextElem() {
+							break
+						}
+					}
+				}
+				if a.c1 == nil {
+					a.c1 = []string{}
+				}
+				v.ES = a.c1
 			}
-			if a.c1 == nil {
-				a.c1 = []string{}
-			}
-			v.ES = a.c1
 		case "n":
 			v.N = int(l.ReadInt())
 		default:
@@ -23480,9 +24932,10 @@ func (v *Inner) AppendZJSON(dst []byte) ([]byte, error) {
 }
 
 // UnmarshalZJSON decodes data into v, copying strings and Raw values.
-// Existing pointers are preserved; slice elements are rebuilt from zero.
+// Existing pointers and ordinary slice elements are reused as in stdlib.
+// Registered leaf contracts may override traversal and reuse.
 // Custom codecs define their own value/null behavior. Errors may leave v
-// partially changed. Use zerojson.Valid first if strict grammar is required.
+// partially changed. Complete JSON grammar is validated before decoding.
 func (v *Inner) UnmarshalZJSON(data []byte) error {
 	return v.unmarshalZJSON(data, false)
 }
@@ -23495,6 +24948,9 @@ func (v *Inner) UnmarshalZJSONBorrow(data []byte) error {
 }
 
 func (v *Inner) unmarshalZJSON(data []byte, borrow bool) error {
+	if err := zerojson.Valid(data); err != nil {
+		return err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	a := &zjArenaInner{}
 	zjDecode_Inner(&l, v, a)
@@ -23508,6 +24964,21 @@ func (v *Inner) unmarshalZJSON(data []byte, borrow bool) error {
 func (v *Inner) ReadZJSON(l *zerojson.Lexer) {
 	a := &zjArenaInner{}
 	zjDecode_Inner(l, v, a)
+}
+func zjFieldName_Inner(name string) string {
+	switch name {
+	case "a":
+		return name
+	case "b":
+		return name
+	}
+	if strings_.EqualFold(name, "a") {
+		return "a"
+	}
+	if strings_.EqualFold(name, "b") {
+		return "b"
+	}
+	return name
 }
 
 // zjDecode_Inner tries the speculative ordered fast path first (see ordered.go),
@@ -23685,7 +25156,7 @@ func zjTryOrderedKeyInner(l *zerojson.Lexer, k int) bool {
 }
 
 func zjIsDeclaredKeyInner(name string) bool {
-	switch name {
+	switch zjFieldName_Inner(name) {
 	case "a", "b":
 		return true
 	}
@@ -23705,6 +25176,7 @@ func zjDecodeFallback_Inner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) {
 		if l.Err() != nil {
 			return
 		}
+		name := zjFieldName_Inner(string(key))
 		if l.IsNull() {
 			if l.Err() != nil {
 				l.AnnotateField(key)
@@ -23715,7 +25187,7 @@ func zjDecodeFallback_Inner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) {
 			}
 			continue
 		}
-		switch string(key) {
+		switch name {
 		case "a":
 			v.A = int(l.ReadInt())
 		case "b":

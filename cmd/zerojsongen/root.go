@@ -183,6 +183,7 @@ func (g *generator) genRootDecode(ti typeInfo) {
 	g.p("}")
 	g.p("")
 	g.p("func (v *%s) unmarshalZJSON(data []byte, borrow bool) error {", n)
+	g.p("\tif err := zerojson.Valid(data); err != nil { return err }")
 	g.p("\tl := zerojson.NewLexer(data, borrow)")
 	g.p("\ta := &%s{}", arenaName(n))
 	g.p("\t%s(&l, v, a)", decodeName(n))
@@ -197,9 +198,26 @@ func (g *generator) genRootDecode(ti typeInfo) {
 	g.p("// element structs keep their ordered fast path; the root loop itself is")
 	g.p("// the plain array/object protocol.")
 	g.p("func %s(l *zerojson.Lexer, v *%s, a *%s) {", decodeName(n), n, arenaName(n))
-	if rf.kind == kMap {
+	delegate := stdlibMethodContainer(*rf) || (g.stdlibValue(*rf, map[string]bool{}) && g.fieldHasReplayCallbacks(*rf, map[string]bool{}))
+	reusedSlice := !delegate && rf.kind != kMap && g.stdlibValue(*rf, map[string]bool{})
+	if delegate || reusedSlice {
+		q := g.importAlias("encoding/json", "json")
+		if reusedSlice {
+			g.p("\tif *v != nil {")
+		}
+		// A methodless local view prevents recursion through generated
+		// compatibility UnmarshalJSON wrappers on the container itself.
+		g.p("\ttype container %s", n)
+		g.p("\tif raw := l.RawValue(); l.Err() == nil {")
+		g.p("\t\tif err := %s.Unmarshal(raw, (*container)(v)); err != nil { l.AddError(err) }", q)
+		g.p("\t}")
+		if reusedSlice {
+			g.p("\treturn\n\t}")
+		}
+	}
+	if !delegate && rf.kind == kMap {
 		g.emitRootMapDecode(ti)
-	} else {
+	} else if !delegate {
 		g.emitRootSliceDecode(ti)
 	}
 	g.p("}")
