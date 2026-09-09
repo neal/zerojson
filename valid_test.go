@@ -118,6 +118,46 @@ func BenchmarkValid(b *testing.B) {
 	}
 }
 
+// Keep validation costs visible across token mixes and whitespace layouts.
+// Both implementations see identical inputs; setup is outside the timer.
+func BenchmarkValidShapes(b *testing.B) {
+	for _, tc := range []struct{ name, input string }{
+		{"literal", `true`},
+		{"literals", `[` + strings.Repeat(`true,false,null,`, 31) + `null]`},
+		{"short_keys", `{"a":1,"b":2,"c":3,"d":4,"e":5,"f":6}`},
+		{"whitespace", " { \n\"a\" : [ true , false , null ] , \"b\" : { } } \t"},
+		{"long_string", `"` + strings.Repeat("abcdefgh", 512) + `"`},
+		{"escaped_string", `"` + strings.Repeat(`a\n\u0041`, 128) + `"`},
+		{"numbers", `[` + strings.Repeat(`12345.6789e-12,`, 63) + `0]`},
+		{"nested", strings.Repeat(`{"a":[`, 64) + `null` + strings.Repeat(`]}`, 64)},
+	} {
+		data := []byte(tc.input)
+		if !json.Valid(data) || Valid(data) != nil {
+			b.Fatalf("invalid benchmark fixture %s", tc.name)
+		}
+		b.Run(tc.name, func(b *testing.B) {
+			b.Run("zerojson", func(b *testing.B) {
+				b.ReportAllocs()
+				b.SetBytes(int64(len(data)))
+				for b.Loop() {
+					if err := Valid(data); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+			b.Run("stdlib", func(b *testing.B) {
+				b.ReportAllocs()
+				b.SetBytes(int64(len(data)))
+				for b.Loop() {
+					if !json.Valid(data) {
+						b.Fatal("invalid JSON")
+					}
+				}
+			})
+		})
+	}
+}
+
 // TestSyntaxErrorError calls SyntaxError.Error via a real Valid
 // failure.
 func TestSyntaxErrorError(t *testing.T) {

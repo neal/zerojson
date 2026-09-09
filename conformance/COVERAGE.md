@@ -27,7 +27,7 @@ or verified invariants. Use this checklist when extending the test framework.
 - A generation mode is not proof that an ordered path executed: custom-method
   dispatch disables speculation. Use path-specific tests for path coverage.
 
-## Current callback-visibility finding
+## Callback publication regression
 
 `TestCallbackSeesSliceProgress` pins callback-visible publication. Before
 stdlib container delegation, callbacks decoding a slice of custom JSON

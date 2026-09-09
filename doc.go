@@ -48,9 +48,9 @@
 // encoding/json.Valid, including acceptance of invalid UTF-8 in strings.
 // It allocates nothing on success and returns a *SyntaxError on failure.
 //
-// Public decode methods validate the complete document before custom methods
-// run. Use Valid alone for opaque payloads. Low-level Lexer readers are not a
-// substitute for document validation when implementing a custom Reader.
+// Generated unmarshal methods and pooled decoders validate the complete
+// document before custom methods run. Use Valid alone for opaque payloads.
+// ReadZJSON and low-level Lexer readers are not whole-document validators.
 //
 // The codec targets classic encoding/json semantics and easyjson-style
 // encoding, with documented differences including unsorted maps, float

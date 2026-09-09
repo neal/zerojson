@@ -28,7 +28,9 @@ func syntaxErrorf(offset int, format string, args ...any) error {
 // 10,000 containers. It does not validate a schema or business rules.
 //
 // Unlike ordinary Lexer value readers, Valid checks complete JSON grammar.
-// Call it before decoding when strict grammar is required.
+// Generated unmarshal methods and pooled decoders call it automatically.
+// Call it explicitly when using low-level Lexer readers or checking JSON
+// without decoding it.
 //
 // Valid returns nil without allocating on success, or a *SyntaxError on
 // failure. Error messages and offsets need not match encoding/json.

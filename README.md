@@ -96,10 +96,10 @@ drop-in replacement. Notable differences include unsorted map output,
 float notation, and explicitly registered leaf behavior. Unsupported
 schemas are rejected during generation.
 
-Public decode methods validate the complete document before decoding or
-invoking custom methods. Field matching prefers exact names, then uses
-stdlib-style case-insensitive matching. `zerojson.Valid` remains available
-for checking opaque JSON without decoding it.
+Generated unmarshal methods and pooled decoders validate the complete
+document before decoding or invoking custom methods. Field matching prefers
+exact names, then uses stdlib-style case-insensitive matching.
+`zerojson.Valid` remains available for checking opaque JSON without decoding it.
 
 Validation checks JSON syntax, not application rules or resource limits.
 Decode errors can leave the target partially changed.

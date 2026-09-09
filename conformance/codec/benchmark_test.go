@@ -176,6 +176,17 @@ func BenchmarkValidateEvent(b *testing.B) {
 	}
 }
 
+func BenchmarkValidateEvent_Stdlib(b *testing.B) {
+	_, data := benchEvent(b)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if !json.Valid(data) {
+			b.Fatal("invalid JSON")
+		}
+	}
+}
+
 func BenchmarkDecodeScalarSliceReused(b *testing.B) {
 	data := []byte(`{"names":["first",null,"third"]}`)
 	var v PointerCollections

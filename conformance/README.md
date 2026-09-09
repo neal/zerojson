@@ -246,6 +246,16 @@ Run codec benchmarks from `conformance/codec`:
 go test -run '^$' -bench . -benchmem
 ```
 
+For validation alone, run from the repository root:
+
+```sh
+go test -run '^$' -bench BenchmarkValidShapes -benchmem
+```
+
+This compares zerojson with stdlib across token mixes and whitespace
+layouts. The codec suite's `BenchmarkValidateEvent` and
+`BenchmarkValidateEvent_Stdlib` compare the same mixed Event fixture.
+
 To compare the bounded interner with the experimental `unique` backend:
 
 ```sh

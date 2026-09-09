@@ -139,10 +139,11 @@ acceptance of invalid UTF-8 and unpaired Unicode escapes inside strings and a
 limit of 10,000 nested containers. Error messages and offsets are not a stdlib
 compatibility guarantee.
 
-Public decode entry points validate complete JSON grammar before decoding.
-Use `Valid` alone for opaque storage/passthrough. Low-level Lexer methods
-remain building blocks, not whole-document validators. Syntax validation
-does not validate your schema, business rules, or resource limits.
+Generated unmarshal methods and pooled decoders validate complete JSON
+grammar before decoding. Use `Valid` alone for opaque storage/passthrough.
+`ReadZJSON` and low-level Lexer methods operate within an existing decode;
+they do not validate whole documents. Syntax validation does not validate
+your schema, business rules, or resource limits.
 
 ## Caveats — read before production use
 
@@ -209,8 +210,8 @@ does not validate your schema, business rules, or resource limits.
 - **Delegated `UnmarshalJSON`/`UnmarshalText` run only on a cleanly
   captured value.** If the value's own grammar walk fails, the decode
   error stands and the callback is not invoked with an empty or partial
-  span — user code never sees a malformed value. Decoding is single-pass,
-  after a whole-document syntax pre-pass at public entry points. A callback
+  span — user code never sees a malformed value. Public entry points check
+  the whole document first, then decode it. A callback
   can still run before a later type or custom-validation error, as in stdlib.
 
 - **Decode errors carry the field path and byte offset**: a
