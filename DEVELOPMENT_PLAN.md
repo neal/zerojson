@@ -149,8 +149,15 @@ daily CI spending by default. Push/release remains separately authorized.
 
 ## Latest checkpoint
 
-2026-09-09: G0 complete. Production code remains at the frozen control;
-the preferred prototype is not merged. Next action is G1: preserve/replay
-the experiment on amd64 and agree on the performance/allocation budget
-before production implementation. No background job or scheduled task is
-implied by this plan.
+2026-09-09: G0 complete; G1 host assessment started. A read-only check found
+`felix` is x86_64 with one CPU, approximately 965 MiB RAM (608 MiB available),
+and zero reported load average at the time of inspection. Go is not on its
+PATH. It is a small shared-host environment, not an isolated performance lab.
+
+Next action: obtain approval for a short low-priority benchmark window on
+its sole CPU, or select an isolated amd64 host. Control and fresh-ordered
+test/benchmark binaries have been cross-compiled locally for Linux/amd64
+with Go 1.26.5 and CGO disabled; nothing needs installing there. A felix comparison would be directional
+evidence, not sufficient alone for production capacity estimates. No remote
+benchmark has run and no resource budget has been accepted. Production
+code remains frozen; no background job or scheduled task is implied.
