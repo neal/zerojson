@@ -1,9 +1,61 @@
 package main
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"go/types"
+	"os"
+	"path/filepath"
 	"testing"
 )
+
+// Derive the inventory from emitted code, not the hand-maintained reservation
+// list. New decoder locals must not become legal dependency import aliases.
+func TestImportAliasesAvoidGeneratedLocals(t *testing.T) {
+	// The independently generated fixtures live in a sibling module and are
+	// not included when this generator module is downloaded on its own.
+	if _, err := os.Stat("../../conformance/go.mod"); os.IsNotExist(err) {
+		t.Skip("requires repository conformance fixtures")
+	}
+	locals := map[string]bool{}
+	for _, file := range []string{
+		"codec/zerojson_gen.go", "generator/compat/zerojson_gen.go",
+		"generator/typeshape/zerojson_gen.go", "ownership/zerojson_gen.go",
+	} {
+		f, err := parser.ParseFile(token.NewFileSet(), filepath.Join("../../conformance", file), nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range f.Decls {
+			fn, ok := d.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			ast.Inspect(fn, func(n ast.Node) bool {
+				id, ok := n.(*ast.Ident)
+				if !ok || id.Obj == nil || id.Name == "_" || id.Obj.Pos() < fn.Pos() || id.Obj.Pos() >= fn.End() {
+					return true
+				}
+				switch id.Obj.Kind {
+				case ast.Var, ast.Typ, ast.Con:
+					locals[id.Name] = true
+				}
+				return true
+			})
+		}
+	}
+	if !locals["zjSlice"] || !locals["zjIndex"] {
+		t.Fatal("scalar-slice locals not exercised")
+	}
+	for name := range locals {
+		g := &generator{imports: map[string]string{}, aliasOwner: map[string]string{}}
+		alias := g.importAlias("example.com/"+name, name)
+		if locals[alias] {
+			t.Errorf("dependency %q receives local identifier %q", name, alias)
+		}
+	}
+}
 
 func TestImportAliasesAvoidPredeclaredNames(t *testing.T) {
 	g := &generator{imports: map[string]string{}, aliasOwner: map[string]string{}}

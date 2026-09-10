@@ -55,6 +55,40 @@ func TestPackageLayoutBoundaries(t *testing.T) {
 			t.Fatalf("generated package: %v\n%s", err, b)
 		}
 	}
+	t.Run("local_dependency_names", func(t *testing.T) {
+		dir := filepath.Join(base, "locals")
+		imports, fields, roots := "import (\n", "type T struct {\n", "T"
+		var lists string
+		for i, name := range []string{"zjSlice", "zjIndex", "zjSlice_", "zjIndex_", "borrow", "zero", "txt", "folded"} {
+			dep := fmt.Sprintf("local%d", i)
+			write(filepath.Join(base, dep, "types.go"), "package "+name+"\ntype Value int\n")
+			imports += fmt.Sprintf("d%d %q\n", i, "github.com/neal/zerojson/conformance/"+filepath.Base(base)+"/"+dep)
+			fields += fmt.Sprintf("S%d []d%d.Value; P%d *[]d%d.Value\n", i, i, i, i)
+			lists += fmt.Sprintf("type List%d []d%d.Value\n", i, i)
+			roots += fmt.Sprintf(",List%d", i)
+		}
+		write(filepath.Join(dir, "types.go"), "package p\n"+imports+")\n"+fields+"}\n"+lists)
+		var previous []byte
+		for attempt := 0; attempt < 2; attempt++ {
+			if out, err := run(dir, roots, "zerojson_gen.go", "codec_fuzz_test.go"); err != nil {
+				t.Fatalf("generate: %v %s", err, out)
+			}
+			build(dir)
+			codec, err := os.ReadFile(filepath.Join(dir, "zerojson_gen.go"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			fuzz, err := os.ReadFile(filepath.Join(dir, "codec_fuzz_test.go"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			combined := append(codec, fuzz...)
+			if attempt > 0 && !bytes.Equal(previous, combined) {
+				t.Fatal("regeneration changed output")
+			}
+			previous = combined
+		}
+	})
 	t.Run("predeclared_dependency_names", func(t *testing.T) {
 		dir := filepath.Join(base, "predeclared")
 		imports, fields := "import (\n", "type T struct { S []int; M map[string]int; V any\n"

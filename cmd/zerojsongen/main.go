@@ -136,6 +136,9 @@ var generatedIdents = map[string]bool{
 	"fmt": true, "strings": true, "f": true, "t": true, "seed": true,
 	"canon": true, "enc": true, "x": true, "y": true,
 	"src": true, "out": true, "rv": true,
+	"borrow": true, "zero": true, "txt": true, "folded": true,
+	"zjSlice": true, "zjIndex": true,
+	"container": true,
 }
 
 // safeAlias returns the qualifier to import a package under: its own name
