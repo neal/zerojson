@@ -72,7 +72,7 @@ for _, data := range messages {
     if err := decoder.DecodeBorrow(data, &event); err != nil {
         return err
     }
-    consume(event) // finish before reusing the decoder or input buffer
+    consume(event) // finish before reusing the input buffer
 }
 ```
 

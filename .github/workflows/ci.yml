@@ -48,7 +48,7 @@ jobs:
         run: scripts/verify.sh quick
       - name: Regenerate fixtures
         working-directory: conformance
-        run: go generate ./codec ./generator/compat ./generator/typeshape
+        run: go generate ./codec ./generator/compat ./generator/typeshape ./ownership
       - name: Require a clean tree
         run: git diff --exit-code
 

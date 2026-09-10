@@ -51,7 +51,7 @@ fixtures, regenerate them with:
 
 ```sh
 cd conformance
-go generate ./codec ./generator/compat ./generator/typeshape
+go generate ./codec ./generator/compat ./generator/typeshape ./ownership
 ```
 
 The resulting tree must be clean after a second regeneration.
