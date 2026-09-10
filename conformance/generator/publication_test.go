@@ -3,7 +3,7 @@ package generator
 import "strings"
 
 // A callback can publish an alias during a decode, not just before it. The
-// observation is made before the next pooled call invalidates arena storage.
+// observation here focuses on within-call publication and detachment.
 func publicationCases() []behaviorCase {
 	var cases []behaviorCase
 	for _, mode := range []string{"ordered", "fallback"} {

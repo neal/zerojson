@@ -33,9 +33,9 @@
 // deciding whether a buffer can be reused.
 //
 // With -pool, the generator emits Decode and DecodeBorrow methods on a
-// reusable Decoder. Each call resets the target and reuses arena storage,
-// invalidating the previous result. Finish using or copy out retained data
-// before the next call. Use one Decoder per goroutine; overlapping calls on
+// reusable Decoder. Each call resets the target and uses fresh storage;
+// later calls do not invalidate earlier results.
+// Use one Decoder per goroutine; overlapping calls on
 // the same Decoder panic. Pooled borrow decoding of leaf-only shapes can
 // avoid allocations, but custom codecs and containers may still allocate.
 //

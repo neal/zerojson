@@ -7,11 +7,10 @@ import (
 )
 
 // TestPooledDecoderReuse verifies a reused Decoder never leaks a field
-// from a prior message — especially nested-struct siblings, which are the
-// case that requires arena-cell reset.
+// from a prior message, including nested-struct siblings.
 func TestPooledDecoderReuse(t *testing.T) {
 	// msgA populates the nested Meta fully; msgB omits Meta.Note, which
-	// would leak from A if the arena cell weren't reset.
+	// must not inherit A's value.
 	msgA := []byte(`{"origin":"A","meta":{"note":"secret","cost":"1.5","internal":true},"count":7}`)
 	msgB := []byte(`{"origin":"B","meta":{"cost":"2.5"},"count":9}`)
 
@@ -22,7 +21,7 @@ func TestPooledDecoderReuse(t *testing.T) {
 		t.Fatal(err)
 	}
 	var b Event
-	if err := d.Decode(msgB, &b); err != nil { // reuses the arena
+	if err := d.Decode(msgB, &b); err != nil {
 		t.Fatal(err)
 	}
 
@@ -39,11 +38,8 @@ func TestPooledDecoderReuse(t *testing.T) {
 	}
 }
 
-// TestPooledDecoderSliceReuseNoGhosts verifies the persistent slice cell a
-// pooled Decoder reuses across calls doesn't leak elements: msgA has 3
-// items, msgB has 1 — the result must have len 1, not 3 with 2 stale
-// "ghost" elements left over from reslicing a longer previous backing
-// array.
+// TestPooledDecoderSliceReuseNoGhosts checks that a shorter second message
+// does not inherit elements from an earlier result.
 func TestPooledDecoderSliceReuseNoGhosts(t *testing.T) {
 	msgA := []byte(`{"items":[` +
 		`{"ratio":"1","label":"ALPHA","mode":"up"},` +
@@ -62,7 +58,7 @@ func TestPooledDecoderSliceReuseNoGhosts(t *testing.T) {
 	}
 
 	var b Event
-	if err := d.Decode(msgB, &b); err != nil { // reuses the arena's slice cell
+	if err := d.Decode(msgB, &b); err != nil {
 		t.Fatal(err)
 	}
 
@@ -112,8 +108,7 @@ func TestPooledDecoderNestedInSliceNoLeak(t *testing.T) {
 
 	// EventLeg contains a registered decimal leaf, so its slice keeps the
 	// documented reset-on-reuse override rather than stdlib element merging.
-	// Same-call reuse needs per-slot zeroing even when pooled-call entry
-	// already clears private capacity.
+	// Same-call reuse still needs per-slot zeroing with fresh per-call arenas.
 	duplicate := []byte(`{"items":[{"ratio":"1","label":"ALPHA","mode":"up"}],"items":[{"ratio":"2","label":"BETA"}]}`)
 	for _, borrow := range []bool{false, true} {
 		var got Event
@@ -130,10 +125,8 @@ func TestPooledDecoderNestedInSliceNoLeak(t *testing.T) {
 	}
 }
 
-// TestPooledDecoderMapReuseNoGhosts verifies the persistent map cell a
-// pooled Decoder reuses is clear()ed, not merged: msgA's Amounts has 2
-// keys, msgB's has 1 different key — the result must have exactly msgB's
-// key, not a union of both messages' keys.
+// TestPooledDecoderMapReuseNoGhosts checks that reset-first decoding does
+// not merge keys from separate messages.
 func TestPooledDecoderMapReuseNoGhosts(t *testing.T) {
 	msgA := []byte(`{"amounts":{"ALPHA":"12.5","BETA":"7.25"}}`)
 	msgB := []byte(`{"amounts":{"GAMMA":"3.5"}}`)
@@ -148,7 +141,7 @@ func TestPooledDecoderMapReuseNoGhosts(t *testing.T) {
 	}
 
 	var b Event
-	if err := d.Decode(msgB, &b); err != nil { // reuses the arena's map cell
+	if err := d.Decode(msgB, &b); err != nil {
 		t.Fatal(err)
 	}
 	var want Event
@@ -227,7 +220,7 @@ func TestPooledDecoderPtrStructReuseNoSubfieldGhosts(t *testing.T) {
 		}
 
 		var b Event
-		if err := decode(&d, msgB, &b); err != nil { // reuses the arena's *EventMeta cell
+		if err := decode(&d, msgB, &b); err != nil {
 			t.Fatal(err)
 		}
 

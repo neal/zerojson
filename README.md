@@ -8,7 +8,7 @@ zerojson generates specialized encoders and decoders with reusable buffers,
 optional zero-copy decoding, and zero runtime dependencies.
 
 - **Direct encoding:** append into your own buffer without intermediate JSON.
-- **Reusable decoding:** optional decoders reuse storage across messages.
+- **Explicit ownership:** reuse a target or reset it with fresh per-call storage.
 - **Schema-aware tests:** generate differential fuzz tests alongside your codecs.
 
 Requires Go 1.26 or later.
@@ -82,11 +82,11 @@ Choose the mode that fits your ownership requirements:
 |---|---|---|
 | `UnmarshalZJSON` | Strings and Raw values are copied | Ordinary target reuse |
 | `UnmarshalZJSONBorrow` | Strings and Raw values may alias input | Ordinary target reuse |
-| Pooled `Decode` / `DecodeBorrow` | Copy / borrow, respectively | Target reset; previous result invalidated on the next call |
+| `Decode` / `DecodeBorrow` (`-pool`) | Copy / borrow, respectively | Target reset; fresh storage per call |
 
 **Borrowed input must remain unchanged while any result refers to it.**
-A pooled decoder is single-goroutine; finish using or copy out its result
-before the next call. Custom codecs must honor their own ownership contracts.
+A decoder is single-goroutine; later calls do not invalidate earlier results.
+Custom codecs must honor their own ownership contracts.
 See [reusable decoders](docs/guide.md#reusable-decoders) for details.
 
 ## Compatibility and validation

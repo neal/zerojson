@@ -64,11 +64,8 @@ func TestCopyModeDoesNotAliasInputBuffer(t *testing.T) {
 }
 
 // TestPooledCopyDecodeDoesNotAliasInputBuffer is the same guard for the
-// pooled Decoder's non-borrow Decode: the arena/slice-cell reuse
-// machinery is exactly the kind of place an accidental borrow could
-// sneak in (e.g. a slice cell resliced from borrowed backing memory
-// instead of copied), so it needs its own scribble check independent of
-// the plain path above.
+// reset-first Decoder's non-borrow Decode, independently of the ordinary
+// target-reusing path above.
 func TestPooledCopyDecodeDoesNotAliasInputBuffer(t *testing.T) {
 	var d EventDecoder
 	for name, tr := range variants() {

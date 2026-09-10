@@ -18,19 +18,14 @@ import "fmt"
 // ordered fast path of their own (only their element structs do), so no
 // zjDecodeFallback/zjDecodeOrdered is emitted for them.
 
-// genRootArena emits the reusable backing cell for a slice/map root.
+// genRootArena emits per-call working storage for a slice/map root.
 func (g *generator) genRootArena(ti typeInfo) {
 	n := ti.name
 	g.p("")
-	g.p("// %s backs a decoded %s with one reusable cell for the root", arenaName(n), n)
-	g.p("// slice/map: resliced (slice) or clear()ed (map) across -pool decodes")
-	g.p("// so the backing array/table is reused rather than reallocated. The")
-	g.p("// result aliases it, with the same lifetime contract as a pooled")
-	g.p("// struct decode (invalidated by the next Decode on the same Decoder).")
+	g.p("// %s holds working storage for one %s decode.", arenaName(n), n)
 	g.p("type %s struct {", arenaName(n))
 	if ti.rootField.kind == kMap {
 		g.p("\tmRoot %s", n)
-		g.p("\tsRoot bool")
 	} else {
 		g.p("\tcRoot %s", n)
 	}
@@ -236,9 +231,6 @@ func (g *generator) emitRootSliceDecode(ti typeInfo) {
 	g.p("%s\t*v = nil", ind)
 	g.p("%s\treturn", ind)
 	g.p("%s}", ind)
-	// Reset the reusable cell's length (keeping capacity) before repopulating
-	// — the same reset-first discipline slice fields use, so a reused arena
-	// (pooled decode) or a duplicate decode never doubles up elements.
 	if rf.byteElem != "" {
 		g.p("%sif l.IsDelim('\"') {", ind)
 		g.p("%s\t*v = %s", ind, byteSliceReadExpr(*rf))
@@ -247,8 +239,8 @@ func (g *generator) emitRootSliceDecode(ti typeInfo) {
 	}
 	// Root decoding enters once per public call. Non-pooled callers retain
 	// their existing slice aliases; pooled wrappers zero *v before entry,
-	// so their persistent cell never adopts pre-existing caller storage.
-	g.p("%sif *v != nil { %s = *v } else { clear(%s[:cap(%s)]) }", ind, cell, cell, cell)
+	// so they start with fresh storage.
+	g.p("%s%s = *v", ind, cell)
 	g.p("%s%s = %s[:0]", ind, cell, cell)
 	g.p("%sif l.EnterArray() {", ind)
 	g.p("%sfor {", ind)
@@ -347,16 +339,10 @@ func (g *generator) emitRootMapDecode(ti typeInfo) {
 	g.p("%s\t*v = nil", ind)
 	g.p("%s\treturn", ind)
 	g.p("%s}", ind)
-	g.p("%sa.sRoot = false", ind)
-	g.p("%sif !a.sRoot {", ind)
-	g.p("%s\ta.sRoot = true", ind)
-	g.p("%s\tif *v != nil {", ind)
-	g.p("%s\t\t%s = *v", ind, cell)
-	g.p("%s\t} else if %s == nil {", ind, cell)
-	g.p("%s\t\t%s = make(%s)", ind, cell, n)
-	g.p("%s\t} else {", ind)
-	g.p("%s\t\tclear(%s)", ind, cell)
-	g.p("%s\t}", ind)
+	g.p("%sif *v != nil {", ind)
+	g.p("%s\t%s = *v", ind, cell)
+	g.p("%s} else {", ind)
+	g.p("%s\t%s = make(%s)", ind, cell, n)
 	g.p("%s}", ind)
 	g.p("%sif l.EnterObject() {", ind)
 	g.p("%sfor {", ind)

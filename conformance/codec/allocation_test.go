@@ -68,7 +68,7 @@ func TestEventLegEncodeReuseAllocationBudget(t *testing.T) {
 
 // TestEventLegPooledDecodeBorrowAllocationBudget: a pooled Decoder's
 // DecodeBorrow on an all-leaf-kind struct must not allocate at all —
-// no arena (reused), no string copies (borrowed), no interning miss
+// no escaping arena, no string copies (borrowed), no interning miss
 // (Mode is a known enum constant, Label isn't tagged intern so it's
 // just a borrowed string header).
 func TestEventLegPooledDecodeBorrowAllocationBudget(t *testing.T) {
@@ -81,7 +81,7 @@ func TestEventLegPooledDecodeBorrowAllocationBudget(t *testing.T) {
 
 	var d EventLegDecoder
 	var v EventLeg
-	if err := d.DecodeBorrow(data, &v); err != nil { // warm the arena
+	if err := d.DecodeBorrow(data, &v); err != nil {
 		t.Fatal(err)
 	}
 
@@ -91,15 +91,14 @@ func TestEventLegPooledDecodeBorrowAllocationBudget(t *testing.T) {
 		}
 	})
 	if allocs != 0 {
-		t.Fatalf("EventLegDecoder.DecodeBorrow (reused arena) allocations=%v, want 0", allocs)
+		t.Fatalf("EventLegDecoder.DecodeBorrow (fresh per-call storage) allocations=%v, want 0", allocs)
 	}
 }
 
 // TestEventLegPooledDecodeCopyAllocationBudget: the pooled Decoder's copy
 // mode still allocates exactly one string (Label) per decode — Go's
 // string(bytes) conversion always allocates for a non-empty result. This
-// pins that floor exactly, so any additional allocation (e.g. the arena
-// itself no longer being reused) is caught.
+// pins that floor exactly, so any additional allocation is caught.
 func TestEventLegPooledDecodeCopyAllocationBudget(t *testing.T) {
 	requireStableAllocationInstrumentation(t)
 	leg := fullEventLeg()
@@ -121,20 +120,14 @@ func TestEventLegPooledDecodeCopyAllocationBudget(t *testing.T) {
 		}
 	})
 	if allocs != wantAllocs {
-		t.Fatalf("EventLegDecoder.Decode (reused arena, copy mode) allocations=%v, want %v", allocs, wantAllocs)
+		t.Fatalf("EventLegDecoder.Decode (fresh per-call storage, copy mode) allocations=%v, want %v", allocs, wantAllocs)
 	}
 }
 
 // TestEventLegNonPooledDecodeBorrowAllocationBudget: a one-off
-// (non-pooled) UnmarshalZJSONBorrow. The README describes "one
-// allocation per decode, zero with -pool" for the general case (the
-// per-decode arena backing every pointer field) — but EventLeg has no
-// pointer, slice, or map fields at all, so its generated arena type is a
-// zero-size struct, and `&zjArenaEventLeg{}` costs nothing (Go shares one
-// zero-size backing address for it, the same mechanism that makes an
-// empty slice/map literal free — see decode.go's emitNonNilEmptySlice).
-// Combined with borrow mode skipping the one string copy, this hits true
-// zero, better than the general one-alloc floor.
+// (non-pooled) UnmarshalZJSONBorrow. EventLeg has no pointer or container
+// fields, so its zero-sized arena does not allocate. Borrowing avoids the
+// remaining string copy.
 func TestEventLegNonPooledDecodeBorrowAllocationBudget(t *testing.T) {
 	requireStableAllocationInstrumentation(t)
 	leg := fullEventLeg()
@@ -215,7 +208,7 @@ func TestEventEncodeAllocationBudget(t *testing.T) {
 // TestEventPooledDecodeBorrowAllocationBudget pins Event's pooled
 // DecodeBorrow floor: even in borrow mode, its Marshaler-delegated and
 // interface{}-fallback fields (UnmarshalJSON/json.Unmarshal calls) each
-// allocate independent of zerojson's own arena/slice-cell reuse.
+// allocate in addition to zerojson's fresh per-call storage.
 func TestEventPooledDecodeBorrowAllocationBudget(t *testing.T) {
 	requireStableAllocationInstrumentation(t)
 	tr := variants()["full"]
@@ -235,7 +228,7 @@ func TestEventPooledDecodeBorrowAllocationBudget(t *testing.T) {
 			t.Fatalf("DecodeBorrow: %v", err)
 		}
 	})
-	t.Logf("EventDecoder.DecodeBorrow (reused arena): %v allocations/decode", allocs)
+	t.Logf("EventDecoder.DecodeBorrow (fresh per-call storage): %v allocations/decode", allocs)
 	if raceDetectorEnabled {
 		// This path's race-detector overhead is itself nondeterministic
 		// run to run (observed both 40 and 41, and occasionally other
@@ -251,17 +244,12 @@ func TestEventPooledDecodeBorrowAllocationBudget(t *testing.T) {
 		// enforcement is the non-race assertion below.
 		return
 	}
-	// Callback-bearing schemas now bypass speculative ordered decoding so a
-	// later fallback cannot invoke user UnmarshalJSON/ReadZJSON methods twice.
-	// Avoiding that abandoned attempt also removes two allocations here.
-	// A pooled Decode zeroes *v before decoding (so the arena never adopts
-	// caller-owned memory that a later decode would clear); the two
-	// allocations that adds here are IDList.UnmarshalJSON regrowing its own
-	// slice, which the reused non-zero target used to keep — user-type
-	// storage, not the arena's, which is still reused.
-	const maxAllocs = 40.0
+	// Fresh per-call storage deliberately replaces the old 39-allocation
+	// persistent arena. The architecture comparison measured 55; allow one
+	// additional allocation for toolchain variation, not unbounded growth.
+	const maxAllocs = 56.0
 	if allocs > maxAllocs {
-		t.Fatalf("EventDecoder.DecodeBorrow (reused arena) allocations=%v, budget %v", allocs, maxAllocs)
+		t.Fatalf("EventDecoder.DecodeBorrow (fresh per-call storage) allocations=%v, budget %v", allocs, maxAllocs)
 	}
 }
 
@@ -298,7 +286,7 @@ func TestPointerCollectionsPooledFallbackAllocationBudget(t *testing.T) {
 		var d PointerCollectionsDecoder
 		var v PointerCollections
 		data := []byte(doc)
-		for i := 0; i < 3; i++ { // warm the arena, including growth
+		for i := 0; i < 3; i++ {
 			if err := d.DecodeBorrow(data, &v); err != nil {
 				t.Fatalf("%s: %v", name, err)
 			}
@@ -311,7 +299,7 @@ func TestPointerCollectionsPooledFallbackAllocationBudget(t *testing.T) {
 		// Revisited slices preserve stdlib element reuse, with generated
 		// scalar traversal where eligible.
 		// This is a ceiling: newer stdlib implementations can allocate less.
-		want := map[string]float64{"spaced": 2, "duplicate member": 5}[name]
+		want := 5.0 // fresh arena, slice growth, and map storage
 		if allocs > want {
 			t.Errorf("%s: PointerCollectionsDecoder.DecodeBorrow allocations=%v, budget %v", name, allocs, want)
 		}

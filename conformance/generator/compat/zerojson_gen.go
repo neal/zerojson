@@ -11,14 +11,9 @@ import (
 )
 
 // zjArenaPoint holds first-use pointer cells for a decoded Point in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaPoint struct {
-}
-
-func (a *zjArenaPoint) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the

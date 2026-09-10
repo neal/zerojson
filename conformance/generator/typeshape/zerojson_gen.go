@@ -14,14 +14,9 @@ import (
 )
 
 // zjArenaC_bytes holds first-use pointer cells for a decoded C_bytes in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_bytes struct {
-}
-
-func (a *zjArenaC_bytes) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -310,14 +305,9 @@ func zjDecodeFallback_C_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) 
 }
 
 // zjArenaC_bytes_named holds first-use pointer cells for a decoded C_bytes_named in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_bytes_named struct {
-}
-
-func (a *zjArenaC_bytes_named) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -606,14 +596,9 @@ func zjDecodeFallback_C_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjAr
 }
 
 // zjArenaC_bytes_named_oe holds first-use pointer cells for a decoded C_bytes_named_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_bytes_named_oe struct {
-}
-
-func (a *zjArenaC_bytes_named_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -902,18 +887,10 @@ func zjDecodeFallback_C_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a
 }
 
 // zjArenaC_bytes_nested_slice holds first-use pointer cells for a decoded C_bytes_nested_slice in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_bytes_nested_slice struct {
-	slicePublished0 bool
-	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
-	c0              [][]byte
-}
-
-func (a *zjArenaC_bytes_nested_slice) beginDecode() {
-	a.slicePublished0 = false
+	c0 [][]byte
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -1127,15 +1104,10 @@ func zjDecodeOrderedField_C_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nes
 			}
 		} else {
 			if v.F != nil {
-				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
-			} else if a.slicePublished0 || a.sliceBorrowed0 {
-				a.c0 = nil
-				a.sliceBorrowed0 = false
 			} else {
-				clear(a.c0[:cap(a.c0)])
+				a.c0 = nil
 			}
-			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -1246,15 +1218,10 @@ func zjDecodeFallback_C_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_
 				}
 			} else {
 				if v.F != nil {
-					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 					a.c0 = v.F
-				} else if a.slicePublished0 || a.sliceBorrowed0 {
-					a.c0 = nil
-					a.sliceBorrowed0 = false
 				} else {
-					clear(a.c0[:cap(a.c0)])
+					a.c0 = nil
 				}
-				a.slicePublished0 = true
 				a.c0 = a.c0[:0]
 				if l.EnterArray() {
 					for {
@@ -1301,18 +1268,10 @@ func zjDecodeFallback_C_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_
 }
 
 // zjArenaC_bytes_nested_slice_oe holds first-use pointer cells for a decoded C_bytes_nested_slice_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_bytes_nested_slice_oe struct {
-	slicePublished0 bool
-	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
-	c0              [][]byte
-}
-
-func (a *zjArenaC_bytes_nested_slice_oe) beginDecode() {
-	a.slicePublished0 = false
+	c0 [][]byte
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -1526,15 +1485,10 @@ func zjDecodeOrderedField_C_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_
 			}
 		} else {
 			if v.F != nil {
-				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
-			} else if a.slicePublished0 || a.sliceBorrowed0 {
-				a.c0 = nil
-				a.sliceBorrowed0 = false
 			} else {
-				clear(a.c0[:cap(a.c0)])
+				a.c0 = nil
 			}
-			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -1645,15 +1599,10 @@ func zjDecodeFallback_C_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nest
 				}
 			} else {
 				if v.F != nil {
-					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 					a.c0 = v.F
-				} else if a.slicePublished0 || a.sliceBorrowed0 {
-					a.c0 = nil
-					a.sliceBorrowed0 = false
 				} else {
-					clear(a.c0[:cap(a.c0)])
+					a.c0 = nil
 				}
-				a.slicePublished0 = true
 				a.c0 = a.c0[:0]
 				if l.EnterArray() {
 					for {
@@ -1700,14 +1649,9 @@ func zjDecodeFallback_C_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nest
 }
 
 // zjArenaC_bytes_oe holds first-use pointer cells for a decoded C_bytes_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_bytes_oe struct {
-}
-
-func (a *zjArenaC_bytes_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -1996,17 +1940,11 @@ func zjDecodeFallback_C_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_b
 }
 
 // zjArenaC_bytes_ptr holds first-use pointer cells for a decoded C_bytes_ptr in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_bytes_ptr struct {
 	published0 bool
 	f0         []byte
-}
-
-func (a *zjArenaC_bytes_ptr) beginDecode() {
-	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -2213,8 +2151,6 @@ func zjDecodeOrderedField_C_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjAr
 			if a.published0 {
 				v.F = new([]byte)
 			} else {
-				var zjZero []byte
-				a.f0 = zjZero
 				v.F = &a.f0
 				a.published0 = true
 			}
@@ -2298,8 +2234,6 @@ func zjDecodeFallback_C_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC
 				if a.published0 {
 					v.F = new([]byte)
 				} else {
-					var zjZero []byte
-					a.f0 = zjZero
 					v.F = &a.f0
 					a.published0 = true
 				}
@@ -2323,18 +2257,10 @@ func zjDecodeFallback_C_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC
 }
 
 // zjArenaC_map_bytes holds first-use pointer cells for a decoded C_map_bytes in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_map_bytes struct {
-	m0            map[string][]byte
-	owned0        bool // only arena-owned maps may be cleared for reuse
-	mapPublished0 bool
-}
-
-func (a *zjArenaC_map_bytes) beginDecode() {
-	a.mapPublished0 = false
+	m0 map[string][]byte
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -2546,16 +2472,11 @@ func zjDecodeOrderedField_C_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjAr
 	case 0:
 		{
 			if v.F != nil {
-				a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 				a.m0 = v.F
-			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-				a.m0 = make(map[string][]byte)
-				a.owned0 = true
 			} else {
-				clear(a.m0)
+				a.m0 = make(map[string][]byte)
 			}
 		}
-		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -2649,16 +2570,11 @@ func zjDecodeFallback_C_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC
 		case "f":
 			{
 				if v.F != nil {
-					a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 					a.m0 = v.F
-				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-					a.m0 = make(map[string][]byte)
-					a.owned0 = true
 				} else {
-					clear(a.m0)
+					a.m0 = make(map[string][]byte)
 				}
 			}
-			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -2694,18 +2610,10 @@ func zjDecodeFallback_C_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC
 }
 
 // zjArenaC_map_bytes_oe holds first-use pointer cells for a decoded C_map_bytes_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_map_bytes_oe struct {
-	m0            map[string][]byte
-	owned0        bool // only arena-owned maps may be cleared for reuse
-	mapPublished0 bool
-}
-
-func (a *zjArenaC_map_bytes_oe) beginDecode() {
-	a.mapPublished0 = false
+	m0 map[string][]byte
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -2917,16 +2825,11 @@ func zjDecodeOrderedField_C_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a
 	case 0:
 		{
 			if v.F != nil {
-				a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 				a.m0 = v.F
-			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-				a.m0 = make(map[string][]byte)
-				a.owned0 = true
 			} else {
-				clear(a.m0)
+				a.m0 = make(map[string][]byte)
 			}
 		}
-		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -3020,16 +2923,11 @@ func zjDecodeFallback_C_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zj
 		case "f":
 			{
 				if v.F != nil {
-					a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 					a.m0 = v.F
-				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-					a.m0 = make(map[string][]byte)
-					a.owned0 = true
 				} else {
-					clear(a.m0)
+					a.m0 = make(map[string][]byte)
 				}
 			}
-			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -3065,18 +2963,10 @@ func zjDecodeFallback_C_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zj
 }
 
 // zjArenaC_map_decimal holds first-use pointer cells for a decoded C_map_decimal in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_map_decimal struct {
-	m0            map[string]testleaf.Decimal
-	owned0        bool // only arena-owned maps may be cleared for reuse
-	mapPublished0 bool
-}
-
-func (a *zjArenaC_map_decimal) beginDecode() {
-	a.mapPublished0 = false
+	m0 map[string]testleaf.Decimal
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -3288,16 +3178,11 @@ func zjDecodeOrderedField_C_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *
 	case 0:
 		{
 			if v.F != nil {
-				a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 				a.m0 = v.F
-			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-				a.m0 = make(map[string]testleaf.Decimal)
-				a.owned0 = true
 			} else {
-				clear(a.m0)
+				a.m0 = make(map[string]testleaf.Decimal)
 			}
 		}
-		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -3391,16 +3276,11 @@ func zjDecodeFallback_C_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjAr
 		case "f":
 			{
 				if v.F != nil {
-					a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 					a.m0 = v.F
-				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-					a.m0 = make(map[string]testleaf.Decimal)
-					a.owned0 = true
 				} else {
-					clear(a.m0)
+					a.m0 = make(map[string]testleaf.Decimal)
 				}
 			}
-			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -3436,18 +3316,10 @@ func zjDecodeFallback_C_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjAr
 }
 
 // zjArenaC_map_decimal_oe holds first-use pointer cells for a decoded C_map_decimal_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_map_decimal_oe struct {
-	m0            map[string]testleaf.Decimal
-	owned0        bool // only arena-owned maps may be cleared for reuse
-	mapPublished0 bool
-}
-
-func (a *zjArenaC_map_decimal_oe) beginDecode() {
-	a.mapPublished0 = false
+	m0 map[string]testleaf.Decimal
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -3659,16 +3531,11 @@ func zjDecodeOrderedField_C_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_o
 	case 0:
 		{
 			if v.F != nil {
-				a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 				a.m0 = v.F
-			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-				a.m0 = make(map[string]testleaf.Decimal)
-				a.owned0 = true
 			} else {
-				clear(a.m0)
+				a.m0 = make(map[string]testleaf.Decimal)
 			}
 		}
-		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -3762,16 +3629,11 @@ func zjDecodeFallback_C_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a
 		case "f":
 			{
 				if v.F != nil {
-					a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 					a.m0 = v.F
-				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-					a.m0 = make(map[string]testleaf.Decimal)
-					a.owned0 = true
 				} else {
-					clear(a.m0)
+					a.m0 = make(map[string]testleaf.Decimal)
 				}
 			}
-			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -3807,18 +3669,10 @@ func zjDecodeFallback_C_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a
 }
 
 // zjArenaC_map_int holds first-use pointer cells for a decoded C_map_int in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_map_int struct {
-	m0            map[string]int
-	owned0        bool // only arena-owned maps may be cleared for reuse
-	mapPublished0 bool
-}
-
-func (a *zjArenaC_map_int) beginDecode() {
-	a.mapPublished0 = false
+	m0 map[string]int
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -4030,16 +3884,11 @@ func zjDecodeOrderedField_C_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC
 	case 0:
 		{
 			if v.F != nil {
-				a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 				a.m0 = v.F
-			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-				a.m0 = make(map[string]int)
-				a.owned0 = true
 			} else {
-				clear(a.m0)
+				a.m0 = make(map[string]int)
 			}
 		}
-		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -4133,16 +3982,11 @@ func zjDecodeFallback_C_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map
 		case "f":
 			{
 				if v.F != nil {
-					a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 					a.m0 = v.F
-				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-					a.m0 = make(map[string]int)
-					a.owned0 = true
 				} else {
-					clear(a.m0)
+					a.m0 = make(map[string]int)
 				}
 			}
-			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -4178,18 +4022,10 @@ func zjDecodeFallback_C_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map
 }
 
 // zjArenaC_map_int_oe holds first-use pointer cells for a decoded C_map_int_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_map_int_oe struct {
-	m0            map[string]int
-	owned0        bool // only arena-owned maps may be cleared for reuse
-	mapPublished0 bool
-}
-
-func (a *zjArenaC_map_int_oe) beginDecode() {
-	a.mapPublished0 = false
+	m0 map[string]int
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -4401,16 +4237,11 @@ func zjDecodeOrderedField_C_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zj
 	case 0:
 		{
 			if v.F != nil {
-				a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 				a.m0 = v.F
-			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-				a.m0 = make(map[string]int)
-				a.owned0 = true
 			} else {
-				clear(a.m0)
+				a.m0 = make(map[string]int)
 			}
 		}
-		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -4504,16 +4335,11 @@ func zjDecodeFallback_C_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjAren
 		case "f":
 			{
 				if v.F != nil {
-					a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 					a.m0 = v.F
-				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-					a.m0 = make(map[string]int)
-					a.owned0 = true
 				} else {
-					clear(a.m0)
+					a.m0 = make(map[string]int)
 				}
 			}
-			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -4549,18 +4375,10 @@ func zjDecodeFallback_C_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjAren
 }
 
 // zjArenaC_map_set holds first-use pointer cells for a decoded C_map_set in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_map_set struct {
-	m0            map[string]struct{}
-	owned0        bool // only arena-owned maps may be cleared for reuse
-	mapPublished0 bool
-}
-
-func (a *zjArenaC_map_set) beginDecode() {
-	a.mapPublished0 = false
+	m0 map[string]struct{}
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -4773,16 +4591,11 @@ func zjDecodeOrderedField_C_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC
 	case 0:
 		{
 			if v.F != nil {
-				a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 				a.m0 = v.F
-			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-				a.m0 = make(map[string]struct{})
-				a.owned0 = true
 			} else {
-				clear(a.m0)
+				a.m0 = make(map[string]struct{})
 			}
 		}
-		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -4876,16 +4689,11 @@ func zjDecodeFallback_C_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map
 		case "f":
 			{
 				if v.F != nil {
-					a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 					a.m0 = v.F
-				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-					a.m0 = make(map[string]struct{})
-					a.owned0 = true
 				} else {
-					clear(a.m0)
+					a.m0 = make(map[string]struct{})
 				}
 			}
-			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -4921,18 +4729,10 @@ func zjDecodeFallback_C_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map
 }
 
 // zjArenaC_map_set_oe holds first-use pointer cells for a decoded C_map_set_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_map_set_oe struct {
-	m0            map[string]struct{}
-	owned0        bool // only arena-owned maps may be cleared for reuse
-	mapPublished0 bool
-}
-
-func (a *zjArenaC_map_set_oe) beginDecode() {
-	a.mapPublished0 = false
+	m0 map[string]struct{}
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -5145,16 +4945,11 @@ func zjDecodeOrderedField_C_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zj
 	case 0:
 		{
 			if v.F != nil {
-				a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 				a.m0 = v.F
-			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-				a.m0 = make(map[string]struct{})
-				a.owned0 = true
 			} else {
-				clear(a.m0)
+				a.m0 = make(map[string]struct{})
 			}
 		}
-		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -5248,16 +5043,11 @@ func zjDecodeFallback_C_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjAren
 		case "f":
 			{
 				if v.F != nil {
-					a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 					a.m0 = v.F
-				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-					a.m0 = make(map[string]struct{})
-					a.owned0 = true
 				} else {
-					clear(a.m0)
+					a.m0 = make(map[string]struct{})
 				}
 			}
-			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -5293,18 +5083,10 @@ func zjDecodeFallback_C_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjAren
 }
 
 // zjArenaC_map_struct holds first-use pointer cells for a decoded C_map_struct in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_map_struct struct {
-	m0            map[string]Inner
-	owned0        bool // only arena-owned maps may be cleared for reuse
-	mapPublished0 bool
-}
-
-func (a *zjArenaC_map_struct) beginDecode() {
-	a.mapPublished0 = false
+	m0 map[string]Inner
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -5520,16 +5302,11 @@ func zjDecodeOrderedField_C_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zj
 	case 0:
 		{
 			if v.F != nil {
-				a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 				a.m0 = v.F
-			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-				a.m0 = make(map[string]Inner)
-				a.owned0 = true
 			} else {
-				clear(a.m0)
+				a.m0 = make(map[string]Inner)
 			}
 		}
-		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -5624,16 +5401,11 @@ func zjDecodeFallback_C_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjAren
 		case "f":
 			{
 				if v.F != nil {
-					a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 					a.m0 = v.F
-				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-					a.m0 = make(map[string]Inner)
-					a.owned0 = true
 				} else {
-					clear(a.m0)
+					a.m0 = make(map[string]Inner)
 				}
 			}
-			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -5670,18 +5442,10 @@ func zjDecodeFallback_C_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjAren
 }
 
 // zjArenaC_map_struct_oe holds first-use pointer cells for a decoded C_map_struct_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_map_struct_oe struct {
-	m0            map[string]Inner
-	owned0        bool // only arena-owned maps may be cleared for reuse
-	mapPublished0 bool
-}
-
-func (a *zjArenaC_map_struct_oe) beginDecode() {
-	a.mapPublished0 = false
+	m0 map[string]Inner
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -5897,16 +5661,11 @@ func zjDecodeOrderedField_C_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe,
 	case 0:
 		{
 			if v.F != nil {
-				a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 				a.m0 = v.F
-			} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-				a.m0 = make(map[string]Inner)
-				a.owned0 = true
 			} else {
-				clear(a.m0)
+				a.m0 = make(map[string]Inner)
 			}
 		}
-		a.mapPublished0 = true
 		if l.EnterObject() {
 			for {
 				mk := string(string(l.ReadKey()))
@@ -6001,16 +5760,11 @@ func zjDecodeFallback_C_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *
 		case "f":
 			{
 				if v.F != nil {
-					a.owned0 = a.owned0 && zerojson.SameMap(v.F, a.m0)
 					a.m0 = v.F
-				} else if a.m0 == nil || !a.owned0 || a.mapPublished0 {
-					a.m0 = make(map[string]Inner)
-					a.owned0 = true
 				} else {
-					clear(a.m0)
+					a.m0 = make(map[string]Inner)
 				}
 			}
-			a.mapPublished0 = true
 			if l.EnterObject() {
 				for {
 					mk := string(string(l.ReadKey()))
@@ -6047,18 +5801,10 @@ func zjDecodeFallback_C_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *
 }
 
 // zjArenaC_slice_decimal holds first-use pointer cells for a decoded C_slice_decimal in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_slice_decimal struct {
-	slicePublished0 bool
-	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
-	c0              []testleaf.Decimal
-}
-
-func (a *zjArenaC_slice_decimal) beginDecode() {
-	a.slicePublished0 = false
+	c0 []testleaf.Decimal
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -6265,15 +6011,10 @@ func zjDecodeOrderedField_C_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal,
 	switch k {
 	case 0:
 		if v.F != nil {
-			a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 			a.c0 = v.F
-		} else if a.slicePublished0 || a.sliceBorrowed0 {
-			a.c0 = nil
-			a.sliceBorrowed0 = false
 		} else {
-			clear(a.c0[:cap(a.c0)])
+			a.c0 = nil
 		}
-		a.slicePublished0 = true
 		a.c0 = a.c0[:0]
 		if l.EnterArray() {
 			for {
@@ -6376,15 +6117,10 @@ func zjDecodeFallback_C_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *
 		switch name {
 		case "f":
 			if v.F != nil {
-				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
-			} else if a.slicePublished0 || a.sliceBorrowed0 {
-				a.c0 = nil
-				a.sliceBorrowed0 = false
 			} else {
-				clear(a.c0[:cap(a.c0)])
+				a.c0 = nil
 			}
-			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -6430,18 +6166,10 @@ func zjDecodeFallback_C_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *
 }
 
 // zjArenaC_slice_decimal_oe holds first-use pointer cells for a decoded C_slice_decimal_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_slice_decimal_oe struct {
-	slicePublished0 bool
-	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
-	c0              []testleaf.Decimal
-}
-
-func (a *zjArenaC_slice_decimal_oe) beginDecode() {
-	a.slicePublished0 = false
+	c0 []testleaf.Decimal
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -6648,15 +6376,10 @@ func zjDecodeOrderedField_C_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decim
 	switch k {
 	case 0:
 		if v.F != nil {
-			a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 			a.c0 = v.F
-		} else if a.slicePublished0 || a.sliceBorrowed0 {
-			a.c0 = nil
-			a.sliceBorrowed0 = false
 		} else {
-			clear(a.c0[:cap(a.c0)])
+			a.c0 = nil
 		}
-		a.slicePublished0 = true
 		a.c0 = a.c0[:0]
 		if l.EnterArray() {
 			for {
@@ -6759,15 +6482,10 @@ func zjDecodeFallback_C_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_o
 		switch name {
 		case "f":
 			if v.F != nil {
-				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
-			} else if a.slicePublished0 || a.sliceBorrowed0 {
-				a.c0 = nil
-				a.sliceBorrowed0 = false
 			} else {
-				clear(a.c0[:cap(a.c0)])
+				a.c0 = nil
 			}
-			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -6813,18 +6531,10 @@ func zjDecodeFallback_C_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_o
 }
 
 // zjArenaC_slice_int holds first-use pointer cells for a decoded C_slice_int in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_slice_int struct {
-	slicePublished0 bool
-	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
-	c0              []int
-}
-
-func (a *zjArenaC_slice_int) beginDecode() {
-	a.slicePublished0 = false
+	c0 []int
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -7057,15 +6767,10 @@ func zjDecodeOrderedField_C_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjAr
 			}
 		} else {
 			if v.F != nil {
-				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
-			} else if a.slicePublished0 || a.sliceBorrowed0 {
-				a.c0 = nil
-				a.sliceBorrowed0 = false
 			} else {
-				clear(a.c0[:cap(a.c0)])
+				a.c0 = nil
 			}
-			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -7195,15 +6900,10 @@ func zjDecodeFallback_C_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC
 				}
 			} else {
 				if v.F != nil {
-					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 					a.c0 = v.F
-				} else if a.slicePublished0 || a.sliceBorrowed0 {
-					a.c0 = nil
-					a.sliceBorrowed0 = false
 				} else {
-					clear(a.c0[:cap(a.c0)])
+					a.c0 = nil
 				}
-				a.slicePublished0 = true
 				a.c0 = a.c0[:0]
 				if l.EnterArray() {
 					for {
@@ -7250,18 +6950,10 @@ func zjDecodeFallback_C_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC
 }
 
 // zjArenaC_slice_int_oe holds first-use pointer cells for a decoded C_slice_int_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_slice_int_oe struct {
-	slicePublished0 bool
-	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
-	c0              []int
-}
-
-func (a *zjArenaC_slice_int_oe) beginDecode() {
-	a.slicePublished0 = false
+	c0 []int
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -7494,15 +7186,10 @@ func zjDecodeOrderedField_C_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a
 			}
 		} else {
 			if v.F != nil {
-				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
-			} else if a.slicePublished0 || a.sliceBorrowed0 {
-				a.c0 = nil
-				a.sliceBorrowed0 = false
 			} else {
-				clear(a.c0[:cap(a.c0)])
+				a.c0 = nil
 			}
-			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -7632,15 +7319,10 @@ func zjDecodeFallback_C_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zj
 				}
 			} else {
 				if v.F != nil {
-					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 					a.c0 = v.F
-				} else if a.slicePublished0 || a.sliceBorrowed0 {
-					a.c0 = nil
-					a.sliceBorrowed0 = false
 				} else {
-					clear(a.c0[:cap(a.c0)])
+					a.c0 = nil
 				}
-				a.slicePublished0 = true
 				a.c0 = a.c0[:0]
 				if l.EnterArray() {
 					for {
@@ -7687,18 +7369,10 @@ func zjDecodeFallback_C_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zj
 }
 
 // zjArenaC_slice_ptrstruct holds first-use pointer cells for a decoded C_slice_ptrstruct in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_slice_ptrstruct struct {
-	slicePublished0 bool
-	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
-	c0              []*Inner
-}
-
-func (a *zjArenaC_slice_ptrstruct) beginDecode() {
-	a.slicePublished0 = false
+	c0 []*Inner
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -7920,15 +7594,10 @@ func zjDecodeOrderedField_C_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstr
 			}
 		} else {
 			if v.F != nil {
-				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
-			} else if a.slicePublished0 || a.sliceBorrowed0 {
-				a.c0 = nil
-				a.sliceBorrowed0 = false
 			} else {
-				clear(a.c0[:cap(a.c0)])
+				a.c0 = nil
 			}
-			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -8039,15 +7708,10 @@ func zjDecodeFallback_C_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct,
 				}
 			} else {
 				if v.F != nil {
-					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 					a.c0 = v.F
-				} else if a.slicePublished0 || a.sliceBorrowed0 {
-					a.c0 = nil
-					a.sliceBorrowed0 = false
 				} else {
-					clear(a.c0[:cap(a.c0)])
+					a.c0 = nil
 				}
-				a.slicePublished0 = true
 				a.c0 = a.c0[:0]
 				if l.EnterArray() {
 					for {
@@ -8094,18 +7758,10 @@ func zjDecodeFallback_C_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct,
 }
 
 // zjArenaC_slice_ptrstruct_oe holds first-use pointer cells for a decoded C_slice_ptrstruct_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_slice_ptrstruct_oe struct {
-	slicePublished0 bool
-	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
-	c0              []*Inner
-}
-
-func (a *zjArenaC_slice_ptrstruct_oe) beginDecode() {
-	a.slicePublished0 = false
+	c0 []*Inner
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -8327,15 +7983,10 @@ func zjDecodeOrderedField_C_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptr
 			}
 		} else {
 			if v.F != nil {
-				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
-			} else if a.slicePublished0 || a.sliceBorrowed0 {
-				a.c0 = nil
-				a.sliceBorrowed0 = false
 			} else {
-				clear(a.c0[:cap(a.c0)])
+				a.c0 = nil
 			}
-			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -8446,15 +8097,10 @@ func zjDecodeFallback_C_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstru
 				}
 			} else {
 				if v.F != nil {
-					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 					a.c0 = v.F
-				} else if a.slicePublished0 || a.sliceBorrowed0 {
-					a.c0 = nil
-					a.sliceBorrowed0 = false
 				} else {
-					clear(a.c0[:cap(a.c0)])
+					a.c0 = nil
 				}
-				a.slicePublished0 = true
 				a.c0 = a.c0[:0]
 				if l.EnterArray() {
 					for {
@@ -8501,18 +8147,10 @@ func zjDecodeFallback_C_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstru
 }
 
 // zjArenaC_slice_string holds first-use pointer cells for a decoded C_slice_string in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_slice_string struct {
-	slicePublished0 bool
-	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
-	c0              []string
-}
-
-func (a *zjArenaC_slice_string) beginDecode() {
-	a.slicePublished0 = false
+	c0 []string
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -8745,15 +8383,10 @@ func zjDecodeOrderedField_C_slice_string(l *zerojson.Lexer, v *C_slice_string, a
 			}
 		} else {
 			if v.F != nil {
-				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
-			} else if a.slicePublished0 || a.sliceBorrowed0 {
-				a.c0 = nil
-				a.sliceBorrowed0 = false
 			} else {
-				clear(a.c0[:cap(a.c0)])
+				a.c0 = nil
 			}
-			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -8883,15 +8516,10 @@ func zjDecodeFallback_C_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zj
 				}
 			} else {
 				if v.F != nil {
-					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 					a.c0 = v.F
-				} else if a.slicePublished0 || a.sliceBorrowed0 {
-					a.c0 = nil
-					a.sliceBorrowed0 = false
 				} else {
-					clear(a.c0[:cap(a.c0)])
+					a.c0 = nil
 				}
-				a.slicePublished0 = true
 				a.c0 = a.c0[:0]
 				if l.EnterArray() {
 					for {
@@ -8938,18 +8566,10 @@ func zjDecodeFallback_C_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zj
 }
 
 // zjArenaC_slice_string_oe holds first-use pointer cells for a decoded C_slice_string_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_slice_string_oe struct {
-	slicePublished0 bool
-	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
-	c0              []string
-}
-
-func (a *zjArenaC_slice_string_oe) beginDecode() {
-	a.slicePublished0 = false
+	c0 []string
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -9182,15 +8802,10 @@ func zjDecodeOrderedField_C_slice_string_oe(l *zerojson.Lexer, v *C_slice_string
 			}
 		} else {
 			if v.F != nil {
-				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
-			} else if a.slicePublished0 || a.sliceBorrowed0 {
-				a.c0 = nil
-				a.sliceBorrowed0 = false
 			} else {
-				clear(a.c0[:cap(a.c0)])
+				a.c0 = nil
 			}
-			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -9320,15 +8935,10 @@ func zjDecodeFallback_C_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe,
 				}
 			} else {
 				if v.F != nil {
-					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 					a.c0 = v.F
-				} else if a.slicePublished0 || a.sliceBorrowed0 {
-					a.c0 = nil
-					a.sliceBorrowed0 = false
 				} else {
-					clear(a.c0[:cap(a.c0)])
+					a.c0 = nil
 				}
-				a.slicePublished0 = true
 				a.c0 = a.c0[:0]
 				if l.EnterArray() {
 					for {
@@ -9375,18 +8985,10 @@ func zjDecodeFallback_C_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe,
 }
 
 // zjArenaC_slice_struct holds first-use pointer cells for a decoded C_slice_struct in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_slice_struct struct {
-	slicePublished0 bool
-	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
-	c0              []Inner
-}
-
-func (a *zjArenaC_slice_struct) beginDecode() {
-	a.slicePublished0 = false
+	c0 []Inner
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -9604,15 +9206,10 @@ func zjDecodeOrderedField_C_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a
 			}
 		} else {
 			if v.F != nil {
-				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
-			} else if a.slicePublished0 || a.sliceBorrowed0 {
-				a.c0 = nil
-				a.sliceBorrowed0 = false
 			} else {
-				clear(a.c0[:cap(a.c0)])
+				a.c0 = nil
 			}
-			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -9721,15 +9318,10 @@ func zjDecodeFallback_C_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zj
 				}
 			} else {
 				if v.F != nil {
-					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 					a.c0 = v.F
-				} else if a.slicePublished0 || a.sliceBorrowed0 {
-					a.c0 = nil
-					a.sliceBorrowed0 = false
 				} else {
-					clear(a.c0[:cap(a.c0)])
+					a.c0 = nil
 				}
-				a.slicePublished0 = true
 				a.c0 = a.c0[:0]
 				if l.EnterArray() {
 					for {
@@ -9774,18 +9366,10 @@ func zjDecodeFallback_C_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zj
 }
 
 // zjArenaC_slice_struct_oe holds first-use pointer cells for a decoded C_slice_struct_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaC_slice_struct_oe struct {
-	slicePublished0 bool
-	sliceBorrowed0  bool // adopted storage must not be recycled on the next pooled call
-	c0              []Inner
-}
-
-func (a *zjArenaC_slice_struct_oe) beginDecode() {
-	a.slicePublished0 = false
+	c0 []Inner
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -10003,15 +9587,10 @@ func zjDecodeOrderedField_C_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct
 			}
 		} else {
 			if v.F != nil {
-				a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 				a.c0 = v.F
-			} else if a.slicePublished0 || a.sliceBorrowed0 {
-				a.c0 = nil
-				a.sliceBorrowed0 = false
 			} else {
-				clear(a.c0[:cap(a.c0)])
+				a.c0 = nil
 			}
-			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
 			if l.EnterArray() {
 				for {
@@ -10120,15 +9699,10 @@ func zjDecodeFallback_C_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe,
 				}
 			} else {
 				if v.F != nil {
-					a.sliceBorrowed0 = a.sliceBorrowed0 || !zerojson.SameBacking(v.F, a.c0)
 					a.c0 = v.F
-				} else if a.slicePublished0 || a.sliceBorrowed0 {
-					a.c0 = nil
-					a.sliceBorrowed0 = false
 				} else {
-					clear(a.c0[:cap(a.c0)])
+					a.c0 = nil
 				}
-				a.slicePublished0 = true
 				a.c0 = a.c0[:0]
 				if l.EnterArray() {
 					for {
@@ -10173,14 +9747,9 @@ func zjDecodeFallback_C_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe,
 }
 
 // zjArenaE_embed_first holds first-use pointer cells for a decoded E_embed_first in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaE_embed_first struct {
-}
-
-func (a *zjArenaE_embed_first) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -10513,14 +10082,9 @@ func zjDecodeFallback_E_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjAr
 }
 
 // zjArenaE_embed_last holds first-use pointer cells for a decoded E_embed_last in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaE_embed_last struct {
-}
-
-func (a *zjArenaE_embed_last) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -10853,14 +10417,9 @@ func zjDecodeFallback_E_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjAren
 }
 
 // zjArenaE_embed_unexported holds first-use pointer cells for a decoded E_embed_unexported in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaE_embed_unexported struct {
-}
-
-func (a *zjArenaE_embed_unexported) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -11167,14 +10726,9 @@ func zjDecodeFallback_E_embed_unexported(l *zerojson.Lexer, v *E_embed_unexporte
 }
 
 // zjArenaL_appender holds first-use pointer cells for a decoded L_appender in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_appender struct {
-}
-
-func (a *zjArenaL_appender) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -11307,14 +10861,9 @@ func zjDecodeFallback_L_appender(l *zerojson.Lexer, v *L_appender, a *zjArenaL_a
 }
 
 // zjArenaL_appender_oe holds first-use pointer cells for a decoded L_appender_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_appender_oe struct {
-}
-
-func (a *zjArenaL_appender_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -11447,17 +10996,11 @@ func zjDecodeFallback_L_appender_oe(l *zerojson.Lexer, v *L_appender_oe, a *zjAr
 }
 
 // zjArenaL_appender_ptr holds first-use pointer cells for a decoded L_appender_ptr in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_appender_ptr struct {
 	published0 bool
 	f0         Cents
-}
-
-func (a *zjArenaL_appender_ptr) beginDecode() {
-	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -11577,8 +11120,6 @@ func zjDecodeFallback_L_appender_ptr(l *zerojson.Lexer, v *L_appender_ptr, a *zj
 				if a.published0 {
 					v.F = new(Cents)
 				} else {
-					var zjZero Cents
-					a.f0 = zjZero
 					v.F = &a.f0
 					a.published0 = true
 				}
@@ -11602,14 +11143,9 @@ func zjDecodeFallback_L_appender_ptr(l *zerojson.Lexer, v *L_appender_ptr, a *zj
 }
 
 // zjArenaL_bool holds first-use pointer cells for a decoded L_bool in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_bool struct {
-}
-
-func (a *zjArenaL_bool) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -11890,14 +11426,9 @@ func zjDecodeFallback_L_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) {
 }
 
 // zjArenaL_bool_oe holds first-use pointer cells for a decoded L_bool_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_bool_oe struct {
-}
-
-func (a *zjArenaL_bool_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -12178,17 +11709,11 @@ func zjDecodeFallback_L_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_boo
 }
 
 // zjArenaL_bool_ptr holds first-use pointer cells for a decoded L_bool_ptr in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_bool_ptr struct {
 	published0 bool
 	f0         bool
-}
-
-func (a *zjArenaL_bool_ptr) beginDecode() {
-	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -12395,8 +11920,6 @@ func zjDecodeOrderedField_L_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjAren
 			if a.published0 {
 				v.F = new(bool)
 			} else {
-				var zjZero bool
-				a.f0 = zjZero
 				v.F = &a.f0
 				a.published0 = true
 			}
@@ -12480,8 +12003,6 @@ func zjDecodeFallback_L_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_b
 				if a.published0 {
 					v.F = new(bool)
 				} else {
-					var zjZero bool
-					a.f0 = zjZero
 					v.F = &a.f0
 					a.published0 = true
 				}
@@ -12505,14 +12026,9 @@ func zjDecodeFallback_L_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_b
 }
 
 // zjArenaL_decimal holds first-use pointer cells for a decoded L_decimal in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_decimal struct {
-}
-
-func (a *zjArenaL_decimal) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -12793,14 +12309,9 @@ func zjDecodeFallback_L_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_dec
 }
 
 // zjArenaL_decimal_oe holds first-use pointer cells for a decoded L_decimal_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_decimal_oe struct {
-}
-
-func (a *zjArenaL_decimal_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -13081,17 +12592,11 @@ func zjDecodeFallback_L_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjAren
 }
 
 // zjArenaL_decimal_ptr holds first-use pointer cells for a decoded L_decimal_ptr in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_decimal_ptr struct {
 	published0 bool
 	f0         testleaf.Decimal
-}
-
-func (a *zjArenaL_decimal_ptr) beginDecode() {
-	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -13298,8 +12803,6 @@ func zjDecodeOrderedField_L_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *
 			if a.published0 {
 				v.F = new(testleaf.Decimal)
 			} else {
-				var zjZero testleaf.Decimal
-				a.f0 = zjZero
 				v.F = &a.f0
 				a.published0 = true
 			}
@@ -13383,8 +12886,6 @@ func zjDecodeFallback_L_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjAr
 				if a.published0 {
 					v.F = new(testleaf.Decimal)
 				} else {
-					var zjZero testleaf.Decimal
-					a.f0 = zjZero
 					v.F = &a.f0
 					a.published0 = true
 				}
@@ -13408,14 +12909,9 @@ func zjDecodeFallback_L_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjAr
 }
 
 // zjArenaL_enum holds first-use pointer cells for a decoded L_enum in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_enum struct {
-}
-
-func (a *zjArenaL_enum) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -13706,14 +13202,9 @@ func zjDecodeFallback_L_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) {
 }
 
 // zjArenaL_enum_oe holds first-use pointer cells for a decoded L_enum_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_enum_oe struct {
-}
-
-func (a *zjArenaL_enum_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -14004,17 +13495,11 @@ func zjDecodeFallback_L_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enu
 }
 
 // zjArenaL_enum_ptr holds first-use pointer cells for a decoded L_enum_ptr in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_enum_ptr struct {
 	published0 bool
 	f0         Mode
-}
-
-func (a *zjArenaL_enum_ptr) beginDecode() {
-	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -14221,8 +13706,6 @@ func zjDecodeOrderedField_L_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjAren
 			if a.published0 {
 				v.F = new(Mode)
 			} else {
-				var zjZero Mode
-				a.f0 = zjZero
 				v.F = &a.f0
 				a.published0 = true
 			}
@@ -14311,8 +13794,6 @@ func zjDecodeFallback_L_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_e
 				if a.published0 {
 					v.F = new(Mode)
 				} else {
-					var zjZero Mode
-					a.f0 = zjZero
 					v.F = &a.f0
 					a.published0 = true
 				}
@@ -14341,14 +13822,9 @@ func zjDecodeFallback_L_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_e
 }
 
 // zjArenaL_float32 holds first-use pointer cells for a decoded L_float32 in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_float32 struct {
-}
-
-func (a *zjArenaL_float32) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -14633,14 +14109,9 @@ func zjDecodeFallback_L_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_flo
 }
 
 // zjArenaL_float32_oe holds first-use pointer cells for a decoded L_float32_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_float32_oe struct {
-}
-
-func (a *zjArenaL_float32_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -14925,17 +14396,11 @@ func zjDecodeFallback_L_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjAren
 }
 
 // zjArenaL_float32_ptr holds first-use pointer cells for a decoded L_float32_ptr in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_float32_ptr struct {
 	published0 bool
 	f0         float32
-}
-
-func (a *zjArenaL_float32_ptr) beginDecode() {
-	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -15146,8 +14611,6 @@ func zjDecodeOrderedField_L_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *
 			if a.published0 {
 				v.F = new(float32)
 			} else {
-				var zjZero float32
-				a.f0 = zjZero
 				v.F = &a.f0
 				a.published0 = true
 			}
@@ -15231,8 +14694,6 @@ func zjDecodeFallback_L_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjAr
 				if a.published0 {
 					v.F = new(float32)
 				} else {
-					var zjZero float32
-					a.f0 = zjZero
 					v.F = &a.f0
 					a.published0 = true
 				}
@@ -15256,14 +14717,9 @@ func zjDecodeFallback_L_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjAr
 }
 
 // zjArenaL_float64 holds first-use pointer cells for a decoded L_float64 in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_float64 struct {
-}
-
-func (a *zjArenaL_float64) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -15548,14 +15004,9 @@ func zjDecodeFallback_L_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_flo
 }
 
 // zjArenaL_float64_oe holds first-use pointer cells for a decoded L_float64_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_float64_oe struct {
-}
-
-func (a *zjArenaL_float64_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -15840,17 +15291,11 @@ func zjDecodeFallback_L_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjAren
 }
 
 // zjArenaL_float64_ptr holds first-use pointer cells for a decoded L_float64_ptr in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_float64_ptr struct {
 	published0 bool
 	f0         float64
-}
-
-func (a *zjArenaL_float64_ptr) beginDecode() {
-	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -16061,8 +15506,6 @@ func zjDecodeOrderedField_L_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *
 			if a.published0 {
 				v.F = new(float64)
 			} else {
-				var zjZero float64
-				a.f0 = zjZero
 				v.F = &a.f0
 				a.published0 = true
 			}
@@ -16146,8 +15589,6 @@ func zjDecodeFallback_L_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjAr
 				if a.published0 {
 					v.F = new(float64)
 				} else {
-					var zjZero float64
-					a.f0 = zjZero
 					v.F = &a.f0
 					a.published0 = true
 				}
@@ -16171,14 +15612,9 @@ func zjDecodeFallback_L_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjAr
 }
 
 // zjArenaL_int holds first-use pointer cells for a decoded L_int in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_int struct {
-}
-
-func (a *zjArenaL_int) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -16459,14 +15895,9 @@ func zjDecodeFallback_L_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) {
 }
 
 // zjArenaL_int32 holds first-use pointer cells for a decoded L_int32 in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_int32 struct {
-}
-
-func (a *zjArenaL_int32) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -16747,14 +16178,9 @@ func zjDecodeFallback_L_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) 
 }
 
 // zjArenaL_int32_oe holds first-use pointer cells for a decoded L_int32_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_int32_oe struct {
-}
-
-func (a *zjArenaL_int32_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -17035,17 +16461,11 @@ func zjDecodeFallback_L_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_i
 }
 
 // zjArenaL_int32_ptr holds first-use pointer cells for a decoded L_int32_ptr in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_int32_ptr struct {
 	published0 bool
 	f0         int32
-}
-
-func (a *zjArenaL_int32_ptr) beginDecode() {
-	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -17252,8 +16672,6 @@ func zjDecodeOrderedField_L_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjAr
 			if a.published0 {
 				v.F = new(int32)
 			} else {
-				var zjZero int32
-				a.f0 = zjZero
 				v.F = &a.f0
 				a.published0 = true
 			}
@@ -17337,8 +16755,6 @@ func zjDecodeFallback_L_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL
 				if a.published0 {
 					v.F = new(int32)
 				} else {
-					var zjZero int32
-					a.f0 = zjZero
 					v.F = &a.f0
 					a.published0 = true
 				}
@@ -17362,14 +16778,9 @@ func zjDecodeFallback_L_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL
 }
 
 // zjArenaL_int_oe holds first-use pointer cells for a decoded L_int_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_int_oe struct {
-}
-
-func (a *zjArenaL_int_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -17650,17 +17061,11 @@ func zjDecodeFallback_L_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_o
 }
 
 // zjArenaL_int_ptr holds first-use pointer cells for a decoded L_int_ptr in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_int_ptr struct {
 	published0 bool
 	f0         int
-}
-
-func (a *zjArenaL_int_ptr) beginDecode() {
-	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -17867,8 +17272,6 @@ func zjDecodeOrderedField_L_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL
 			if a.published0 {
 				v.F = new(int)
 			} else {
-				var zjZero int
-				a.f0 = zjZero
 				v.F = &a.f0
 				a.published0 = true
 			}
@@ -17952,8 +17355,6 @@ func zjDecodeFallback_L_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int
 				if a.published0 {
 					v.F = new(int)
 				} else {
-					var zjZero int
-					a.f0 = zjZero
 					v.F = &a.f0
 					a.published0 = true
 				}
@@ -17977,14 +17378,9 @@ func zjDecodeFallback_L_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int
 }
 
 // zjArenaL_marshaler holds first-use pointer cells for a decoded L_marshaler in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_marshaler struct {
-}
-
-func (a *zjArenaL_marshaler) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -18124,14 +17520,9 @@ func zjDecodeFallback_L_marshaler(l *zerojson.Lexer, v *L_marshaler, a *zjArenaL
 }
 
 // zjArenaL_marshaler_oe holds first-use pointer cells for a decoded L_marshaler_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_marshaler_oe struct {
-}
-
-func (a *zjArenaL_marshaler_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -18271,17 +17662,11 @@ func zjDecodeFallback_L_marshaler_oe(l *zerojson.Lexer, v *L_marshaler_oe, a *zj
 }
 
 // zjArenaL_marshaler_ptr holds first-use pointer cells for a decoded L_marshaler_ptr in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_marshaler_ptr struct {
 	published0 bool
 	f0         Tags
-}
-
-func (a *zjArenaL_marshaler_ptr) beginDecode() {
-	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -18404,8 +17789,6 @@ func zjDecodeFallback_L_marshaler_ptr(l *zerojson.Lexer, v *L_marshaler_ptr, a *
 				if a.published0 {
 					v.F = new(Tags)
 				} else {
-					var zjZero Tags
-					a.f0 = zjZero
 					v.F = &a.f0
 					a.published0 = true
 				}
@@ -18433,14 +17816,9 @@ func zjDecodeFallback_L_marshaler_ptr(l *zerojson.Lexer, v *L_marshaler_ptr, a *
 }
 
 // zjArenaL_quotedint holds first-use pointer cells for a decoded L_quotedint in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_quotedint struct {
-}
-
-func (a *zjArenaL_quotedint) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -18721,14 +18099,9 @@ func zjDecodeFallback_L_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL
 }
 
 // zjArenaL_quotedint_oe holds first-use pointer cells for a decoded L_quotedint_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_quotedint_oe struct {
-}
-
-func (a *zjArenaL_quotedint_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -19009,17 +18382,11 @@ func zjDecodeFallback_L_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zj
 }
 
 // zjArenaL_quotedint_ptr holds first-use pointer cells for a decoded L_quotedint_ptr in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_quotedint_ptr struct {
 	published0 bool
 	f0         StrInt64
-}
-
-func (a *zjArenaL_quotedint_ptr) beginDecode() {
-	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -19226,8 +18593,6 @@ func zjDecodeOrderedField_L_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr,
 			if a.published0 {
 				v.F = new(StrInt64)
 			} else {
-				var zjZero StrInt64
-				a.f0 = zjZero
 				v.F = &a.f0
 				a.published0 = true
 			}
@@ -19311,8 +18676,6 @@ func zjDecodeFallback_L_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *
 				if a.published0 {
 					v.F = new(StrInt64)
 				} else {
-					var zjZero StrInt64
-					a.f0 = zjZero
 					v.F = &a.f0
 					a.published0 = true
 				}
@@ -19336,14 +18699,9 @@ func zjDecodeFallback_L_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *
 }
 
 // zjArenaL_string holds first-use pointer cells for a decoded L_string in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_string struct {
-}
-
-func (a *zjArenaL_string) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -19624,14 +18982,9 @@ func zjDecodeFallback_L_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_strin
 }
 
 // zjArenaL_string_oe holds first-use pointer cells for a decoded L_string_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_string_oe struct {
-}
-
-func (a *zjArenaL_string_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -19912,17 +19265,11 @@ func zjDecodeFallback_L_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL
 }
 
 // zjArenaL_string_ptr holds first-use pointer cells for a decoded L_string_ptr in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_string_ptr struct {
 	published0 bool
 	f0         string
-}
-
-func (a *zjArenaL_string_ptr) beginDecode() {
-	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -20129,8 +19476,6 @@ func zjDecodeOrderedField_L_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zj
 			if a.published0 {
 				v.F = new(string)
 			} else {
-				var zjZero string
-				a.f0 = zjZero
 				v.F = &a.f0
 				a.published0 = true
 			}
@@ -20214,8 +19559,6 @@ func zjDecodeFallback_L_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjAren
 				if a.published0 {
 					v.F = new(string)
 				} else {
-					var zjZero string
-					a.f0 = zjZero
 					v.F = &a.f0
 					a.published0 = true
 				}
@@ -20239,14 +19582,9 @@ func zjDecodeFallback_L_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjAren
 }
 
 // zjArenaL_text holds first-use pointer cells for a decoded L_text in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_text struct {
-}
-
-func (a *zjArenaL_text) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -20377,14 +19715,9 @@ func zjDecodeFallback_L_text(l *zerojson.Lexer, v *L_text, a *zjArenaL_text) {
 }
 
 // zjArenaL_text_oe holds first-use pointer cells for a decoded L_text_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_text_oe struct {
-}
-
-func (a *zjArenaL_text_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -20515,17 +19848,11 @@ func zjDecodeFallback_L_text_oe(l *zerojson.Lexer, v *L_text_oe, a *zjArenaL_tex
 }
 
 // zjArenaL_text_ptr holds first-use pointer cells for a decoded L_text_ptr in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_text_ptr struct {
 	published0 bool
 	f0         YMD
-}
-
-func (a *zjArenaL_text_ptr) beginDecode() {
-	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -20645,8 +19972,6 @@ func zjDecodeFallback_L_text_ptr(l *zerojson.Lexer, v *L_text_ptr, a *zjArenaL_t
 				if a.published0 {
 					v.F = new(YMD)
 				} else {
-					var zjZero YMD
-					a.f0 = zjZero
 					v.F = &a.f0
 					a.published0 = true
 				}
@@ -20674,14 +19999,9 @@ func zjDecodeFallback_L_text_ptr(l *zerojson.Lexer, v *L_text_ptr, a *zjArenaL_t
 }
 
 // zjArenaL_time holds first-use pointer cells for a decoded L_time in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_time struct {
-}
-
-func (a *zjArenaL_time) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -20966,14 +20286,9 @@ func zjDecodeFallback_L_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) {
 }
 
 // zjArenaL_time_oe holds first-use pointer cells for a decoded L_time_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_time_oe struct {
-}
-
-func (a *zjArenaL_time_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -21258,17 +20573,11 @@ func zjDecodeFallback_L_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_tim
 }
 
 // zjArenaL_time_ptr holds first-use pointer cells for a decoded L_time_ptr in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_time_ptr struct {
 	published0 bool
 	f0         time.Time
-}
-
-func (a *zjArenaL_time_ptr) beginDecode() {
-	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -21479,8 +20788,6 @@ func zjDecodeOrderedField_L_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjAren
 			if a.published0 {
 				v.F = new(time.Time)
 			} else {
-				var zjZero time.Time
-				a.f0 = zjZero
 				v.F = &a.f0
 				a.published0 = true
 			}
@@ -21564,8 +20871,6 @@ func zjDecodeFallback_L_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_t
 				if a.published0 {
 					v.F = new(time.Time)
 				} else {
-					var zjZero time.Time
-					a.f0 = zjZero
 					v.F = &a.f0
 					a.published0 = true
 				}
@@ -21589,14 +20894,9 @@ func zjDecodeFallback_L_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_t
 }
 
 // zjArenaL_uint16 holds first-use pointer cells for a decoded L_uint16 in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_uint16 struct {
-}
-
-func (a *zjArenaL_uint16) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -21877,14 +21177,9 @@ func zjDecodeFallback_L_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint1
 }
 
 // zjArenaL_uint16_oe holds first-use pointer cells for a decoded L_uint16_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_uint16_oe struct {
-}
-
-func (a *zjArenaL_uint16_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -22165,17 +21460,11 @@ func zjDecodeFallback_L_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL
 }
 
 // zjArenaL_uint16_ptr holds first-use pointer cells for a decoded L_uint16_ptr in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_uint16_ptr struct {
 	published0 bool
 	f0         uint16
-}
-
-func (a *zjArenaL_uint16_ptr) beginDecode() {
-	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -22382,8 +21671,6 @@ func zjDecodeOrderedField_L_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zj
 			if a.published0 {
 				v.F = new(uint16)
 			} else {
-				var zjZero uint16
-				a.f0 = zjZero
 				v.F = &a.f0
 				a.published0 = true
 			}
@@ -22467,8 +21754,6 @@ func zjDecodeFallback_L_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjAren
 				if a.published0 {
 					v.F = new(uint16)
 				} else {
-					var zjZero uint16
-					a.f0 = zjZero
 					v.F = &a.f0
 					a.published0 = true
 				}
@@ -22492,14 +21777,9 @@ func zjDecodeFallback_L_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjAren
 }
 
 // zjArenaL_uuid holds first-use pointer cells for a decoded L_uuid in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_uuid struct {
-}
-
-func (a *zjArenaL_uuid) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -22780,14 +22060,9 @@ func zjDecodeFallback_L_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) {
 }
 
 // zjArenaL_uuid_oe holds first-use pointer cells for a decoded L_uuid_oe in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_uuid_oe struct {
-}
-
-func (a *zjArenaL_uuid_oe) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -23068,17 +22343,11 @@ func zjDecodeFallback_L_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uui
 }
 
 // zjArenaL_uuid_ptr holds first-use pointer cells for a decoded L_uuid_ptr in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaL_uuid_ptr struct {
 	published0 bool
 	f0         uuid.UUID
-}
-
-func (a *zjArenaL_uuid_ptr) beginDecode() {
-	a.published0 = false
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -23285,8 +22554,6 @@ func zjDecodeOrderedField_L_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjAren
 			if a.published0 {
 				v.F = new(uuid.UUID)
 			} else {
-				var zjZero uuid.UUID
-				a.f0 = zjZero
 				v.F = &a.f0
 				a.published0 = true
 			}
@@ -23370,8 +22637,6 @@ func zjDecodeFallback_L_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_u
 				if a.published0 {
 					v.F = new(uuid.UUID)
 				} else {
-					var zjZero uuid.UUID
-					a.f0 = zjZero
 					v.F = &a.f0
 					a.published0 = true
 				}
@@ -23395,14 +22660,9 @@ func zjDecodeFallback_L_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_u
 }
 
 // zjArenaN_any holds first-use pointer cells for a decoded N_any in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaN_any struct {
-}
-
-func (a *zjArenaN_any) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -23719,14 +22979,9 @@ func zjDecodeFallback_N_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) {
 }
 
 // zjArenaN_rawmsg holds first-use pointer cells for a decoded N_rawmsg in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaN_rawmsg struct {
-}
-
-func (a *zjArenaN_rawmsg) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -23866,16 +23121,10 @@ func zjDecodeFallback_N_rawmsg(l *zerojson.Lexer, v *N_rawmsg, a *zjArenaN_rawms
 }
 
 // zjArenaN_struct holds first-use pointer cells for a decoded N_struct in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaN_struct struct {
 	a0 zjArenaInner
-}
-
-func (a *zjArenaN_struct) beginDecode() {
-	a.a0.beginDecode()
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -24163,19 +23412,12 @@ func zjDecodeFallback_N_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struc
 }
 
 // zjArenaN_struct_ptr holds first-use pointer cells for a decoded N_struct_ptr in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaN_struct_ptr struct {
 	published0 bool
 	v0         Inner
 	a0         zjArenaInner
-}
-
-func (a *zjArenaN_struct_ptr) beginDecode() {
-	a.published0 = false
-	a.a0.beginDecode()
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -24386,8 +23628,6 @@ func zjDecodeOrderedField_N_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zj
 			if a.published0 {
 				v.F = new(Inner)
 			} else {
-				var zjZero Inner
-				a.v0 = zjZero
 				v.F = &a.v0
 				a.published0 = true
 			}
@@ -24474,8 +23714,6 @@ func zjDecodeFallback_N_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjAren
 				if a.published0 {
 					v.F = new(Inner)
 				} else {
-					var zjZero Inner
-					a.v0 = zjZero
 					v.F = &a.v0
 					a.published0 = true
 				}
@@ -24499,14 +23737,9 @@ func zjDecodeFallback_N_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjAren
 }
 
 // zjArenaT_invalid_tagname holds first-use pointer cells for a decoded T_invalid_tagname in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaT_invalid_tagname struct {
-}
-
-func (a *zjArenaT_invalid_tagname) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -24813,14 +24046,9 @@ func zjDecodeFallback_T_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname,
 }
 
 // zjArenaT_string_opt holds first-use pointer cells for a decoded T_string_opt in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaT_string_opt struct {
-}
-
-func (a *zjArenaT_string_opt) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -25139,18 +24367,10 @@ func zjDecodeFallback_T_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjAren
 }
 
 // zjArenaZ_omitzero holds first-use pointer cells for a decoded Z_omitzero in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaZ_omitzero struct {
-	slicePublished1 bool
-	sliceBorrowed1  bool // adopted storage must not be recycled on the next pooled call
-	c1              []string
-}
-
-func (a *zjArenaZ_omitzero) beginDecode() {
-	a.slicePublished1 = false
+	c1 []string
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -25413,15 +24633,10 @@ func zjDecodeOrderedField_Z_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjAren
 			}
 		} else {
 			if v.ES != nil {
-				a.sliceBorrowed1 = a.sliceBorrowed1 || !zerojson.SameBacking(v.ES, a.c1)
 				a.c1 = v.ES
-			} else if a.slicePublished1 || a.sliceBorrowed1 {
-				a.c1 = nil
-				a.sliceBorrowed1 = false
 			} else {
-				clear(a.c1[:cap(a.c1)])
+				a.c1 = nil
 			}
-			a.slicePublished1 = true
 			a.c1 = a.c1[:0]
 			if l.EnterArray() {
 				for {
@@ -25575,15 +24790,10 @@ func zjDecodeFallback_Z_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_o
 				}
 			} else {
 				if v.ES != nil {
-					a.sliceBorrowed1 = a.sliceBorrowed1 || !zerojson.SameBacking(v.ES, a.c1)
 					a.c1 = v.ES
-				} else if a.slicePublished1 || a.sliceBorrowed1 {
-					a.c1 = nil
-					a.sliceBorrowed1 = false
 				} else {
-					clear(a.c1[:cap(a.c1)])
+					a.c1 = nil
 				}
-				a.slicePublished1 = true
 				a.c1 = a.c1[:0]
 				if l.EnterArray() {
 					for {
@@ -25632,14 +24842,9 @@ func zjDecodeFallback_Z_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_o
 }
 
 // zjArenaInner holds first-use pointer cells for a decoded Inner in one
-// allocation, and (for -pool Decoders, which reuse an arena across
-// decodes instead of allocating one per call) holds a persistent
-// cell per slice/map field so repeated decodes reuse their backing
-// storage. Detached storage is not reused within the same decode.
+// allocation, plus working container headers for this call only.
+// Detached storage is not reused within the same decode.
 type zjArenaInner struct {
-}
-
-func (a *zjArenaInner) beginDecode() {
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the

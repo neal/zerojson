@@ -105,18 +105,12 @@ func (g *generator) emitEnumHelpers() {
 func (g *generator) genArena(ti typeInfo) {
 	g.p("")
 	g.p("// %s holds first-use pointer cells for a decoded %s in one", arenaName(ti.name), ti.name)
-	g.p("// allocation, and (for -pool Decoders, which reuse an arena across")
-	g.p("// decodes instead of allocating one per call) holds a persistent")
-	g.p("// cell per slice/map field so repeated decodes reuse their backing")
-	g.p("// storage. Detached storage is not reused within the same decode.")
+	g.p("// allocation, plus working container headers for this call only.")
+	g.p("// Detached storage is not reused within the same decode.")
 	g.p("type %s struct {", arenaName(ti.name))
 	for _, f := range ti.fields {
 		if f.ptr {
 			g.p("\tpublished%s bool", f.cellName)
-		}
-		if f.kind == kSlice || f.kind == kLeafSlice {
-			g.p("\tslicePublished%s bool", f.cellName)
-			g.p("\tsliceBorrowed%s bool // adopted storage must not be recycled on the next pooled call", f.cellName)
 		}
 		if f.kind == kStruct {
 			if f.ptr {
@@ -135,24 +129,6 @@ func (g *generator) genArena(ti typeInfo) {
 			g.p("\tc%s %s", f.cellName, sliceCellType(f.valInfo.typeStr, f.elemPtr))
 		case kMap:
 			g.p("\tm%s %s", f.cellName, f.typeStr)
-			g.p("\towned%s bool // only arena-owned maps may be cleared for reuse", f.cellName)
-			g.p("\tmapPublished%s bool", f.cellName)
-		}
-	}
-	g.p("}")
-	g.p("func (a *%s) beginDecode() {", arenaName(ti.name))
-	for _, f := range ti.fields {
-		if f.ptr {
-			g.p("\ta.published%s = false", f.cellName)
-		}
-		if f.kind == kMap {
-			g.p("\ta.mapPublished%s = false", f.cellName)
-		}
-		if f.kind == kSlice || f.kind == kLeafSlice {
-			g.p("\ta.slicePublished%s = false", f.cellName)
-		}
-		if f.kind == kStruct {
-			g.p("\ta.a%s.beginDecode()", f.cellName)
 		}
 	}
 	g.p("}")
@@ -206,15 +182,14 @@ func (g *generator) stdlibValue(f fieldInfo, visiting map[string]bool) bool {
 
 // Preserve an existing receiver, including aliases held elsewhere in the
 // caller's object graph. An arena cell can be published only once per public
-// decode: null may detach it after a callback has retained its address. Only
-// the next pooled call permits reuse, never a nested call or ordered bail.
+// decode: null may detach it after a callback has retained its address.
+// No nested call or ordered bail permits republishing a detached cell.
 func (g *generator) emitPointerCellInit(f fieldInfo, target, cell, ind string) {
 	g.p("%sif %s == nil {", ind, target)
 	g.p("%s\tif a.published%s {", ind, f.cellName)
 	g.p("%s\t\t%s = new(%s)", ind, target, f.typeStr)
 	g.p("%s\t} else {", ind)
-	g.p("%s\tvar zjZero %s", ind, f.typeStr)
-	g.p("%s\t%s = zjZero", ind, cell)
+	// An unpublished cell in this call's fresh arena is already zero.
 	g.p("%s\t%s = &%s", ind, target, cell)
 	g.p("%s\ta.published%s = true", ind, f.cellName)
 	g.p("%s\t}", ind)
@@ -232,25 +207,10 @@ func (g *generator) emitSlicePublication(f fieldInfo, target, cell, ind string) 
 		present += " && " + source + " != nil"
 	}
 	g.p("%sif %s {", ind, present)
-	// The target may hand back the arena's own cell: the ordered path
-	// published it and then rewound to the keyed decoder, or the member
-	// is duplicated. That storage is still ours to recycle on the next
-	// pooled call; only a header over SOME OTHER array (supplied by the
-	// caller or a callback) is borrowed — and once borrowed, handing the
-	// same foreign header back again keeps it borrowed.
-	g.p("%s\ta.sliceBorrowed%s = a.sliceBorrowed%s || !zerojson.SameBacking(%s, %s)", ind, f.cellName, f.cellName, source, cell)
 	g.p("%s\t%s = %s", ind, cell, source)
-	g.p("%s} else if a.slicePublished%s || a.sliceBorrowed%s {", ind, f.cellName, f.cellName)
-	g.p("%s\t%s = nil", ind, cell)
-	g.p("%s\ta.sliceBorrowed%s = false", ind, f.cellName)
 	g.p("%s} else {", ind)
-	// Only private arena storage is reset. Clear the entire capacity: a
-	// previous duplicate member may have written beyond the cell's length
-	// through another slice header. Those slots must start at zero before
-	// the fresh result can expose them through a later null element.
-	g.p("%s\tclear(%s[:cap(%s)])", ind, cell, cell)
+	g.p("%s\t%s = nil", ind, cell)
 	g.p("%s}", ind)
-	g.p("%sa.slicePublished%s = true", ind, f.cellName)
 }
 
 // Empty arrays replace the slice with a non-nil, zero-capacity value, as
@@ -562,7 +522,7 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 			g.p("%s%s = %s", ind, target, readExpr)
 		}
 	}
-	// Slice/map fields decode into the arena's persistent collection cell
+	// Slice/map fields decode into the arena's per-call collection cell
 	// (a.c<N> / a.m<N>) and then alias target to it. For a POINTER to a
 	// slice/map (*[]T, *map[string]T — a shape encoding/json supports) the
 	// collection goes through the arena's pointer cell (a.f<N>, of the
@@ -654,8 +614,7 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		g.p("%sl.SkipObject()", ind)
 	case kCustomLeaf:
 		if f.ptr {
-			// Keep an existing receiver; clear arena storage only when
-			// allocating a new one (including on each pooled decode).
+			// Keep existing receivers; publish a fresh cell for a nil target.
 			g.emitPointerCellInit(f, target, cell, ind)
 			g.leafRead(f.leaf, target, ind)
 		} else {
@@ -719,12 +678,8 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 	case kSlice:
 		cell := "a.c" + f.cellName
 		g.emitSlicePublication(f, target, cell, ind)
-		// Reslice-or-append onto the arena's persistent cell instead of
-		// appending directly to target: a -pool Decoder's arena survives
-		// across decodes, so this reuses the backing array instead of
-		// reallocating it every message. Resetting the cell's length to 0
-		// up front — keeping its capacity — is also a correctness
-		// requirement independent of pooling: re-decoding this field onto a
+		// Reset the cell's length to 0 while keeping its current capacity:
+		// re-decoding this field onto a
 		// non-empty slice (a duplicate key in the fallback loop, or an
 		// ordered attempt's confirmed-key write followed by a fallback
 		// retry after a later bail) would otherwise double up elements
@@ -837,10 +792,6 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		}
 	case kMap:
 		cell := "a.m" + f.cellName
-		// Reuse the arena's persistent map cell across -pool decodes
-		// (clear() empties it without discarding the underlying table);
-		// aliased into target exactly like the slice cells above, with
-		// the same lifetime contract (invalidated by the next Decode).
 		// Seed the cell from an existing NON-NIL map behind target (for a
 		// pointer field: the pointer must be non-nil AND point at a
 		// non-nil map — a pointer to a nil map must not be adopted as the
@@ -853,18 +804,11 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		// header since this field last appeared. Re-adopt it on every member.
 		g.p("%s{", ind)
 		g.p("%s\tif %s {", ind, seedCond)
-		// The arena's own map handed back (ordered rewind, duplicate
-		// member) stays owned; see emitSlicePublication.
-		g.p("%s\t\ta.owned%s = a.owned%s && zerojson.SameMap(%s, %s)", ind, f.cellName, f.cellName, derefTarget, cell)
 		g.p("%s\t\t%s = %s", ind, cell, derefTarget)
-		g.p("%s\t} else if %s == nil || !a.owned%s || a.mapPublished%s {", ind, cell, f.cellName, f.cellName)
-		g.p("%s\t\t%s = make(%s)", ind, cell, f.typeStr)
-		g.p("%s\t\ta.owned%s = true", ind, f.cellName)
 		g.p("%s\t} else {", ind)
-		g.p("%s\t\tclear(%s)", ind, cell)
+		g.p("%s\t\t%s = make(%s)", ind, cell, f.typeStr)
 		g.p("%s\t}", ind)
 		g.p("%s}", ind)
-		g.p("%sa.mapPublished%s = true", ind, f.cellName)
 		g.p("%sif l.EnterObject() {", ind)
 		g.p("%sfor {", ind)
 		if f.intern {

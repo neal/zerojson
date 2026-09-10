@@ -40,15 +40,9 @@ func Example_basicMarshalUnmarshal() {
 	// ALPHA 2.5
 }
 
-// Example_pooledDecodeLoop is the zero-allocation decode loop: a pooled
-// Decoder reuses one arena across calls, and DecodeBorrow aliases the input
-// instead of copying strings.
-//
-// Lifetime contract: the decoded value holds pointers into the Decoder's
-// arena (and, in borrow mode, into the input bytes), so it is invalidated
-// by the NEXT Decode/DecodeBorrow on the same Decoder. Finish with — or copy
-// out of — each result before decoding the next, exactly as the loop below
-// does (it consumes leg fully each iteration and retains nothing).
+// Example_pooledDecodeLoop shows zero-allocation decoding for a leaf-only
+// shape. DecodeBorrow aliases input strings; keep input unchanged for the
+// result's lifetime. Later calls do not invalidate earlier results.
 func Example_pooledDecodeLoop() {
 	batch := [][]byte{
 		[]byte(`{"ratio":"1","label":"ALPHA","mode":"up"}`),
@@ -61,7 +55,7 @@ func Example_pooledDecodeLoop() {
 		if err := d.DecodeBorrow(msg, &leg); err != nil {
 			panic(err)
 		}
-		// Use leg now; do not retain it past the next DecodeBorrow.
+		// Borrowed strings refer to msg, which remains unchanged here.
 		fmt.Printf("%s=%s\n", leg.Label, leg.Ratio.String())
 	}
 	// Output:

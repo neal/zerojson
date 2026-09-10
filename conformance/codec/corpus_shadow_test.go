@@ -123,8 +123,7 @@ func shadowCompare(t *testing.T, variant shadowVariant, pooledCopy, pooledBorrow
 	}
 
 	// Copy modes must own all decoded data even when the input comes from a
-	// synthetic/error-recovery sequence. Borrow modes remain live only until
-	// their next pooled decode and are compared before that point.
+	// synthetic/error-recovery sequence. Borrow modes retain their inputs.
 	scribble(inputCopy)
 	assertMapFieldsLikeEqual(t, "plain copy", std, plainCopy)
 	assertMapFieldsLikeEqual(t, "plain borrow", std, plainBorrow)

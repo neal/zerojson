@@ -160,14 +160,12 @@ your schema, business rules, or resource limits.
   and later corrupts. Treat every string from a borrow decode as aliased.
 
 - **A pooled `Decoder` zeroes `*v` before every decode and is
-  single-goroutine.** It never adopts a caller-owned map or pointee as an
-  arena cell (a later decode would clear it in place), so decode into a
+  single-goroutine.** It uses fresh per-call storage, so decode into a
   fresh or throwaway value, not into a struct you also populate yourself.
   Overlapping calls on one Decoder panic with a descriptive message;
   keep one Decoder per goroutine
-  (`sync.Pool` works well). A decoded value is invalidated by the next
-  decode on the same Decoder; keeping it yields a value stitched from two
-  messages, silently — copy out what you keep.
+  (`sync.Pool` works well). Later calls do not invalidate prior results.
+  Borrowed input and custom-codec ownership contracts still apply.
 
 ### Target reuse and nulls
 
@@ -230,10 +228,10 @@ your schema, business rules, or resource limits.
 
 ### Resource considerations
 
-A pooled arena can retain the high-water mark of the largest message it has
-seen, so bound message size or recycle Decoders that have seen an outlier.
-Private slice capacity is cleared before reuse, including hidden slots that
-later duplicate members could expose; reset work scales with that capacity.
+Decoders do not retain result storage across calls. Live results and borrowed
+input can still retain large allocations, so bound message size and result
+lifetimes. Fresh container storage increases allocation and GC work compared
+with cross-call pooling; measure representative workloads.
 An empty JSON array replaces its slice with a non-nil, zero-capacity value.
 
 - **The intern table is process-global and entry-bounded** (32 shards ×

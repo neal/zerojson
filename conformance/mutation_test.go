@@ -18,6 +18,18 @@ import (
 // copies the repository, regenerates fixtures, and launches nested go tests.
 // Use scripts/mutation-test.sh; quick is the developer tier and full is the
 // broader pre-release tier.
+func TestMutationCatalogAnchors(t *testing.T) {
+	for _, m := range mutationCatalog() {
+		data, err := os.ReadFile(filepath.Join("..", m.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(string(data), m.old); n != m.wantCount {
+			t.Errorf("%s: anchor count %d, want %d", m.name, n, m.wantCount)
+		}
+	}
+}
+
 func TestMutationDetectors(t *testing.T) {
 	mode := os.Getenv("ZEROJSON_MUTATION")
 	if mode == "" {
@@ -157,19 +169,16 @@ func mutationCatalog() []mutationCase {
 			name: "empty_slice_keeps_previous_capacity", tier: "full", file: "cmd/zerojsongen/decode.go",
 			old: `g.p("%sif len(%s) == 0 {", ind, cell)`,
 			new: `g.p("%sif %s == nil {", ind, cell)`, wantCount: 1,
-			detector: generatorDetector(`^TestScalarReuseKinds$`), wantOutput: "empty array retained capacity:",
+			regenerate: true, detector: codecDetector(`^TestOverrideSliceStorage$`), wantOutput: "empty override slice retained capacity:",
 		},
 		{
-			name: "pooled_slice_keeps_hidden_values", tier: "full", file: "cmd/zerojsongen/decode.go",
-			old: `g.p("%s\tclear(%s[:cap(%s)])", ind, cell, cell)`,
-			new: `g.p("%s\tclear(%s)", ind, cell)`, wantCount: 1,
-			detector: generatorDetector(`^TestScalarReuseKinds$`), wantOutput: "scalar field reuse",
-		},
-		{
-			name: "pooled_root_keeps_hidden_values", tier: "full", file: "cmd/zerojsongen/root.go",
-			old: `g.p("%sif *v != nil { %s = *v } else { clear(%s[:cap(%s)]) }", ind, cell, cell, cell)`,
-			new: `g.p("%sif *v != nil { %s = *v }", ind, cell)`, wantCount: 1,
-			detector: generatorDetector(`^TestScalarReuseKinds$`), wantOutput: "pooled root hidden capacity",
+			// Cross-call hidden-capacity clearing no longer exists. Prevent
+			// reintroducing retained result storage instead; keep the old
+			// hidden-capacity behavioral tests in TestScalarReuseKinds.
+			name: "decoder_retains_arena", tier: "quick", file: "cmd/zerojsongen/pool.go",
+			old: `g.p("type %s struct {", dec)`,
+			new: `g.p("type %s struct {", dec); g.p("\ta %s", arenaName(n))`, wantCount: 1,
+			regenerate: true, detector: codecDetector(`^TestDecoderOwnsNoResultStorage$`), wantOutput: "retained decoder storage",
 		},
 		{
 			name: "scalar_root_reuse_rejects_null", tier: "full", file: "cmd/zerojsongen/decode.go",
@@ -211,12 +220,12 @@ func mutationCatalog() []mutationCase {
 		},
 		{
 			name: "publication_map", tier: "full", file: "cmd/zerojsongen/decode.go",
-			old: ` || a.mapPublished%s {", ind, cell, f.cellName, f.cellName)`, new: ` {", ind, cell, f.cellName)`, wantCount: 1,
+			old: `g.p("%s\t\t%s = make(%s)", ind, cell, f.typeStr)`, new: `g.p("%s\t\tif %s == nil { %s = make(%s) } else { clear(%s) }", ind, cell, cell, f.typeStr, cell)`, wantCount: 1,
 			detector: generatorDetector(`^TestGeneratorBehaviorMatrix/publication_map_ordered$`), wantOutput: "publication pooled=",
 		},
 		{
 			name: "publication_slice", tier: "full", file: "cmd/zerojsongen/decode.go",
-			old: `g.p("%sa.slicePublished%s = true", ind, f.cellName)`, new: `g.p("%sa.slicePublished%s = false", ind, f.cellName)`, wantCount: 1,
+			old: `g.p("%s\t%s = nil", ind, cell)`, new: `g.p("%s\t// incorrectly keep detached storage", ind)`, wantCount: 1,
 			detector: generatorDetector(`^TestGeneratorBehaviorMatrix/publication_slice_ordered$`), wantOutput: "publication pooled=",
 		},
 		{
@@ -231,10 +240,9 @@ func mutationCatalog() []mutationCase {
 		},
 		{
 			name: "state_campaign_observes_retained_maps", tier: "full", file: "cmd/zerojsongen/decode.go",
-			old: `g.p("%s\t} else if %s == nil || !a.owned%s || a.mapPublished%s {", ind, cell, f.cellName, f.cellName)`,
-			// Both guards now prevent same-document reuse. Remove both to
-			// model the original fault of clearing an observable map.
-			new:        `g.p("%s\t} else if %s == nil {", ind, cell)`,
+			old: `g.p("%s\t\t%s = make(%s)", ind, cell, f.typeStr)`,
+			// Recycle detached storage to model clearing an observable map.
+			new:        `g.p("%s\t\tif %s == nil { %s = make(%s) } else { clear(%s) }", ind, cell, cell, f.typeStr, cell)`,
 			occurrence: 0, wantCount: 1,
 			detector: generatorDetector(`^TestGeneratedSchemaCampaign$`), wantOutput: "state/retained-pointee mismatch",
 		},
@@ -372,7 +380,7 @@ func mutationCatalog() []mutationCase {
 			wantOutput: "decode errors:",
 		},
 		{
-			name:       "pooled_slice_is_not_reset",
+			name:       "duplicate_slice_is_not_reset",
 			tier:       "quick",
 			file:       "cmd/zerojsongen/decode.go",
 			old:        `g.p("%s%s = %s[:0]", ind, cell, cell)`,
@@ -380,22 +388,9 @@ func mutationCatalog() []mutationCase {
 			occurrence: 0,
 			wantCount:  3,
 			regenerate: true,
-			detector:   codecDetector(`^TestPooledDecoderSliceReuseNoGhosts$`),
-			wantOutput: "pooled slice reuse leaked state",
-		},
-		{
-			name:       "pooled_map_is_not_cleared",
-			tier:       "quick",
-			file:       "cmd/zerojsongen/decode.go",
-			old:        `g.p("%s\t\tclear(%s)", ind, cell)`,
-			new:        `g.p("%s\t\t_ = %s", ind, cell)`,
-			occurrence: 0,
-			wantCount:  1,
-			regenerate: true,
-			detector:   codecDetector(`^TestPooledDecoderMapReuseNoGhosts$`),
-			wantOutput: "pooled map reuse leaked state",
-		},
-		{
+			detector:   codecDetector(`^TestPooledDecoderNestedInSliceNoLeak$`),
+			wantOutput: "nested-in-slice leak on duplicate member:",
+		}, {
 			name:       "ordered_fallback_replays_callbacks",
 			tier:       "quick",
 			file:       "cmd/zerojsongen/ordered.go",
@@ -417,18 +412,6 @@ func mutationCatalog() []mutationCase {
 			wantCount:  1,
 			detector:   generatorDetector(`^TestGeneratorBehaviorMatrix/malformed_json_marshaler_rejected_in_every_shape$`),
 			wantOutput: "direct malformed output errors:",
-		},
-		{
-			name:       "pooled_pointer_cell_is_not_zeroed",
-			tier:       "full",
-			file:       "cmd/zerojsongen/decode.go",
-			old:        `g.p("%s\t%s = zjZero", ind, cell)`,
-			new:        `g.p("%s\t_ = zjZero", ind)`,
-			occurrence: 0,
-			wantCount:  1,
-			regenerate: true,
-			detector:   codecDetector(`^TestPooledDecoderPtrStructReuseNoSubfieldGhosts$`),
-			wantOutput: "pooled ptr-struct reuse leaked state",
 		},
 		{
 			name:       "pooled_entry_points_skip_syntax_preflight",
@@ -461,22 +444,9 @@ func mutationCatalog() []mutationCase {
 			occurrence: 0,
 			wantCount:  1,
 			regenerate: true,
-			detector:   codecDetector(`^TestRootPooledDecode/EventList_reuse$`),
-			wantOutput: "reused-cell len",
-		},
-		{
-			name:       "root_map_is_not_cleared",
-			tier:       "full",
-			file:       "cmd/zerojsongen/root.go",
-			old:        `g.p("%s\t\tclear(%s)", ind, cell)`,
-			new:        `g.p("%s\t\t_ = %s", ind, cell)`,
-			occurrence: 0,
-			wantCount:  1,
-			regenerate: true,
-			detector:   codecDetector(`^TestRootPooledDecode/LegIndex_reuse$`),
-			wantOutput: "reused-table len",
-		},
-		{
+			detector:   codecDetector(`^TestOverrideSliceStorage$`),
+			wantOutput: "reused override root length:",
+		}, {
 			name:       "reused_slice_slot_is_not_zeroed",
 			tier:       "full",
 			file:       "cmd/zerojsongen/decode.go",

@@ -1,0 +1,351 @@
+{
+  "environment": {
+    "go": "go1.26.5",
+    "os": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M4 Pro",
+    "GOMAXPROCS": 1,
+    "GOGC": 100,
+    "GOMEMLIMIT": "1GiB",
+    "benchtime": "250ms",
+    "order": [
+      "prototype",
+      "implementation",
+      "implementation",
+      "prototype"
+    ],
+    "samplesPerEntry": 3
+  },
+  "measurements": {
+    "BenchmarkPayload/n0/pool-borrow": {
+      "prototype": [
+        {
+          "ns": 334.9,
+          "bytes": 352,
+          "allocs": 3
+        },
+        {
+          "ns": 337.1,
+          "bytes": 352,
+          "allocs": 3
+        },
+        {
+          "ns": 331.6,
+          "bytes": 352,
+          "allocs": 3
+        },
+        {
+          "ns": 327,
+          "bytes": 352,
+          "allocs": 3
+        },
+        {
+          "ns": 327.7,
+          "bytes": 352,
+          "allocs": 3
+        },
+        {
+          "ns": 330,
+          "bytes": 352,
+          "allocs": 3
+        }
+      ],
+      "implementation": [
+        {
+          "ns": 323.6,
+          "bytes": 336,
+          "allocs": 3
+        },
+        {
+          "ns": 329.2,
+          "bytes": 336,
+          "allocs": 3
+        },
+        {
+          "ns": 329,
+          "bytes": 336,
+          "allocs": 3
+        },
+        {
+          "ns": 325.7,
+          "bytes": 336,
+          "allocs": 3
+        },
+        {
+          "ns": 325.4,
+          "bytes": 336,
+          "allocs": 3
+        },
+        {
+          "ns": 326.1,
+          "bytes": 336,
+          "allocs": 3
+        }
+      ]
+    },
+    "BenchmarkPayload/n4/pool-borrow": {
+      "prototype": [
+        {
+          "ns": 884.9,
+          "bytes": 688,
+          "allocs": 9
+        },
+        {
+          "ns": 897.6,
+          "bytes": 688,
+          "allocs": 9
+        },
+        {
+          "ns": 880,
+          "bytes": 688,
+          "allocs": 9
+        },
+        {
+          "ns": 887.5,
+          "bytes": 688,
+          "allocs": 9
+        },
+        {
+          "ns": 881.8,
+          "bytes": 688,
+          "allocs": 9
+        },
+        {
+          "ns": 885.2,
+          "bytes": 688,
+          "allocs": 9
+        }
+      ],
+      "implementation": [
+        {
+          "ns": 868.3,
+          "bytes": 672,
+          "allocs": 9
+        },
+        {
+          "ns": 867.3,
+          "bytes": 672,
+          "allocs": 9
+        },
+        {
+          "ns": 879.8,
+          "bytes": 672,
+          "allocs": 9
+        },
+        {
+          "ns": 890.3,
+          "bytes": 672,
+          "allocs": 9
+        },
+        {
+          "ns": 876.5,
+          "bytes": 672,
+          "allocs": 9
+        },
+        {
+          "ns": 874.4,
+          "bytes": 672,
+          "allocs": 9
+        }
+      ]
+    },
+    "BenchmarkPayload/n64/pool-borrow": {
+      "prototype": [
+        {
+          "ns": 7603,
+          "bytes": 6960,
+          "allocs": 17
+        },
+        {
+          "ns": 7615,
+          "bytes": 6960,
+          "allocs": 17
+        },
+        {
+          "ns": 7785,
+          "bytes": 6960,
+          "allocs": 17
+        },
+        {
+          "ns": 7735,
+          "bytes": 6960,
+          "allocs": 17
+        },
+        {
+          "ns": 7800,
+          "bytes": 6960,
+          "allocs": 17
+        },
+        {
+          "ns": 7805,
+          "bytes": 6960,
+          "allocs": 17
+        }
+      ],
+      "implementation": [
+        {
+          "ns": 7818,
+          "bytes": 6944,
+          "allocs": 17
+        },
+        {
+          "ns": 7691,
+          "bytes": 6944,
+          "allocs": 17
+        },
+        {
+          "ns": 7801,
+          "bytes": 6944,
+          "allocs": 17
+        },
+        {
+          "ns": 7723,
+          "bytes": 6944,
+          "allocs": 17
+        },
+        {
+          "ns": 7829,
+          "bytes": 6944,
+          "allocs": 17
+        },
+        {
+          "ns": 7699,
+          "bytes": 6944,
+          "allocs": 17
+        }
+      ]
+    },
+    "BenchmarkDecodeEventLeg_ZJSON_PooledBorrow": {
+      "prototype": [
+        {
+          "ns": 68.51,
+          "bytes": 0,
+          "allocs": 0
+        },
+        {
+          "ns": 67.55,
+          "bytes": 0,
+          "allocs": 0
+        },
+        {
+          "ns": 67.92,
+          "bytes": 0,
+          "allocs": 0
+        },
+        {
+          "ns": 68.03,
+          "bytes": 0,
+          "allocs": 0
+        },
+        {
+          "ns": 68.34,
+          "bytes": 0,
+          "allocs": 0
+        },
+        {
+          "ns": 68.12,
+          "bytes": 0,
+          "allocs": 0
+        }
+      ],
+      "implementation": [
+        {
+          "ns": 67.85,
+          "bytes": 0,
+          "allocs": 0
+        },
+        {
+          "ns": 69.43,
+          "bytes": 0,
+          "allocs": 0
+        },
+        {
+          "ns": 67.94,
+          "bytes": 0,
+          "allocs": 0
+        },
+        {
+          "ns": 67.64,
+          "bytes": 0,
+          "allocs": 0
+        },
+        {
+          "ns": 68.46,
+          "bytes": 0,
+          "allocs": 0
+        },
+        {
+          "ns": 68.07,
+          "bytes": 0,
+          "allocs": 0
+        }
+      ]
+    },
+    "BenchmarkDecodeEvent_ZJSON_PooledBorrow": {
+      "prototype": [
+        {
+          "ns": 4516,
+          "bytes": 3040,
+          "allocs": 55
+        },
+        {
+          "ns": 4489,
+          "bytes": 3040,
+          "allocs": 55
+        },
+        {
+          "ns": 4504,
+          "bytes": 3040,
+          "allocs": 55
+        },
+        {
+          "ns": 4438,
+          "bytes": 3040,
+          "allocs": 55
+        },
+        {
+          "ns": 4438,
+          "bytes": 3040,
+          "allocs": 55
+        },
+        {
+          "ns": 4481,
+          "bytes": 3040,
+          "allocs": 55
+        }
+      ],
+      "implementation": [
+        {
+          "ns": 4380,
+          "bytes": 2976,
+          "allocs": 55
+        },
+        {
+          "ns": 4479,
+          "bytes": 2976,
+          "allocs": 55
+        },
+        {
+          "ns": 4532,
+          "bytes": 2976,
+          "allocs": 55
+        },
+        {
+          "ns": 4432,
+          "bytes": 2976,
+          "allocs": 55
+        },
+        {
+          "ns": 4404,
+          "bytes": 2976,
+          "allocs": 55
+        },
+        {
+          "ns": 4495,
+          "bytes": 2976,
+          "allocs": 55
+        }
+      ]
+    }
+  }
+}

@@ -154,46 +154,33 @@ reserved; a target package declaring that name at package scope is refused.
 
 ## Reusable decoders
 
-`-pool` emits a `<Type>Decoder` per listed type that reuses one arena
-across decodes, eliminating the per-decode arena allocation. Combined
-with `DecodeBorrow`, a decode loop over a leaf-only shape allocates
-**zero** bytes (fields that delegate to user methods, `any`, `[]byte`,
-maps of structs, `[]*Struct` elements, and elements of `[]Struct` whose
-struct has pointer fields still allocate on their own, the last three
-once per element):
+`-pool` emits a reset-first `<Type>Decoder` per listed type. The flag name
+is retained for compatibility; the Decoder now uses fresh storage per call,
+not a persistent arena. Leaf-only borrowing shapes can still allocate zero
+bytes. Pointer and container shapes allocate as needed.
 
 ```go
-var d models.EventDecoder // pool one per goroutine, or via sync.Pool
+var d models.EventDecoder // one per goroutine
 for _, msg := range batch {
     var e models.Event
     if err := d.DecodeBorrow(msg, &e); err != nil {
         return err
     }
-    apply(&e) // must finish before the next Decode reuses the arena
+    apply(&e)
 }
 ```
 
-Lifetime: the decoded value holds pointers into the Decoder's arena (and,
-in borrow mode, into `msg`), so it is invalidated by the next
-`Decode`/`DecodeBorrow` on that Decoder. Finish with — or copy out of —
-one result before decoding the next.
+Later calls do not invalidate earlier results, including retained slices,
+maps, and pointers. In borrow mode, `msg` must remain live and unmodified
+while any result refers to it. Custom codecs retain their own ownership
+contracts. Each call resets the destination before validation, including
+when the input is invalid; ordinary `UnmarshalZJSON` methods instead reuse
+the destination with stdlib semantics.
 
-Slice and map fields also alias the Decoder's arena (a persistent
-per-field cell, resliced/reclaimed across decodes so their backing array
-or table is reused instead of reallocated — the same lifetime rule
-applies to them, not just pointer fields): don't retain `e.Items` or
-`e.Tags` past the next `Decode` either. Value-typed fields with no
-pointers, slices, or maps in their tree are unaffected (copies, as
-always).
-
-Memory: arena storage can retain the high-water mark of the largest message
-the Decoder has seen (see
-[resource considerations](compatibility.md#resource-considerations)), so a
-`sync.Pool` of Decoders that each met one outlier pins that many peaks.
-Bound message size, or drop a Decoder after an outlier.
-Reusing a private slice clears its retained capacity before publication,
-so an outlier can also increase later reset work. An empty JSON array
-replaces its slice with a non-nil, zero-capacity value.
+The Decoder does not retain high-water-mark storage from previous messages.
+Fresh storage costs allocations and GC work on collection-heavy workloads;
+see [resource considerations](compatibility.md#resource-considerations).
+An empty JSON array replaces its slice with a non-nil, zero-capacity value.
 
 ## Projection / passthrough decoding
 

@@ -23,6 +23,9 @@ stays dependency-free; see [repository layout](../CONTRIBUTING.md#repository-lay
   campaigns, plus `compat/` wrapper tests and the finite `typeshape/`
   classification matrix.
 - `mutation_test.go` — repository-wide curated mutation testing.
+- `ownership/` — bounded storage/callback transitions, cross-call result
+  lifetimes, and the architecture-comparison benchmark fixture. See its
+  [coverage inventory](ownership/README.md).
 
 ## Which `encoding/json` is the oracle
 

@@ -1,8 +1,8 @@
 # Decoder simplification and confidence plan
 
-Status: architecture experiments completed; production implementation has
-not changed. The preferred design is provisional pending the performance
-decision below. This is an active maintainer plan, not a release guarantee.
+Status: fresh per-call storage accepted under the maintainer's delegated
+decision; implementation is in progress on `codex/fresh-decoder-storage`.
+This is an active maintainer plan, not a release guarantee.
 
 ## Objective
 
@@ -22,7 +22,7 @@ verification of the finalized implementation.
 - Frozen code control: `ba64c77964c2c56e68ccbfe08ce2e5bd565456b7`.
   Later planning-only commits do not change this experimental control.
 - Five isolated prototypes compared speculation, persistent arenas, and
-  ordinary-container stdlib delegation. Encoding was unchanged: all 35
+  ordinary-container stdlib delegation. Encoding was unchanged: all 29
   generated encoder functions in the codec fixture had matching normalized
   AST hashes.
 - Preferred candidate: fresh per-call storage, retaining generated scalar
@@ -50,6 +50,14 @@ its location is in the project continuity note. It includes source fixtures,
 candidate patches, rebuild/benchmark scripts, raw logs and summaries. Before
 implementing the selected design, bring the relevant evidence and tests into
 a reviewable development branch; do not depend on temporary directories.
+The independent fixtures and amd64 summary are now checked in under
+`conformance/ownership`; raw experimental logs remain in the external archive.
+
+The encoder fingerprint was refined to select `AppendZJSON` methods exactly:
+the earlier 35-function count also included six decoder/name-lookup functions
+whose type names contained Appender. All 29 actual encoders match control,
+prototype and implementation (SHA-256
+`bc91e7c6d5d794f80b28494325b38a9e00c8bf7374e40641d12bacf361e202e9`).
 
 ## Gates, in order
 
@@ -59,7 +67,18 @@ Control and prototypes are isolated, encoding is unchanged, behavioral
 challenges ran, and forward/reverse local benchmarks identify tradeoffs.
 The resulting recommendation is the fresh-storage candidate above.
 
-### G1 — Accept a performance and allocation budget [next]
+### G1 — Accept a performance and allocation budget [complete]
+
+Decision: adopt fresh per-call storage, retaining eligible ordered and scalar
+paths. The maintainer delegated this decision after the amd64 comparison.
+Accept the measured mixed-workload 9.2% time increase and 39-to-55 allocations,
+and synthetic collection increases up to 37.1% with up to 17 allocations.
+This is an explicit tradeoff decision, not a retroactively passed predefined
+budget. Implementation must preserve flat zero-allocation decoding and must
+not materially regress beyond the fresh-ordered prototype; investigate any
+repeatable additional slowdown above 5% or additional allocation per operation
+on those same fixtures before G4 can close. Production GC/tail-latency capacity
+remains unproven by this microbenchmark evidence.
 
 1. Reproduce the preferred candidate/control comparison on amd64 in an
    approved, isolated environment. Do not load a shared host or incur paid
@@ -76,7 +95,20 @@ The resulting recommendation is the fresh-storage candidate above.
 Exit: recorded budget and architecture decision supported by repeatable
 evidence. Until then, production decoder behavior remains unchanged.
 
-### G2 — Implement the selected ownership design [pending G1]
+### G2 — Implement the selected ownership design [complete]
+
+Within-call ownership rules:
+
+- A Decoder retains no arena or result storage between calls. Each call resets
+  its destination, validates the whole input, then creates its own arena.
+- Current destination pointers and container headers are authoritative, including
+  replacements made by callbacks. Detached storage is never recycled.
+- A published pointer cell cannot be republished after detachment within a call;
+  retain pointer publication guards even though cross-call bookkeeping disappears.
+- Ordinary reused slices preserve stdlib slot/null semantics. Registered overrides
+  keep their explicitly tested reset semantics; these are not interchangeable.
+- Borrowed strings still depend on the input buffer, independent of Decoder life.
+- Ordered fallback must obey the existing no-callback-replay eligibility rules.
 
 - Write the within-call ownership/publication rules before refactoring.
 - Implement the accepted design in a separate branch from the frozen control.
@@ -90,7 +122,7 @@ evidence. Until then, production decoder behavior remains unchanged.
 Exit: reviewable implementation whose remaining state and transitions are
 documented, with equivalent behavior or explicit approved differences.
 
-### G3 — Establish a credible fast discovery suite [with G2]
+### G3 — Establish a credible fast discovery suite [complete, bounded]
 
 - Preserve the independent bounded enumeration, not just exact bug seeds.
 - Inventory representable operations and observable outcomes. Explicitly
@@ -109,7 +141,7 @@ Exit: a small repeatable suite that distinguishes representative broken
 versions from the candidate, plus a clear list of untested interactions.
 Avoid claiming exhaustive coverage of arbitrary Go types or callbacks.
 
-### G4 — Verify one stable candidate [pending G2/G3]
+### G4 — Verify one stable candidate [next]
 
 During development, run affected invariants and mutants first. Once stable:
 
@@ -167,7 +199,39 @@ is a real allocation/throughput tradeoff, not evidence of acceptable
 production tail latency. Detailed evidence is in the experiment bundle's
 DO_RUN.md, do-summary.json and do-evidence directory.
 
-Next action: agree on explicit latency/allocation/GC budgets and record
-adopt/reject/revise. G1 remains open; infrastructure permission alone did
-not approve architecture adoption. Production code remains frozen. No
-background benchmark, VM, or recurring scheduled task remains running.
+The maintainer subsequently delegated the decision: G1 is accepted as above.
+Implementation starts from `ad80ff0` on `codex/fresh-decoder-storage`.
+Next action: remove persistent decoder arenas and obsolete bookkeeping, port
+the bounded discovery fixtures, update ownership documentation and mutation
+anchors, then run targeted verification before freezing a G4 candidate.
+No background benchmark, VM, or recurring scheduled task remains running.
+
+Implementation checkpoint: per-call arenas replace persistent Decoder fields;
+removed beginDecode, slice/map ownership flags, root reset flags, and redundant
+first-use pointer clearing. Pointer publication guards remain. SameBacking and
+SameMap remain available for compatibility, but generated decoders no longer
+use them. Documentation and allocation ceilings reflect the new lifetime.
+
+Development verification (working tree based on ad80ff0):
+
+- Root and generator module tests passed on Go 1.26.5; codec and ownership
+  package tests passed on Go 1.26.5 and Go 1.27.0.
+- Independent challenge, scalar reuse matrix, generator behavior matrix and
+  generated-schema campaign passed. Independent challenge and scalar matrix
+  also passed with explicit race/checkptr instrumentation in their children.
+- Ownership enumerations, retained-result tests and affected codec tests passed
+  with race/checkptr. All generated fixtures regenerated successfully.
+- First mutation run: 4 of 45 survived. Three detectors only reached now-removed
+  cross-call behavior; moved them to duplicate/registered-override slice cases.
+  The fourth removed redundant zeroing of an unpublished fresh pointer cell;
+  removed that production code and obsolete mutant. Revised run: 44/44 killed
+  for their intended diagnostics, after clean detector baselines.
+- Same-host ABBA comparison against the accepted prototype: all five pooled
+  borrowing medians within 2%, same allocation counts, fewer allocated bytes
+  for collection shapes. Flat decoding remains zero-allocation. Individual
+  measurements are in ownership/implementation-comparison.json. This is local
+  implementation/prototype evidence, not a new amd64 production capacity test.
+
+G2/G3 are complete within the documented finite inventory, not universal proof.
+Next: commit this candidate, then run its full release gate without code edits.
+G4 still needs full-gate, supported-toolchain and bounded campaign evidence.

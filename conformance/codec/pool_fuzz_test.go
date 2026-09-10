@@ -6,22 +6,9 @@ import (
 	"testing"
 )
 
-// pool_fuzz_test.go is pool-pair fuzzing. pool_test.go's hand-picked cases (TestPooledDecoderReuse and its
-// siblings) prove specific leakage shapes (nested-struct siblings,
-// slice ghosts, map ghosts, slice growth) on hand-picked message pairs;
-// this generalizes the same property — a pooled Decoder's second
-// Decode/DecodeBorrow call must produce exactly what an independent
-// fresh decode of the same bytes would, with zero residue from the
-// prior call reusing the arena/slice-cell/map-cell — to arbitrary fuzzed
-// message pairs, in both non-borrow and borrow mode.
-
-// FuzzPoolPair decodes a then b through one pooled EventDecoder and
-// checks both against independent fresh decodes: a's result (captured
-// immediately, before b is decoded and reuses the arena) must match a
-// fresh decode of a, and b's result must match a fresh decode of b —
-// the second check is the one that actually catches arena/slice-cell
-// leakage, since any residue from decoding a would only be visible in
-// b's result once the shared arena/cells are reused.
+// FuzzPoolPair checks independent calls through one Decoder against fresh
+// decoding, including that decoding the second message cannot change the first
+// result. The stdlib-based ownership enumerations complement this path check.
 func FuzzPoolPair(f *testing.F) {
 	vs := variants()
 	full, _ := json.Marshal(vs["full"])
@@ -44,9 +31,7 @@ func FuzzPoolPair(f *testing.F) {
 	})
 }
 
-// checkPoolPair runs the pool-pair check in the given mode (borrow or
-// not) with a freshly pooled Decoder, so the two modes never share an
-// arena with each other.
+// checkPoolPair exercises one Decoder in copy or borrow mode.
 func checkPoolPair(t *testing.T, a, b []byte, borrow bool) {
 	t.Helper()
 	decode := func(d *EventDecoder, data []byte, v *Event) error {
@@ -75,11 +60,12 @@ func checkPoolPair(t *testing.T, a, b []byte, borrow bool) {
 		t.Fatalf("borrow=%v: a's result (captured before b) diverged from a fresh decode of a\na: %q\nfresh: %+v\npooled: %+v", borrow, a, &freshA, &gotA)
 	}
 
-	// Decode b on the SAME pooled Decoder — this reuses (and may
-	// resize/reclaim) the arena and any slice/map cells a's decode
-	// populated. Any leakage from a into b would only surface here.
+	// Decode b on the same Decoder while retaining a's result.
 	var gotB Event
 	errBPooled := decode(&pooled, b, &gotB)
+	if errAPooled == nil && !reflect.DeepEqual(&freshA, &gotA) {
+		t.Fatalf("borrow=%v: earlier result changed after decoding b", borrow)
+	}
 	var freshB Event
 	errBFresh := fresh(b, &freshB)
 	if (errBPooled != nil) != (errBFresh != nil) {

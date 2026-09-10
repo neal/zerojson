@@ -265,7 +265,7 @@ type generator struct {
 
 	compat         bool // emit json.Marshaler/Unmarshaler wrappers
 	compatEasyjson bool // also emit easyjson Marshaler/Unmarshaler wrappers
-	pool           bool // emit reusable-arena Decoder types
+	pool           bool // emit reset-first Decoder types
 	ordered        bool // emit the speculative ordered-decode fast path (ordered.go)
 }
 
@@ -278,7 +278,7 @@ func main() {
 	compat := flag.Bool("compat", false, "emit json.Marshaler/Unmarshaler wrappers (replaces existing MarshalJSON)")
 	compatEasyjson := flag.Bool("compat-easyjson", false, "also emit easyjson Marshaler/Unmarshaler wrappers")
 	testsOut := flag.String("tests", "", "also emit a differential fuzz test file at this path (a _test.go file, relative to -dir; not combinable with -compat)")
-	pool := flag.Bool("pool", false, "emit reusable-arena Decoder types for zero-alloc decode loops")
+	pool := flag.Bool("pool", false, "emit reset-first Decoder types with fresh per-call storage")
 	noOrdered := flag.Bool("no-ordered", false, "disable the speculative ordered-decode fast path (ordered.go)")
 	force := flag.Bool("force", false, "overwrite -out/-tests even if the existing file is not zerojsongen (or easyjson) output")
 	flag.Usage = func() {
