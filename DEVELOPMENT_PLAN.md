@@ -1,7 +1,7 @@
 # Decoder simplification and confidence plan
 
-Status: fresh per-call storage accepted under the maintainer's delegated
-decision; implementation is in progress on `codex/fresh-decoder-storage`.
+Status: fresh per-call storage implemented on `codex/fresh-decoder-storage`;
+the frozen-candidate release gate is in progress.
 This is an active maintainer plan, not a release guarantee.
 
 ## Objective
@@ -86,8 +86,8 @@ remains unproven by this microbenchmark evidence.
 2. Include flat, mixed, and collection-heavy shapes; reused and reset targets;
    copying and borrowing; latency, bytes/op, and allocations/op. Measure
    representative sustained allocation/GC cost, not latency alone.
-3. Set explicit acceptable limits with the maintainer. No limits have yet
-   been agreed; do not invent acceptance thresholds after seeing results.
+3. Record explicit acceptable limits with the maintainer; do not describe a
+   decision made from measurements as passing a predefined threshold.
 4. Record adopt/reject/revise and why. If the cost is unacceptable, isolate
    the particular optimization worth retaining and its invariants; do not
    restore all the previous complexity by default.
@@ -235,3 +235,9 @@ Development verification (working tree based on ad80ff0):
 G2/G3 are complete within the documented finite inventory, not universal proof.
 Next: commit this candidate, then run its full release gate without code edits.
 G4 still needs full-gate, supported-toolchain and bounded campaign evidence.
+
+First frozen full-gate attempt at `a863be9` stopped in generator tests: one
+embedded shape-validation fixture still asserted pre-simplification allocation
+budgets (0/2/4 rather than the measured 5). Updated that test-only budget and
+its stale name/comment. No production code changed; prior behavioral,
+instrumentation, mutation and performance evidence remains applicable.
