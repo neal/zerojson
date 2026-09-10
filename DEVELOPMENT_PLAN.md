@@ -149,15 +149,25 @@ daily CI spending by default. Push/release remains separately authorized.
 
 ## Latest checkpoint
 
-2026-09-09: G0 complete; G1 host assessment started. A read-only check found
-`felix` is x86_64 with one CPU, approximately 965 MiB RAM (608 MiB available),
-and zero reported load average at the time of inspection. Go is not on its
-PATH. It is a small shared-host environment, not an isolated performance lab.
+2026-09-09: G0 complete; the measurement portion of G1 is complete. The user
+authorized a temporary DigitalOcean c-2 / sfo3 VM (599231920), exposing Intel
+Xeon Platinum 8280 / amd64. It was deleted after collecting results, and
+its absence was verified through the API. No extra volumes or backups remain.
 
-Next action: obtain approval for a short low-priority benchmark window on
-its sole CPU, or select an isolated amd64 host. Control and fresh-ordered
-test/benchmark binaries have been cross-compiled locally for Linux/amd64
-with Go 1.26.5 and CGO disabled; nothing needs installing there. A felix comparison would be directional
-evidence, not sufficient alone for production capacity estimates. No remote
-benchmark has run and no resource budget has been accepted. Production
-code remains frozen; no background job or scheduled task is implied.
+Control and fresh-ordered binaries used Go 1.26.5, CGO disabled. Both passed
+the bounded correctness checks. Six samples per benchmark ran in ABBA order
+on one pinned CPU. Flat decoding was essentially unchanged; fresh ordered
+increased mixed pooled Event time by 9.2%, synthetic pooled time by 25–37%,
+and allocations. Non-pooled copy/borrow paths were essentially unchanged.
+
+For 100,000 decodes of a separate 64-element borrowing payload, control
+allocated zero bytes and performed no GC; fresh ordered allocated 6,960
+bytes/decode and performed 239–240 GC cycles in 2.02–2.05 seconds. This
+is a real allocation/throughput tradeoff, not evidence of acceptable
+production tail latency. Detailed evidence is in the experiment bundle's
+DO_RUN.md, do-summary.json and do-evidence directory.
+
+Next action: agree on explicit latency/allocation/GC budgets and record
+adopt/reject/revise. G1 remains open; infrastructure permission alone did
+not approve architecture adoption. Production code remains frozen. No
+background benchmark, VM, or recurring scheduled task remains running.
