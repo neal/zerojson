@@ -243,22 +243,22 @@ func (g *generator) emitSlicePublication(f fieldInfo, target, cell, ind string) 
 	g.p("%s} else if a.slicePublished%s || a.sliceBorrowed%s {", ind, f.cellName, f.cellName)
 	g.p("%s\t%s = nil", ind, cell)
 	g.p("%s\ta.sliceBorrowed%s = false", ind, f.cellName)
+	g.p("%s} else {", ind)
+	// Only private arena storage is reset. Clear the entire capacity: a
+	// previous duplicate member may have written beyond the cell's length
+	// through another slice header. Those slots must start at zero before
+	// the fresh result can expose them through a later null element.
+	g.p("%s\tclear(%s[:cap(%s)])", ind, cell, cell)
 	g.p("%s}", ind)
 	g.p("%sa.slicePublished%s = true", ind, f.cellName)
 }
 
-// emitNonNilEmptySlice ensures cell is non-nil after a slice/leaf-slice
-// decode, matching easyjson (and encoding/json): a JSON `[]` decoded onto
-// a never-before-used arena cell leaves it nil (EnterArray's loop body
-// never runs, so the `cell[:0]` reset — a no-op on nil — is the last
-// write), which would then re-encode as `null` instead of `[]`. This only
-// ever fires on first use: a pooled cell already populated by a prior
-// decode is already non-nil and this is a no-op (the reslice already
-// happened above). The composite literal costs no allocation (Go's
-// runtime shares one zero-size backing pointer for it), so this doesn't
-// touch the zero-alloc pooled decode budget.
+// Empty arrays replace the slice with a non-nil, zero-capacity value, as
+// stdlib does. Keeping an arena's old capacity would expose previous-message
+// elements when a later duplicate field reuses those slots for JSON null.
+// The empty composite literal itself does not allocate backing storage.
 func (g *generator) emitNonNilEmptySlice(cell, cellType, ind string) {
-	g.p("%sif %s == nil {", ind, cell)
+	g.p("%sif len(%s) == 0 {", ind, cell)
 	g.p("%s\t%s = %s{}", ind, cell, cellType)
 	g.p("%s}", ind)
 }

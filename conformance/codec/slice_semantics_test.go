@@ -2,30 +2,14 @@ package codec
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 )
 
-// TestDecodeEmptyArrayYieldsNonNilSlice pins that decoding a JSON `[]` into
-// a slice field produces a non-nil, zero-length slice, not nil — matching
-// both oracles:
-//
-//   - encoding/json: decodes `[]` into a non-nil len-0 slice (the primary
-//     decode contract per this project's precedence rules).
-//   - easyjson: its generated decode for a slice field yields `[]T{}` for
-//     an empty wire array (e.g. `out.InvalidLabels = []string{}`).
-//
-// The two oracles agree, so this is not a documented divergence. The
-// generated slice decoder must force the arena's slice cell non-nil after
-// the decode loop (which EnterArray skips entirely for `[]`) — in the
-// fallback decoder, the ordered decoder (same emitDecode-generated
-// field-value code), and the -pool arena's first use.
-//
-// This test covers all three declared slice-kind fields on Event —
-// Items ([]EventLeg, kSlice, value elements), PtrItems ([]*EventLeg,
-// kSlice, pointer elements), and Names ([]string, kLeafSlice) — through
-// the fallback decoder directly, the public (ordered-first) path, and a
-// pooled Decoder's first-ever use.
+// Empty arrays must produce non-nil slices with zero length and capacity,
+// including after pooled reuse. Duplicate null elements must not recover
+// data from the preceding message's backing array.
 func TestDecodeEmptyArrayYieldsNonNilSlice(t *testing.T) {
 	// Compact, declaration-ordered so the public path exercises the
 	// ordered fast path (Items, PtrItems, Names appear in that relative
@@ -34,13 +18,13 @@ func TestDecodeEmptyArrayYieldsNonNilSlice(t *testing.T) {
 
 	assertNonNilEmpty := func(t *testing.T, label string, tr *Event) {
 		t.Helper()
-		if tr.Items == nil || len(tr.Items) != 0 {
+		if tr.Items == nil || len(tr.Items) != 0 || cap(tr.Items) != 0 {
 			t.Errorf("%s: Items = %#v, want non-nil empty", label, tr.Items)
 		}
-		if tr.PtrItems == nil || len(tr.PtrItems) != 0 {
+		if tr.PtrItems == nil || len(tr.PtrItems) != 0 || cap(tr.PtrItems) != 0 {
 			t.Errorf("%s: PtrItems = %#v, want non-nil empty", label, tr.PtrItems)
 		}
-		if tr.Names == nil || len(tr.Names) != 0 {
+		if tr.Names == nil || len(tr.Names) != 0 || cap(tr.Names) != 0 {
 			t.Errorf("%s: Names = %#v, want non-nil empty", label, tr.Names)
 		}
 	}
@@ -107,6 +91,39 @@ func TestDecodeEmptyArrayYieldsNonNilSlice(t *testing.T) {
 			t.Fatalf("mismatch\nstdlib:   %+v\nzerojson: %+v", &want, &got)
 		}
 	})
+	for _, borrow := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pooled reuse borrow=%v", borrow), func(t *testing.T) {
+			var d EventDecoder
+			decode := d.Decode
+			if borrow {
+				decode = d.DecodeBorrow
+			}
+			var got Event
+			for _, input := range []string{
+				`{"items":[{"label":"old"}],"ptr_items":[{"label":"old"}],"names":["old"]}`,
+				`{"ignored":0,"items":[],"ptr_items":[],"names":[]}`,
+			} {
+				if err := decode([]byte(input), &got); err != nil {
+					t.Fatal(err)
+				}
+			}
+			assertNonNilEmpty(t, "pooled reuse", &got)
+			if err := decode([]byte(`{"names":["old"]}`), &got); err != nil {
+				t.Fatal(err)
+			}
+			input := []byte(`{"ignored":0,"names":[],"names":[null]}`)
+			if err := decode(input, &got); err != nil {
+				t.Fatal(err)
+			}
+			var want Event
+			if err := json.Unmarshal(input, &want); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got.Names, want.Names) {
+				t.Fatalf("old pooled value exposed: got=%q want=%q", got.Names, want.Names)
+			}
+		})
+	}
 }
 
 // TestDecodeEmptyArrayVsNullVsAbsent distinguishes the three cases a

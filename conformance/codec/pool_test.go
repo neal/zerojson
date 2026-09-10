@@ -109,6 +109,25 @@ func TestPooledDecoderNestedInSliceNoLeak(t *testing.T) {
 	if b.Items[0].Mode != "" {
 		t.Fatalf("nested field leaked into reused slot: Items[0].Mode = %q", b.Items[0].Mode)
 	}
+
+	// EventLeg contains a registered decimal leaf, so its slice keeps the
+	// documented reset-on-reuse override rather than stdlib element merging.
+	// Same-call reuse needs per-slot zeroing even when pooled-call entry
+	// already clears private capacity.
+	duplicate := []byte(`{"items":[{"ratio":"1","label":"ALPHA","mode":"up"}],"items":[{"ratio":"2","label":"BETA"}]}`)
+	for _, borrow := range []bool{false, true} {
+		var got Event
+		decode := got.UnmarshalZJSON
+		if borrow {
+			decode = got.UnmarshalZJSONBorrow
+		}
+		if err := decode(duplicate); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got.Items, b.Items) {
+			t.Fatalf("nested-in-slice leak on duplicate member: got=%+v want=%+v", got.Items, b.Items)
+		}
+	}
 }
 
 // TestPooledDecoderMapReuseNoGhosts verifies the persistent map cell a

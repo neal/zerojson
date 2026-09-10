@@ -230,9 +230,11 @@ your schema, business rules, or resource limits.
 
 ### Resource considerations
 
-A pooled arena retains the high-water mark of the largest message it has seen
-(slice and map backing storage is reused, never shrunk), so bound message size,
-or recycle Decoders that have seen an outlier.
+A pooled arena can retain the high-water mark of the largest message it has
+seen, so bound message size or recycle Decoders that have seen an outlier.
+Private slice capacity is cleared before reuse, including hidden slots that
+later duplicate members could expose; reset work scales with that capacity.
+An empty JSON array replaces its slice with a non-nil, zero-capacity value.
 
 - **The intern table is process-global and entry-bounded** (32 shards ×
   4096 entries of ≤24 bytes). The cap does not bound strings retained by

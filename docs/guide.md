@@ -186,11 +186,14 @@ applies to them, not just pointer fields): don't retain `e.Items` or
 pointers, slices, or maps in their tree are unaffected (copies, as
 always).
 
-Memory: the arena keeps the high-water mark of the largest message the
-Decoder has seen and never shrinks (see
+Memory: arena storage can retain the high-water mark of the largest message
+the Decoder has seen (see
 [resource considerations](compatibility.md#resource-considerations)), so a
 `sync.Pool` of Decoders that each met one outlier pins that many peaks.
 Bound message size, or drop a Decoder after an outlier.
+Reusing a private slice clears its retained capacity before publication,
+so an outlier can also increase later reset work. An empty JSON array
+replaces its slice with a non-nil, zero-capacity value.
 
 ## Projection / passthrough decoding
 

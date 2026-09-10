@@ -154,6 +154,24 @@ func mutationCatalog() []mutationCase {
 	)
 	return []mutationCase{
 		{
+			name: "empty_slice_keeps_previous_capacity", tier: "full", file: "cmd/zerojsongen/decode.go",
+			old: `g.p("%sif len(%s) == 0 {", ind, cell)`,
+			new: `g.p("%sif %s == nil {", ind, cell)`, wantCount: 1,
+			detector: generatorDetector(`^TestScalarReuseKinds$`), wantOutput: "empty array retained capacity:",
+		},
+		{
+			name: "pooled_slice_keeps_hidden_values", tier: "full", file: "cmd/zerojsongen/decode.go",
+			old: `g.p("%s\tclear(%s[:cap(%s)])", ind, cell, cell)`,
+			new: `g.p("%s\tclear(%s)", ind, cell)`, wantCount: 1,
+			detector: generatorDetector(`^TestScalarReuseKinds$`), wantOutput: "scalar field reuse",
+		},
+		{
+			name: "pooled_root_keeps_hidden_values", tier: "full", file: "cmd/zerojsongen/root.go",
+			old: `g.p("%sif *v != nil { %s = *v } else { clear(%s[:cap(%s)]) }", ind, cell, cell, cell)`,
+			new: `g.p("%sif *v != nil { %s = *v }", ind, cell)`, wantCount: 1,
+			detector: generatorDetector(`^TestScalarReuseKinds$`), wantOutput: "pooled root hidden capacity",
+		},
+		{
 			name: "scalar_root_reuse_rejects_null", tier: "full", file: "cmd/zerojsongen/decode.go",
 			old: `g.p("%sif l.IsNull() { %s = nil } else if l.EnterArray() {", ind, target)`,
 			new: `g.p("%sif l.EnterArray() {", ind)`, wantCount: 1,

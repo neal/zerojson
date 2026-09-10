@@ -906,6 +906,8 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 			} else if a.slicePublished16 || a.sliceBorrowed16 {
 				a.c16 = nil
 				a.sliceBorrowed16 = false
+			} else {
+				clear(a.c16[:cap(a.c16)])
 			}
 			a.slicePublished16 = true
 			a.c16 = a.c16[:0]
@@ -929,7 +931,7 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 					}
 				}
 			}
-			if a.c16 == nil {
+			if len(a.c16) == 0 {
 				a.c16 = []EventLeg{}
 			}
 			v.Items = a.c16
@@ -940,6 +942,8 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 			} else if a.slicePublished17 || a.sliceBorrowed17 {
 				a.c17 = nil
 				a.sliceBorrowed17 = false
+			} else {
+				clear(a.c17[:cap(a.c17)])
 			}
 			a.slicePublished17 = true
 			a.c17 = a.c17[:0]
@@ -965,7 +969,7 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 					}
 				}
 			}
-			if a.c17 == nil {
+			if len(a.c17) == 0 {
 				a.c17 = []*EventLeg{}
 			}
 			v.PtrItems = a.c17
@@ -1002,6 +1006,8 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 				} else if a.slicePublished18 || a.sliceBorrowed18 {
 					a.c18 = nil
 					a.sliceBorrowed18 = false
+				} else {
+					clear(a.c18[:cap(a.c18)])
 				}
 				a.slicePublished18 = true
 				a.c18 = a.c18[:0]
@@ -1027,7 +1033,7 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 						}
 					}
 				}
-				if a.c18 == nil {
+				if len(a.c18) == 0 {
 					a.c18 = []string{}
 				}
 				v.Names = a.c18
@@ -1150,6 +1156,8 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 				} else if a.slicePublished30 || a.sliceBorrowed30 {
 					a.c30 = nil
 					a.sliceBorrowed30 = false
+				} else {
+					clear(a.c30[:cap(a.c30)])
 				}
 				a.slicePublished30 = true
 				a.c30 = a.c30[:0]
@@ -1175,7 +1183,7 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 						}
 					}
 				}
-				if a.c30 == nil {
+				if len(a.c30) == 0 {
 					a.c30 = []any{}
 				}
 				v.AnyList = a.c30
@@ -2090,6 +2098,8 @@ func zjDecodeOrderedField_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *
 			} else if a.slicePublished6 || a.sliceBorrowed6 {
 				a.c6 = nil
 				a.sliceBorrowed6 = false
+			} else {
+				clear(a.c6[:cap(a.c6)])
 			}
 			a.slicePublished6 = true
 			a.c6 = a.c6[:0]
@@ -2115,7 +2125,7 @@ func zjDecodeOrderedField_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *
 					}
 				}
 			}
-			if a.c6 == nil {
+			if len(a.c6) == 0 {
 				a.c6 = []string{}
 			}
 			v.NilSlice = a.c6
@@ -2153,6 +2163,8 @@ func zjDecodeOrderedField_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *
 			} else if a.slicePublished7 || a.sliceBorrowed7 {
 				a.c7 = nil
 				a.sliceBorrowed7 = false
+			} else {
+				clear(a.c7[:cap(a.c7)])
 			}
 			a.slicePublished7 = true
 			a.c7 = a.c7[:0]
@@ -2178,7 +2190,7 @@ func zjDecodeOrderedField_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *
 					}
 				}
 			}
-			if a.c7 == nil {
+			if len(a.c7) == 0 {
 				a.c7 = []string{}
 			}
 			v.EmptySlice = a.c7
@@ -2385,6 +2397,8 @@ func zjDecodeFallback_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjAr
 				} else if a.slicePublished6 || a.sliceBorrowed6 {
 					a.c6 = nil
 					a.sliceBorrowed6 = false
+				} else {
+					clear(a.c6[:cap(a.c6)])
 				}
 				a.slicePublished6 = true
 				a.c6 = a.c6[:0]
@@ -2410,7 +2424,7 @@ func zjDecodeFallback_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjAr
 						}
 					}
 				}
-				if a.c6 == nil {
+				if len(a.c6) == 0 {
 					a.c6 = []string{}
 				}
 				v.NilSlice = a.c6
@@ -2448,6 +2462,8 @@ func zjDecodeFallback_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjAr
 				} else if a.slicePublished7 || a.sliceBorrowed7 {
 					a.c7 = nil
 					a.sliceBorrowed7 = false
+				} else {
+					clear(a.c7[:cap(a.c7)])
 				}
 				a.slicePublished7 = true
 				a.c7 = a.c7[:0]
@@ -2473,7 +2489,7 @@ func zjDecodeFallback_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjAr
 						}
 					}
 				}
-				if a.c7 == nil {
+				if len(a.c7) == 0 {
 					a.c7 = []string{}
 				}
 				v.EmptySlice = a.c7
@@ -4944,6 +4960,8 @@ func zjDecodeOrderedField_InteractionOmitZero(l *zerojson.Lexer, v *InteractionO
 			} else if a.slicePublished3 || a.sliceBorrowed3 {
 				a.c3 = nil
 				a.sliceBorrowed3 = false
+			} else {
+				clear(a.c3[:cap(a.c3)])
 			}
 			a.slicePublished3 = true
 			a.c3 = a.c3[:0]
@@ -4969,7 +4987,7 @@ func zjDecodeOrderedField_InteractionOmitZero(l *zerojson.Lexer, v *InteractionO
 					}
 				}
 			}
-			if a.c3 == nil {
+			if len(a.c3) == 0 {
 				a.c3 = []int{}
 			}
 			v.Items = a.c3
@@ -5140,6 +5158,8 @@ func zjDecodeFallback_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZ
 				} else if a.slicePublished3 || a.sliceBorrowed3 {
 					a.c3 = nil
 					a.sliceBorrowed3 = false
+				} else {
+					clear(a.c3[:cap(a.c3)])
 				}
 				a.slicePublished3 = true
 				a.c3 = a.c3[:0]
@@ -5165,7 +5185,7 @@ func zjDecodeFallback_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZ
 						}
 					}
 				}
-				if a.c3 == nil {
+				if len(a.c3) == 0 {
 					a.c3 = []int{}
 				}
 				v.Items = a.c3
@@ -6553,6 +6573,8 @@ func zjDecodeOrderedField_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjAren
 			} else if a.slicePublished2 || a.sliceBorrowed2 {
 				a.c2 = nil
 				a.sliceBorrowed2 = false
+			} else {
+				clear(a.c2[:cap(a.c2)])
 			}
 			a.slicePublished2 = true
 			a.c2 = a.c2[:0]
@@ -6578,7 +6600,7 @@ func zjDecodeOrderedField_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjAren
 					}
 				}
 			}
-			if a.c2 == nil {
+			if len(a.c2) == 0 {
 				a.c2 = [][]byte{}
 			}
 			v.Lists = a.c2
@@ -6750,6 +6772,8 @@ func zjDecodeFallback_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaByt
 				} else if a.slicePublished2 || a.sliceBorrowed2 {
 					a.c2 = nil
 					a.sliceBorrowed2 = false
+				} else {
+					clear(a.c2[:cap(a.c2)])
 				}
 				a.slicePublished2 = true
 				a.c2 = a.c2[:0]
@@ -6775,7 +6799,7 @@ func zjDecodeFallback_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaByt
 						}
 					}
 				}
-				if a.c2 == nil {
+				if len(a.c2) == 0 {
 					a.c2 = [][]byte{}
 				}
 				v.Lists = a.c2
@@ -6956,6 +6980,8 @@ func zjDecode_EventList(l *zerojson.Lexer, v *EventList, a *zjArenaEventList) {
 	}
 	if *v != nil {
 		a.cRoot = *v
+	} else {
+		clear(a.cRoot[:cap(a.cRoot)])
 	}
 	a.cRoot = a.cRoot[:0]
 	if l.EnterArray() {
@@ -6978,7 +7004,7 @@ func zjDecode_EventList(l *zerojson.Lexer, v *EventList, a *zjArenaEventList) {
 			}
 		}
 	}
-	if a.cRoot == nil {
+	if len(a.cRoot) == 0 {
 		a.cRoot = EventList{}
 	}
 	*v = a.cRoot
@@ -7115,6 +7141,8 @@ func zjDecode_LegPtrList(l *zerojson.Lexer, v *LegPtrList, a *zjArenaLegPtrList)
 	}
 	if *v != nil {
 		a.cRoot = *v
+	} else {
+		clear(a.cRoot[:cap(a.cRoot)])
 	}
 	a.cRoot = a.cRoot[:0]
 	if l.EnterArray() {
@@ -7139,7 +7167,7 @@ func zjDecode_LegPtrList(l *zerojson.Lexer, v *LegPtrList, a *zjArenaLegPtrList)
 			}
 		}
 	}
-	if a.cRoot == nil {
+	if len(a.cRoot) == 0 {
 		a.cRoot = LegPtrList{}
 	}
 	*v = a.cRoot
@@ -7710,6 +7738,8 @@ func zjDecode_RawList(l *zerojson.Lexer, v *RawList, a *zjArenaRawList) {
 	}
 	if *v != nil {
 		a.cRoot = *v
+	} else {
+		clear(a.cRoot[:cap(a.cRoot)])
 	}
 	a.cRoot = a.cRoot[:0]
 	if l.EnterArray() {
@@ -7736,7 +7766,7 @@ func zjDecode_RawList(l *zerojson.Lexer, v *RawList, a *zjArenaRawList) {
 			}
 		}
 	}
-	if a.cRoot == nil {
+	if len(a.cRoot) == 0 {
 		a.cRoot = RawList{}
 	}
 	*v = a.cRoot
@@ -8040,6 +8070,8 @@ func zjDecode_RawHolderList(l *zerojson.Lexer, v *RawHolderList, a *zjArenaRawHo
 	}
 	if *v != nil {
 		a.cRoot = *v
+	} else {
+		clear(a.cRoot[:cap(a.cRoot)])
 	}
 	a.cRoot = a.cRoot[:0]
 	if l.EnterArray() {
@@ -8062,7 +8094,7 @@ func zjDecode_RawHolderList(l *zerojson.Lexer, v *RawHolderList, a *zjArenaRawHo
 			}
 		}
 	}
-	if a.cRoot == nil {
+	if len(a.cRoot) == 0 {
 		a.cRoot = RawHolderList{}
 	}
 	*v = a.cRoot
@@ -8191,6 +8223,8 @@ func zjDecode_DecimalList(l *zerojson.Lexer, v *DecimalList, a *zjArenaDecimalLi
 	}
 	if *v != nil {
 		a.cRoot = *v
+	} else {
+		clear(a.cRoot[:cap(a.cRoot)])
 	}
 	a.cRoot = a.cRoot[:0]
 	if l.EnterArray() {
@@ -8215,7 +8249,7 @@ func zjDecode_DecimalList(l *zerojson.Lexer, v *DecimalList, a *zjArenaDecimalLi
 			}
 		}
 	}
-	if a.cRoot == nil {
+	if len(a.cRoot) == 0 {
 		a.cRoot = DecimalList{}
 	}
 	*v = a.cRoot
@@ -8648,6 +8682,8 @@ func zjDecodeOrderedField_PointerCollections(l *zerojson.Lexer, v *PointerCollec
 			} else if a.slicePublished0 || a.sliceBorrowed0 {
 				a.c0 = nil
 				a.sliceBorrowed0 = false
+			} else {
+				clear(a.c0[:cap(a.c0)])
 			}
 			a.slicePublished0 = true
 			a.c0 = a.c0[:0]
@@ -8673,7 +8709,7 @@ func zjDecodeOrderedField_PointerCollections(l *zerojson.Lexer, v *PointerCollec
 					}
 				}
 			}
-			if a.c0 == nil {
+			if len(a.c0) == 0 {
 				a.c0 = []string{}
 			}
 			if v.Names == nil {
@@ -8735,6 +8771,8 @@ func zjDecodeOrderedField_PointerCollections(l *zerojson.Lexer, v *PointerCollec
 		} else if a.slicePublished2 || a.sliceBorrowed2 {
 			a.c2 = nil
 			a.sliceBorrowed2 = false
+		} else {
+			clear(a.c2[:cap(a.c2)])
 		}
 		a.slicePublished2 = true
 		a.c2 = a.c2[:0]
@@ -8758,7 +8796,7 @@ func zjDecodeOrderedField_PointerCollections(l *zerojson.Lexer, v *PointerCollec
 				}
 			}
 		}
-		if a.c2 == nil {
+		if len(a.c2) == 0 {
 			a.c2 = []EventLeg{}
 		}
 		if v.Legs == nil {
@@ -8954,6 +8992,8 @@ func zjDecodeFallback_PointerCollections(l *zerojson.Lexer, v *PointerCollection
 				} else if a.slicePublished0 || a.sliceBorrowed0 {
 					a.c0 = nil
 					a.sliceBorrowed0 = false
+				} else {
+					clear(a.c0[:cap(a.c0)])
 				}
 				a.slicePublished0 = true
 				a.c0 = a.c0[:0]
@@ -8979,7 +9019,7 @@ func zjDecodeFallback_PointerCollections(l *zerojson.Lexer, v *PointerCollection
 						}
 					}
 				}
-				if a.c0 == nil {
+				if len(a.c0) == 0 {
 					a.c0 = []string{}
 				}
 				if v.Names == nil {
@@ -9041,6 +9081,8 @@ func zjDecodeFallback_PointerCollections(l *zerojson.Lexer, v *PointerCollection
 			} else if a.slicePublished2 || a.sliceBorrowed2 {
 				a.c2 = nil
 				a.sliceBorrowed2 = false
+			} else {
+				clear(a.c2[:cap(a.c2)])
 			}
 			a.slicePublished2 = true
 			a.c2 = a.c2[:0]
@@ -9064,7 +9106,7 @@ func zjDecodeFallback_PointerCollections(l *zerojson.Lexer, v *PointerCollection
 					}
 				}
 			}
-			if a.c2 == nil {
+			if len(a.c2) == 0 {
 				a.c2 = []EventLeg{}
 			}
 			if v.Legs == nil {
@@ -9592,6 +9634,8 @@ func zjDecodeOrderedField_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjAr
 			} else if a.slicePublished3 || a.sliceBorrowed3 {
 				a.c3 = nil
 				a.sliceBorrowed3 = false
+			} else {
+				clear(a.c3[:cap(a.c3)])
 			}
 			a.slicePublished3 = true
 			a.c3 = a.c3[:0]
@@ -9617,7 +9661,7 @@ func zjDecodeOrderedField_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjAr
 					}
 				}
 			}
-			if a.c3 == nil {
+			if len(a.c3) == 0 {
 				a.c3 = []json_.Number{}
 			}
 			v.NS = a.c3
@@ -9861,6 +9905,8 @@ func zjDecodeFallback_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaN
 				} else if a.slicePublished3 || a.sliceBorrowed3 {
 					a.c3 = nil
 					a.sliceBorrowed3 = false
+				} else {
+					clear(a.c3[:cap(a.c3)])
 				}
 				a.slicePublished3 = true
 				a.c3 = a.c3[:0]
@@ -9886,7 +9932,7 @@ func zjDecodeFallback_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaN
 						}
 					}
 				}
-				if a.c3 == nil {
+				if len(a.c3) == 0 {
 					a.c3 = []json_.Number{}
 				}
 				v.NS = a.c3

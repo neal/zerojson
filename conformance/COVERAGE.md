@@ -9,6 +9,7 @@ or verified invariants. Use this checklist when extending the test framework.
 | Type-shape and method-set fixtures | Compilation and behavior of enumerated cases | Coverage of individual dimensions is not their full cross-product |
 | Stateful publication campaign | Final values, retained references, alias identity, callback order, callback-time snapshots, input integrity | Six integer-leaf layouts, bounded operation streams; arbitrary callback programs and cross-decoder reentrancy are not enumerated |
 | Independent challenge | Typed observations without campaign helpers or projection | A small set of explicit scenarios, not a universal oracle |
+| Scalar reuse matrix | Every specialized scalar kind plus struct, pointer and interface controls; fields, pointer fields and named roots; duplicate keys, retained storage, pooled shrink/regrow sequences and empty-array capacity | Finite value sequences; custom codecs need their own tests |
 | Mutation catalog | Sensitivity to selected compile-valid defects | A catalog kill rate is not coverage of unknown defect classes; baseline detectors must pass first |
 | Resource tests | Selected allocation/scaling/depth boundaries | Not a universal memory ceiling; pooled storage retains its high-water mark |
 

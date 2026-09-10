@@ -248,7 +248,7 @@ func (g *generator) emitRootSliceDecode(ti typeInfo) {
 	// Root decoding enters once per public call. Non-pooled callers retain
 	// their existing slice aliases; pooled wrappers zero *v before entry,
 	// so their persistent cell never adopts pre-existing caller storage.
-	g.p("%sif *v != nil { %s = *v }", ind, cell)
+	g.p("%sif *v != nil { %s = *v } else { clear(%s[:cap(%s)]) }", ind, cell, cell, cell)
 	g.p("%s%s = %s[:0]", ind, cell, cell)
 	g.p("%sif l.EnterArray() {", ind)
 	g.p("%sfor {", ind)
