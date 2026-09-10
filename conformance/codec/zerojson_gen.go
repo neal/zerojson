@@ -6237,7 +6237,32 @@ func zjDecodeOrderedField_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjAren
 	}
 	switch k {
 	case 0:
-		v.Data = []byte(l.ReadBytesBase64())
+		if v.Data != nil && l.IsDelim('[') {
+			if l.EnterArray() {
+				zjSlice := v.Data
+				zjIndex := 0
+				for {
+					if zjIndex < cap(zjSlice) {
+						zjSlice = zjSlice[:zjIndex+1]
+					} else {
+						var zjZero byte
+						zjSlice = append(zjSlice, zjZero)
+					}
+					if !l.IsNull() {
+						zjSlice[zjIndex] = byte(l.ReadUint8())
+					}
+					zjIndex++
+					if l.Err() != nil || !l.NextElem() {
+						break
+					}
+				}
+				v.Data = zjSlice[:zjIndex]
+			} else if l.Err() == nil {
+				v.Data = make([]byte, 0)
+			}
+		} else {
+			v.Data = []byte(l.ReadBytesBase64())
+		}
 	case 1:
 		if v.Ptr == nil {
 			if a.published1 {
@@ -6424,7 +6449,32 @@ func zjDecodeFallback_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaByt
 	zjDispatch:
 		switch name {
 		case "data":
-			v.Data = []byte(l.ReadBytesBase64())
+			if v.Data != nil && l.IsDelim('[') {
+				if l.EnterArray() {
+					zjSlice := v.Data
+					zjIndex := 0
+					for {
+						if zjIndex < cap(zjSlice) {
+							zjSlice = zjSlice[:zjIndex+1]
+						} else {
+							var zjZero byte
+							zjSlice = append(zjSlice, zjZero)
+						}
+						if !l.IsNull() {
+							zjSlice[zjIndex] = byte(l.ReadUint8())
+						}
+						zjIndex++
+						if l.Err() != nil || !l.NextElem() {
+							break
+						}
+					}
+					v.Data = zjSlice[:zjIndex]
+				} else if l.Err() == nil {
+					v.Data = make([]byte, 0)
+				}
+			} else {
+				v.Data = []byte(l.ReadBytesBase64())
+			}
 		case "ptr":
 			if v.Ptr == nil {
 				if a.published1 {

@@ -211,7 +211,32 @@ func zjDecodeOrderedField_C_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_byt
 	}
 	switch k {
 	case 0:
-		v.F = []byte(l.ReadBytesBase64())
+		if v.F != nil && l.IsDelim('[') {
+			if l.EnterArray() {
+				zjSlice := v.F
+				zjIndex := 0
+				for {
+					if zjIndex < cap(zjSlice) {
+						zjSlice = zjSlice[:zjIndex+1]
+					} else {
+						var zjZero byte
+						zjSlice = append(zjSlice, zjZero)
+					}
+					if !l.IsNull() {
+						zjSlice[zjIndex] = byte(l.ReadUint8())
+					}
+					zjIndex++
+					if l.Err() != nil || !l.NextElem() {
+						break
+					}
+				}
+				v.F = zjSlice[:zjIndex]
+			} else if l.Err() == nil {
+				v.F = make([]byte, 0)
+			}
+		} else {
+			v.F = []byte(l.ReadBytesBase64())
+		}
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesC_bytes[k])
@@ -286,7 +311,32 @@ func zjDecodeFallback_C_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) 
 	zjDispatch:
 		switch name {
 		case "f":
-			v.F = []byte(l.ReadBytesBase64())
+			if v.F != nil && l.IsDelim('[') {
+				if l.EnterArray() {
+					zjSlice := v.F
+					zjIndex := 0
+					for {
+						if zjIndex < cap(zjSlice) {
+							zjSlice = zjSlice[:zjIndex+1]
+						} else {
+							var zjZero byte
+							zjSlice = append(zjSlice, zjZero)
+						}
+						if !l.IsNull() {
+							zjSlice[zjIndex] = byte(l.ReadUint8())
+						}
+						zjIndex++
+						if l.Err() != nil || !l.NextElem() {
+							break
+						}
+					}
+					v.F = zjSlice[:zjIndex]
+				} else if l.Err() == nil {
+					v.F = make([]byte, 0)
+				}
+			} else {
+				v.F = []byte(l.ReadBytesBase64())
+			}
 		default:
 			if folded := zjFieldName_C_bytes(name); folded != name {
 				name = folded
@@ -502,7 +552,32 @@ func zjDecodeOrderedField_C_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *
 	}
 	switch k {
 	case 0:
-		v.F = Blob(l.ReadBytesBase64())
+		if v.F != nil && l.IsDelim('[') {
+			if l.EnterArray() {
+				zjSlice := v.F
+				zjIndex := 0
+				for {
+					if zjIndex < cap(zjSlice) {
+						zjSlice = zjSlice[:zjIndex+1]
+					} else {
+						var zjZero byte
+						zjSlice = append(zjSlice, zjZero)
+					}
+					if !l.IsNull() {
+						zjSlice[zjIndex] = byte(l.ReadUint8())
+					}
+					zjIndex++
+					if l.Err() != nil || !l.NextElem() {
+						break
+					}
+				}
+				v.F = zjSlice[:zjIndex]
+			} else if l.Err() == nil {
+				v.F = make(Blob, 0)
+			}
+		} else {
+			v.F = Blob(l.ReadBytesBase64())
+		}
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesC_bytes_named[k])
@@ -577,7 +652,32 @@ func zjDecodeFallback_C_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjAr
 	zjDispatch:
 		switch name {
 		case "f":
-			v.F = Blob(l.ReadBytesBase64())
+			if v.F != nil && l.IsDelim('[') {
+				if l.EnterArray() {
+					zjSlice := v.F
+					zjIndex := 0
+					for {
+						if zjIndex < cap(zjSlice) {
+							zjSlice = zjSlice[:zjIndex+1]
+						} else {
+							var zjZero byte
+							zjSlice = append(zjSlice, zjZero)
+						}
+						if !l.IsNull() {
+							zjSlice[zjIndex] = byte(l.ReadUint8())
+						}
+						zjIndex++
+						if l.Err() != nil || !l.NextElem() {
+							break
+						}
+					}
+					v.F = zjSlice[:zjIndex]
+				} else if l.Err() == nil {
+					v.F = make(Blob, 0)
+				}
+			} else {
+				v.F = Blob(l.ReadBytesBase64())
+			}
 		default:
 			if folded := zjFieldName_C_bytes_named(name); folded != name {
 				name = folded
@@ -793,7 +893,32 @@ func zjDecodeOrderedField_C_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_o
 	}
 	switch k {
 	case 0:
-		v.F = Blob(l.ReadBytesBase64())
+		if v.F != nil && l.IsDelim('[') {
+			if l.EnterArray() {
+				zjSlice := v.F
+				zjIndex := 0
+				for {
+					if zjIndex < cap(zjSlice) {
+						zjSlice = zjSlice[:zjIndex+1]
+					} else {
+						var zjZero byte
+						zjSlice = append(zjSlice, zjZero)
+					}
+					if !l.IsNull() {
+						zjSlice[zjIndex] = byte(l.ReadUint8())
+					}
+					zjIndex++
+					if l.Err() != nil || !l.NextElem() {
+						break
+					}
+				}
+				v.F = zjSlice[:zjIndex]
+			} else if l.Err() == nil {
+				v.F = make(Blob, 0)
+			}
+		} else {
+			v.F = Blob(l.ReadBytesBase64())
+		}
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesC_bytes_named_oe[k])
@@ -868,7 +993,32 @@ func zjDecodeFallback_C_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a
 	zjDispatch:
 		switch name {
 		case "f":
-			v.F = Blob(l.ReadBytesBase64())
+			if v.F != nil && l.IsDelim('[') {
+				if l.EnterArray() {
+					zjSlice := v.F
+					zjIndex := 0
+					for {
+						if zjIndex < cap(zjSlice) {
+							zjSlice = zjSlice[:zjIndex+1]
+						} else {
+							var zjZero byte
+							zjSlice = append(zjSlice, zjZero)
+						}
+						if !l.IsNull() {
+							zjSlice[zjIndex] = byte(l.ReadUint8())
+						}
+						zjIndex++
+						if l.Err() != nil || !l.NextElem() {
+							break
+						}
+					}
+					v.F = zjSlice[:zjIndex]
+				} else if l.Err() == nil {
+					v.F = make(Blob, 0)
+				}
+			} else {
+				v.F = Blob(l.ReadBytesBase64())
+			}
 		default:
 			if folded := zjFieldName_C_bytes_named_oe(name); folded != name {
 				name = folded
@@ -1846,7 +1996,32 @@ func zjDecodeOrderedField_C_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjAren
 	}
 	switch k {
 	case 0:
-		v.F = []byte(l.ReadBytesBase64())
+		if v.F != nil && l.IsDelim('[') {
+			if l.EnterArray() {
+				zjSlice := v.F
+				zjIndex := 0
+				for {
+					if zjIndex < cap(zjSlice) {
+						zjSlice = zjSlice[:zjIndex+1]
+					} else {
+						var zjZero byte
+						zjSlice = append(zjSlice, zjZero)
+					}
+					if !l.IsNull() {
+						zjSlice[zjIndex] = byte(l.ReadUint8())
+					}
+					zjIndex++
+					if l.Err() != nil || !l.NextElem() {
+						break
+					}
+				}
+				v.F = zjSlice[:zjIndex]
+			} else if l.Err() == nil {
+				v.F = make([]byte, 0)
+			}
+		} else {
+			v.F = []byte(l.ReadBytesBase64())
+		}
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesC_bytes_oe[k])
@@ -1921,7 +2096,32 @@ func zjDecodeFallback_C_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_b
 	zjDispatch:
 		switch name {
 		case "f":
-			v.F = []byte(l.ReadBytesBase64())
+			if v.F != nil && l.IsDelim('[') {
+				if l.EnterArray() {
+					zjSlice := v.F
+					zjIndex := 0
+					for {
+						if zjIndex < cap(zjSlice) {
+							zjSlice = zjSlice[:zjIndex+1]
+						} else {
+							var zjZero byte
+							zjSlice = append(zjSlice, zjZero)
+						}
+						if !l.IsNull() {
+							zjSlice[zjIndex] = byte(l.ReadUint8())
+						}
+						zjIndex++
+						if l.Err() != nil || !l.NextElem() {
+							break
+						}
+					}
+					v.F = zjSlice[:zjIndex]
+				} else if l.Err() == nil {
+					v.F = make([]byte, 0)
+				}
+			} else {
+				v.F = []byte(l.ReadBytesBase64())
+			}
 		default:
 			if folded := zjFieldName_C_bytes_oe(name); folded != name {
 				name = folded

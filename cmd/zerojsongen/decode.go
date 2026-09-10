@@ -474,6 +474,29 @@ func (g *generator) emitReusedScalarSlice(f fieldInfo, target, ind string) {
 	g.p("%s} else if l.Err() == nil { %s = make(%s, 0) }", ind, target, f.typeStr)
 }
 
+// emitReusedByteSlice is emitReusedScalarSlice for the array-of-bytes form
+// of a []byte-kind field decoded into an existing slice: the lexer is at
+// '[' and target is non-nil.
+func (g *generator) emitReusedByteSlice(f fieldInfo, target, ind string) {
+	elem := "byte"
+	if f.byteElem != "" {
+		elem = f.byteElem
+	}
+	g.p("%sif l.EnterArray() {", ind)
+	g.p("%s\tzjSlice := %s", ind, target)
+	g.p("%s\tzjIndex := 0", ind)
+	g.p("%s\tfor {", ind)
+	g.p("%s\t\tif zjIndex < cap(zjSlice) { zjSlice = zjSlice[:zjIndex+1] } else {", ind)
+	g.p("%s\t\t\tvar zjZero %s; zjSlice = append(zjSlice, zjZero)", ind, elem)
+	g.p("%s\t\t}", ind)
+	g.p("%s\t\tif !l.IsNull() { zjSlice[zjIndex] = %s(l.ReadUint8()) }", ind, elem)
+	g.p("%s\t\tzjIndex++", ind)
+	g.p("%s\t\tif l.Err() != nil || !l.NextElem() { break }", ind)
+	g.p("%s\t}", ind)
+	g.p("%s\t%s = zjSlice[:zjIndex]", ind, target)
+	g.p("%s} else if l.Err() == nil { %s = make(%s, 0) }", ind, target, f.typeStr)
+}
+
 // emitDecode emits a field value read. The caller handles the key, colon,
 // and field-level null; the lexer is already positioned at the value.
 func (g *generator) emitDecode(f fieldInfo, ordered bool) {
@@ -602,11 +625,24 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		}
 		g.emitInterfaceRead(target, ind)
 	case kByteSlice:
-		// base64 string or numeric byte array → []byte (a fresh allocation
-		// from ReadBytesBase64);
-		// null is handled by the caller's IsNull check, which clears the
-		// field via emitNullSwitch (kByteSlice is a nullable field).
-		assign(byteSliceReadExpr(f))
+		// base64 string or numeric byte array → []byte. The string form is
+		// always a fresh allocation, as in encoding/json. The ARRAY form on
+		// an existing non-nil slice follows the ordinary slice-reuse rule
+		// instead: elements are written in place through the capacity and
+		// a null element leaves the existing byte untouched — a fresh
+		// slice here would zero bytes stdlib preserves (a duplicated
+		// member, or a pre-populated target). null for the whole value is
+		// handled by the caller's IsNull check, which clears the field via
+		// emitNullSwitch (kByteSlice is a nullable field).
+		if !f.ptr {
+			g.p("%sif %s != nil && l.IsDelim('[') {", ind, target)
+			g.emitReusedByteSlice(f, target, ind+"\t")
+			g.p("%s} else {", ind)
+			assign(byteSliceReadExpr(f))
+			g.p("%s}", ind)
+		} else {
+			assign(byteSliceReadExpr(f))
+		}
 	case kEmptyStruct:
 		if f.ptr {
 			g.emitPointerCellInit(f, target, cell, ind)

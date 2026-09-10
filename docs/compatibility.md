@@ -89,6 +89,11 @@ observed implementation differences:
   field name. Truncation can also create a name collision that drops the
   competing fields. A tab remains part of the name (escaped in JSON).
   zerojson follows classic v1.
+- **Escaped timestamp spellings**: classic v1 hands `time.Time`'s
+  `UnmarshalJSON` the raw quoted bytes, so `"2024-01-02T03:04:05\u005a"`
+  is rejected; v1-on-v2 unescapes first and accepts it. zerojson unescapes
+  before parsing and accepts it on both (the "Escaped direct-leaf strings"
+  row above).
 - **TextUnmarshaler slices and maps on `null`**: classic v1 clears a
   value-typed named slice or map, without invoking `UnmarshalText`.
   v1-on-v2 leaves it untouched. zerojson clears it, following classic v1;
@@ -218,12 +223,16 @@ your schema, business rules, or resource limits.
   the whole document first, then decode it. A callback
   can still run before a later type or custom-validation error, as in stdlib.
 
-- **Decode errors carry the field path and byte offset**: a
+- **Value errors carry the field path and byte offset**: a
   `*zerojson.FieldError` such as `field legs.price: zerojson: expected
   number at offset 41` (the innermost field last), unwrapping to the
   underlying error; errors from delegated `UnmarshalJSON`/`UnmarshalText`
-  are wrapped the same way. Framing errors may have no field path; custom
-  errors need not contain offsets. `Valid` returns a `*SyntaxError`.
+  are wrapped the same way. Grammar errors come from the whole-document
+  validation that runs first and are a `*zerojson.SyntaxError` whose text
+  (`unexpected end of JSON input`, `invalid character '1' after object
+  key:value pair`) carries neither a field path nor an offset; the offset
+  is in its `Offset` field. Framing errors may have no field path; custom
+  errors need not contain offsets.
   Avoid logging raw payloads that may contain sensitive data.
 
 - **Reachable JSON/Text/Appender dispatch disables the ordered fast path**

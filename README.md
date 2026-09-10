@@ -115,8 +115,9 @@ leaf encoders append into the caller's buffer, and eligible decoders match
 compact keys in declaration order before falling back to general lookup.
 
 Leaf-only shapes can encode into a sufficiently sized buffer and decode in
-pooled borrow mode with zero allocations. Custom methods, buffer growth, and
-other shapes may allocate; measure your actual types and workload.
+borrow mode with zero allocations (plain `UnmarshalZJSONBorrow` and a
+`-pool` Decoder's `DecodeBorrow` cost the same). Custom methods, buffer
+growth, and other shapes may allocate; measure your actual types and workload.
 
 [Benchmark commands](conformance/README.md#benchmarking) cover encoding,
 decoding, allocation counts, and interning. Previous measurements are retained

@@ -79,7 +79,10 @@ does.
 ## Fields and tags
 
 - `json` accepts a name, `-`, `omitempty`, `omitzero`, and `string`.
-  Unknown options are generation errors. `zerojson:"intern"` opts string/enum
+  Unknown options are generation errors, except on an untagged embedded
+  struct, where an option-only tag such as Kubernetes' `json:",inline"` is
+  accepted and the struct is promoted exactly as if untagged (which is what
+  `encoding/json` does with it). `zerojson:"intern"` opts string/enum
   fields or map keys into the bounded interner; unknown options there also error.
 - `omitempty` uses underlying-kind emptiness: nil pointers/interfaces,
   zero scalars, and length-zero strings/slices/maps/arrays. Struct values
@@ -110,7 +113,10 @@ does.
   in slice elements and map values.
 - A named int64 with JSON methods can opt into quoted-decimal encoding with
   an exact value-receiver `ZeroJSONQuotedInt64()` marker. Its direct reader
-  accepts bare or quoted integers, including `+` only inside quotes.
+  accepts bare or quoted integers, including `+` only inside quotes, and
+  the type's own `UnmarshalJSON` is never called on that path — so it must
+  accept at least those spellings, or the generated fuzzers (which compare
+  against `encoding/json` calling the method) will report the difference.
   Without the marker, its JSON methods define the wire format.
 - Same-package nested structs are auto-discovered; list only roots in `-types`.
   Supported containers include slices of leaves, `[]T`/`[]*T` structs,
@@ -161,14 +167,19 @@ bytes. Pointer and container shapes allocate as needed.
 
 ```go
 var d models.EventDecoder // one per goroutine
+var e models.Event         // declared outside the loop: see below
 for _, msg := range batch {
-    var e models.Event
     if err := d.DecodeBorrow(msg, &e); err != nil {
         return err
     }
     apply(&e)
 }
 ```
+
+Declare the target outside the loop. A target declared inside it escapes
+to the heap through the Decoder's parameter, costing one allocation per
+iteration for any shape with slice or map fields; `Decode` resets the
+target itself, so reusing one variable is safe.
 
 Later calls do not invalidate earlier results, including retained slices,
 maps, and pointers. In borrow mode, `msg` must remain live and unmodified
