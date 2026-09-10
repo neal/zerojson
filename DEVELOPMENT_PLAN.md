@@ -269,3 +269,23 @@ Concrete next action: independent review of the frozen ownership delta and
 test-oracle boundaries, followed by the maintainer's merge/release decision.
 Do not restart an open-ended review/fuzz loop or repeat the full gate without
 new evidence or a relevant code change.
+
+Follow-up ownership review (same implementation author): inspected the three
+changed emitters, all public arena construction sites, the remaining pointer
+publication transitions, ordinary/override collection dispatch, and lifetime
+oracle boundaries. No production defect found. This does not satisfy review
+by an independent reviewer.
+
+One coverage gap closed: successful-result value comparisons did not directly
+exercise equal-valued storage sharing or retained partial error results.
+Added eight bidirectional mutation checks across copy/borrow and successful/
+semantic-error first calls, plus callback-panic partial-result retention in
+both modes. These pass on Go 1.26.5 and 1.27.0; the whole ownership package
+also passes race/checkptr on both toolchains. Against the archived persistent-arena
+control, all eight isolation cases fail with the intended sharing diagnostic.
+That is calibration of the new contract, not a newly discovered old-policy bug.
+
+Only tests and their documentation changed; production candidate remains
+`9ce7187`, so its full-gate and performance evidence is not superseded.
+The next required gate remains a genuinely independent reviewer, followed by
+the maintainer's explicit release decision. No push or release is authorized.
