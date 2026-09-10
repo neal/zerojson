@@ -1,7 +1,8 @@
 # Decoder simplification and confidence plan
 
-Status: fresh per-call storage implemented on `codex/fresh-decoder-storage`;
-the frozen-candidate release gate is in progress.
+Status: fresh per-call storage implemented and verified on
+`codex/fresh-decoder-storage`. G0–G4 are complete within their stated bounds;
+independent review and the maintainer's release decision are next.
 This is an active maintainer plan, not a release guarantee.
 
 ## Objective
@@ -25,7 +26,7 @@ verification of the finalized implementation.
   ordinary-container stdlib delegation. Encoding was unchanged: all 29
   generated encoder functions in the codec fixture had matching normalized
   AST hashes.
-- Preferred candidate: fresh per-call storage, retaining generated scalar
+- Adopted design: fresh per-call storage, retaining generated scalar
   decoding and the existing eligible ordered path. This removes persistent
   decoder-owned arena state, not within-call aliasing or callback obligations.
 - Reject blanket per-container stdlib delegation in the tested design: its
@@ -43,7 +44,8 @@ verification of the finalized implementation.
 - The same enumerations rediscovered defects in `3df9255` and `cc905b2`
   without a list of historical JSON reproducers. This was retrospective,
   informed by known bug classes, not a blind holdout.
-- No experimental design has passed a complete release gate or long soak.
+- The finalized implementation passed the full release gate and bounded
+  two-message fuzz campaigns. No new hours-long soak was run.
 
 The reproducible experiment bundle is currently outside the repository;
 its location is in the project continuity note. It includes source fixtures,
@@ -141,7 +143,7 @@ Exit: a small repeatable suite that distinguishes representative broken
 versions from the candidate, plus a clear list of untested interactions.
 Avoid claiming exhaustive coverage of arbitrary Go types or callbacks.
 
-### G4 — Verify one stable candidate [next]
+### G4 — Verify one stable candidate [complete, bounded]
 
 During development, run affected invariants and mutants first. Once stable:
 
@@ -156,7 +158,7 @@ Exit: complete evidence tied to a revision, no unexplained failures, and
 explicit remaining limitations. A code change invalidates relevant prior
 results; reuse evidence only when its dependency scope is established.
 
-### G5 — Release decision and continued maintenance [pending G4]
+### G5 — Release decision and continued maintenance [next]
 
 Make an explicit release decision from compatibility, complexity, performance,
 and residual-risk evidence. Preserve minimized regressions and the fast
@@ -241,3 +243,29 @@ embedded shape-validation fixture still asserted pre-simplification allocation
 budgets (0/2/4 rather than the measured 5). Updated that test-only budget and
 its stale name/comment. No production code changed; prior behavioral,
 instrumentation, mutation and performance evidence remains applicable.
+
+Final frozen candidate: `9ce7187a56e834b19212eed9348098099b6f880f` (production
+implementation from `a863be9`). Both commits are SSH-signed and verified.
+
+- `GOTOOLCHAIN=go1.26.5 GOMAXPROCS=2 scripts/verify.sh full` passed end to end:
+  all three modules' tests/vet/race/checkptr, nounsafe build/tests, clean fixture
+  regeneration including ownership, exhaustive domains (393.375s), synthetic
+  shadow, and all 44 mutation detectors (137.89s).
+- Go 1.27.0: `go test ./... -count=1` passed in all three modules.
+- `FuzzPoolPair`, one worker, `-fuzztime=1000000x`, five-minute timeout:
+  Go 1.26.5 passed 1,000,022 executions in 47.681s; Go 1.27.0 passed 1,000,000
+  in 54.809s. These check fresh-decoder agreement and retained first results;
+  the separate ownership enumeration supplies the independent stdlib oracle.
+- No uncommitted generated drift, background run, new paid infrastructure,
+  push, or release remains. Subsequent verification-record changes are docs only.
+
+Remaining limits: bounded schemas and callback programs, not universal coverage;
+retrospective mutation calibration, not a blind holdout; no hours-long soak or
+production tail-latency guarantee. The amd64 experiment measured the prototype;
+the final simplification was compared with it on arm64, not re-timed on amd64.
+No second reviewer has independently reviewed this final architecture delta.
+
+Concrete next action: independent review of the frozen ownership delta and
+test-oracle boundaries, followed by the maintainer's merge/release decision.
+Do not restart an open-ended review/fuzz loop or repeat the full gate without
+new evidence or a relevant code change.

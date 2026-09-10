@@ -176,6 +176,8 @@ while any result refers to it. Custom codecs retain their own ownership
 contracts. Each call resets the destination before validation, including
 when the input is invalid; ordinary `UnmarshalZJSON` methods instead reuse
 the destination with stdlib semantics.
+Reusing the same destination still overwrites that variable; retain a copy
+of its value or decode into a different destination when keeping results.
 
 The Decoder does not retain high-water-mark storage from previous messages.
 Fresh storage costs allocations and GC work on collection-heavy workloads;
