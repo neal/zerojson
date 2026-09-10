@@ -219,10 +219,9 @@ members are supported; unknown values are grammar-checked without being
 materialized.
 
 Out-of-order or duplicate keys, escaped keys, and syntax the matcher cannot
-consume cause a rewind to the keyed decoder (a rewind does not cost a
-pooled Decoder its reuse: members the fast path already filled are
-re-read into the same arena cells). **A value or grammar error is
-final; it does not trigger a second parse.** The two paths share field readers
+consume cause a rewind to the keyed decoder. It re-reads the document into
+the current target; rewinding does not undo earlier writes. **A value or grammar
+error is final; it does not trigger a second parse.** The two paths share field readers
 and are compared by differential tests.
 
 Schemas with reachable JSON/Text/Appender decode callbacks use the keyed
@@ -385,11 +384,9 @@ also generate `FuzzEventZJSONSequence`, which can be run separately.
 `-tests <path>` emits schema-seeded differential fuzz tests. They compare
 stdlib and zerojson acceptance, raw Go values where custom codec state permits,
 normalized re-encoding, valid output, and ordered/fallback agreement.
-Acceptance is checked in both directions: whatever `encoding/json` rejects
-for a reason other than JSON grammar — a wrong value kind, a custom
-`UnmarshalJSON`/`UnmarshalText` error, an unparseable timestamp, UUID, or
-base64 payload, trailing data after the document — zerojson must reject too,
-so a codec that silently accepts invalid input cannot pass its own suite.
+Acceptance is checked in both directions, including JSON syntax, wrong value
+kinds, and custom decoding errors, subject to the documented exemptions below.
+This catches both silently accepted invalid input and rejected valid input.
 Seeds cover every declared member, duplicated members, and integer width
 boundaries. Documented differences, such as quoted-int64 marker nulls,
 escaped spellings of direct leaves, and the v2-backed `,string`
