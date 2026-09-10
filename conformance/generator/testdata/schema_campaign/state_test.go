@@ -172,8 +172,8 @@ func runCampaignState(t *testing.T, program []byte) {
 		if op%campaignOperations == 0 {
 			std, zj = newCampaignGraph(value%2 == 0), newCampaignGraph(value%2 == 0)
 		} else if op%campaignOperations == 11 {
-			// A Decoder owns its arena. Discard each result before reusing
-			// it, including after failure; never inspect invalidated results.
+			// Reset-first decoding must recover after invalid input without
+			// invoking callbacks for that malformed document.
 			campaignCalls = 0
 			if err := decoder.Decode([]byte(`{"c":[}`), &pooled); err == nil || campaignCalls != 0 {
 				t.Fatal("pool accepted malformed value")

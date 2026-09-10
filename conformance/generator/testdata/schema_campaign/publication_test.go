@@ -153,7 +153,7 @@ func runPublicationCampaign[T any](t *testing.T, program []byte, access, key str
 	}
 	defer func() { publicationReceiver = nil; publicationCallback = nil }()
 	// Eight actions per document permit duplicate/replacement interactions;
-	// multiple documents exercise caller reuse and pooled invalidation.
+	// multiple documents exercise caller reuse and reset-first decoding.
 	for start := 1; start < len(program); start += 16 {
 		if pooled {
 			std = *new(T)

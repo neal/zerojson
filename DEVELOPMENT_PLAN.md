@@ -2,7 +2,7 @@
 
 Status: fresh per-call storage implemented and verified on
 `codex/fresh-decoder-storage`. G0–G4 are complete within their stated bounds;
-independent review and the maintainer's release decision are next.
+independent review is complete. The maintainer's release decision is next.
 This is an active maintainer plan, not a release guarantee.
 
 ## Objective
@@ -158,7 +158,7 @@ Exit: complete evidence tied to a revision, no unexplained failures, and
 explicit remaining limitations. A code change invalidates relevant prior
 results; reuse evidence only when its dependency scope is established.
 
-### G5 — Release decision and continued maintenance [next]
+### G5 — Release decision and continued maintenance [review complete; decision pending]
 
 Make an explicit release decision from compatibility, complexity, performance,
 and residual-risk evidence. Preserve minimized regressions and the fast
@@ -289,3 +289,34 @@ Only tests and their documentation changed; production candidate remains
 `9ce7187`, so its full-gate and performance evidence is not superseded.
 The next required gate remains a genuinely independent reviewer, followed by
 the maintainer's explicit release decision. No push or release is authorized.
+
+Independent review completed on frozen `a0d61ad` by a separate review agent
+with fresh context, not the implementation author. Scope: the ownership delta
+`ad80ff0..a0d61ad`, all public arena entry points, pointer publication and
+detachment, slice/map header adoption, ordered replay, callbacks, reset/panic
+recovery, oracle independence, and lifetime/performance documentation.
+No actionable production defect was found. The reviewer recommends proceeding
+to the maintainer's explicit merge/release decision, not claiming bug absence.
+
+Fresh reviewer verification on Go 1.26.5, darwin/arm64, GOMAXPROCS=2:
+
+- `go test ./ownership -count=1 -v`: passed 155,520 storage comparisons,
+  1,008 callback comparisons, and lifetime/isolation/panic tests.
+- `ZEROJSON_CHALLENGE_RACE=1 go test ./generator
+  -run '^TestIndependentChallenge$' -count=1 -v`: passed ordered, fallback,
+  and compatibility challenges with race/checkptr in generated children.
+- The default cache attempt stopped on sandbox permissions before tests;
+  rerunning with `/private/tmp/zerojson-independent-review-cache` succeeded.
+
+The review did not rerun the full gate, historical mutation calibration,
+benchmarks, or a soak. Its bounded scope does not cover arbitrary callback
+programs or alias graphs; final amd64 timing and production GC/tail latency
+remain unverified. Existing frozen full-gate evidence remains applicable.
+The author also verified the candidate's SSH signature and corrected two
+stale campaign comments referring to the former result-invalidation policy.
+These final changes are documentation/comments only, not production changes.
+
+Concrete next action: maintainer merge/release decision based on the accepted
+allocation cost and recorded limits. Do not launch another open-ended review
+or add paid/daily CI work without new evidence. Nothing has been pushed or
+released by this review.
