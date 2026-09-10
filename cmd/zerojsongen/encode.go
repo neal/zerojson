@@ -50,7 +50,8 @@ func (g *generator) needsValueEncode(name string) bool {
 			if f.ptr {
 				continue
 			}
-			if (f.kind == kMarshaler && !f.marshalOnValue) || (f.kind == kTextMarshaler && !f.textOnValue) ||
+			if (f.omitzero && f.hasIsZero && !f.zeroOnValue) ||
+				(f.kind == kMarshaler && !f.marshalOnValue) || (f.kind == kTextMarshaler && !f.textOnValue) ||
 				(f.kind == kStruct && g.needsValueEncode(f.elem)) {
 				return true
 			}
@@ -75,6 +76,13 @@ func (g *generator) genEncodeContext(ti typeInfo, addressable bool) {
 
 	for _, f := range ti.fields {
 		gate := g.encodeGate(f)
+		if !addressable && !f.ptr && f.omitzero && f.hasIsZero && !f.zeroOnValue {
+			// stdlib boxes a non-addressable field before calling a pointer
+			// IsZero method. Its mutations must not alter the encoded value.
+			call := fmt.Sprintf("v.%s.IsZero()", f.access)
+			boxed := fmt.Sprintf("func() bool { zjZero := v.%s; return zjZero.IsZero() }()", f.access)
+			gate = strings.ReplaceAll(gate, call, boxed)
+		}
 		if gate != "" {
 			g.p("\tif %s {", gate)
 		} else {

@@ -239,6 +239,12 @@ func mutationCatalog() []mutationCase {
 			detector: commandSpec{dir: "cmd/zerojsongen", args: []string{"go", "test", ".", "-run", "^TestImportAliasesAvoidPredeclaredNames$", "-count=1"}}, wantOutput: "predeclared import qualifier:",
 		},
 		{
+			name: "zero_method_mutates_map_value", tier: "full", file: "cmd/zerojsongen/encode.go",
+			old: `if !addressable && !f.ptr && f.omitzero && f.hasIsZero && !f.zeroOnValue {`,
+			new: `if false && !addressable && !f.ptr && f.omitzero && f.hasIsZero && !f.zeroOnValue {`, wantCount: 1,
+			detector: generatorDetector(`^TestGeneratorBehaviorMatrix/zero_method_true_map_emptyfalse$`), wantOutput: "IsZero receiver:",
+		},
+		{
 			name: "state_campaign_observes_retained_maps", tier: "full", file: "cmd/zerojsongen/decode.go",
 			old: `g.p("%s\t\t%s = make(%s)", ind, cell, f.typeStr)`,
 			// Recycle detached storage to model clearing an observable map.

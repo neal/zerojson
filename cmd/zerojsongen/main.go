@@ -188,6 +188,7 @@ type fieldInfo struct {
 	stringOpt        bool // json:",string" (implemented for kInt/kUint only)
 	intern           bool // zerojson:"intern"
 	hasIsZero        bool // named field type has an IsZero() bool method
+	zeroOnValue      bool // IsZero belongs to the value method set
 	ptr              bool
 	kind             kind
 	typeStr          string // Go type expr for the (non-pointer) field type

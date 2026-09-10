@@ -93,6 +93,12 @@ observed implementation differences:
   value-typed named slice or map, without invoking `UnmarshalText`.
   v1-on-v2 leaves it untouched. zerojson clears it, following classic v1;
   pointer fields still clear to nil on both toolchains.
+- **Side effects in `IsZero`**: classic v1 checks `omitempty` before
+  `omitzero`, and calls a pointer-only `IsZero` on a separate field copy
+  when the field is not addressable (for example, inside a map value).
+  The tested v1-on-v2 implementation calls `IsZero` first and can encode
+  its mutations to that temporary map value. Generated zerojson encoders
+  retain classic behavior. Pure `IsZero` methods avoid these differences.
 - The `any`-fallback encode path allocates more under v1-on-v2 than under
   classic v1 (it is stdlib's allocation, not zerojson's; the conformance
   suite pins both figures).

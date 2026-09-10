@@ -365,6 +365,7 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 		// uuid.UUID and most struct/Marshaler types don't, and fall back
 		// to a zero-value comparison or a generate-time error).
 		fi.hasIsZero = hasIsZeroMethod(named)
+		fi.zeroOnValue = sigIs(methodSigFromSet(types.NewMethodSet(named), "IsZero"), nil, []types.Type{tBool})
 		// Record the underlying emptiness category (if any) so omitempty
 		// on a Marshaler/Appender/TextMarshaler/custom-leaf value field
 		// can gate on it like encoding/json's isEmptyValue does — which

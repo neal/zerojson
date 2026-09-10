@@ -535,6 +535,7 @@ type Root struct { Field Text ` + "`json:\"field\"`" + ` }
 		},
 	}
 	cases = append(cases, methodAddressabilityCases()...)
+	cases = append(cases, zeroMethodCases()...)
 	cases = append(cases, ownershipCases()...)
 	cases = append(cases, publicationCases()...)
 	cases = append(cases, byteMethodSetCases()...)
