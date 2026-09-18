@@ -2347,15 +2347,40 @@ func zjDecodeOrderedField_C_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjAr
 	}
 	switch k {
 	case 0:
-		if v.F == nil {
-			if a.published0 {
-				v.F = new([]byte)
-			} else {
-				v.F = &a.f0
-				a.published0 = true
+		if v.F != nil && (*v.F) != nil && l.IsDelim('[') {
+			if l.EnterArray() {
+				zjSlice := (*v.F)
+				zjIndex := 0
+				for {
+					if zjIndex < cap(zjSlice) {
+						zjSlice = zjSlice[:zjIndex+1]
+					} else {
+						var zjZero byte
+						zjSlice = append(zjSlice, zjZero)
+					}
+					if !l.IsNull() {
+						zjSlice[zjIndex] = byte(l.ReadUint8())
+					}
+					zjIndex++
+					if l.Err() != nil || !l.NextElem() {
+						break
+					}
+				}
+				(*v.F) = zjSlice[:zjIndex]
+			} else if l.Err() == nil {
+				(*v.F) = make([]byte, 0)
 			}
+		} else {
+			if v.F == nil {
+				if a.published0 {
+					v.F = new([]byte)
+				} else {
+					v.F = &a.f0
+					a.published0 = true
+				}
+			}
+			*v.F = []byte(l.ReadBytesBase64())
 		}
-		*v.F = []byte(l.ReadBytesBase64())
 	}
 	if l.Err() != nil {
 		l.AnnotateFieldString(zjFieldNamesC_bytes_ptr[k])
@@ -2430,15 +2455,40 @@ func zjDecodeFallback_C_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC
 	zjDispatch:
 		switch name {
 		case "f":
-			if v.F == nil {
-				if a.published0 {
-					v.F = new([]byte)
-				} else {
-					v.F = &a.f0
-					a.published0 = true
+			if v.F != nil && (*v.F) != nil && l.IsDelim('[') {
+				if l.EnterArray() {
+					zjSlice := (*v.F)
+					zjIndex := 0
+					for {
+						if zjIndex < cap(zjSlice) {
+							zjSlice = zjSlice[:zjIndex+1]
+						} else {
+							var zjZero byte
+							zjSlice = append(zjSlice, zjZero)
+						}
+						if !l.IsNull() {
+							zjSlice[zjIndex] = byte(l.ReadUint8())
+						}
+						zjIndex++
+						if l.Err() != nil || !l.NextElem() {
+							break
+						}
+					}
+					(*v.F) = zjSlice[:zjIndex]
+				} else if l.Err() == nil {
+					(*v.F) = make([]byte, 0)
 				}
+			} else {
+				if v.F == nil {
+					if a.published0 {
+						v.F = new([]byte)
+					} else {
+						v.F = &a.f0
+						a.published0 = true
+					}
+				}
+				*v.F = []byte(l.ReadBytesBase64())
 			}
-			*v.F = []byte(l.ReadBytesBase64())
 		default:
 			if folded := zjFieldName_C_bytes_ptr(name); folded != name {
 				name = folded

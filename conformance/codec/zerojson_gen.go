@@ -6264,15 +6264,40 @@ func zjDecodeOrderedField_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjAren
 			v.Data = []byte(l.ReadBytesBase64())
 		}
 	case 1:
-		if v.Ptr == nil {
-			if a.published1 {
-				v.Ptr = new([]byte)
-			} else {
-				v.Ptr = &a.f1
-				a.published1 = true
+		if v.Ptr != nil && (*v.Ptr) != nil && l.IsDelim('[') {
+			if l.EnterArray() {
+				zjSlice := (*v.Ptr)
+				zjIndex := 0
+				for {
+					if zjIndex < cap(zjSlice) {
+						zjSlice = zjSlice[:zjIndex+1]
+					} else {
+						var zjZero byte
+						zjSlice = append(zjSlice, zjZero)
+					}
+					if !l.IsNull() {
+						zjSlice[zjIndex] = byte(l.ReadUint8())
+					}
+					zjIndex++
+					if l.Err() != nil || !l.NextElem() {
+						break
+					}
+				}
+				(*v.Ptr) = zjSlice[:zjIndex]
+			} else if l.Err() == nil {
+				(*v.Ptr) = make([]byte, 0)
 			}
+		} else {
+			if v.Ptr == nil {
+				if a.published1 {
+					v.Ptr = new([]byte)
+				} else {
+					v.Ptr = &a.f1
+					a.published1 = true
+				}
+			}
+			*v.Ptr = []byte(l.ReadBytesBase64())
 		}
-		*v.Ptr = []byte(l.ReadBytesBase64())
 	case 2:
 		if v.Lists != nil {
 			if raw := l.RawValue(); l.Err() == nil {
@@ -6476,15 +6501,40 @@ func zjDecodeFallback_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaByt
 				v.Data = []byte(l.ReadBytesBase64())
 			}
 		case "ptr":
-			if v.Ptr == nil {
-				if a.published1 {
-					v.Ptr = new([]byte)
-				} else {
-					v.Ptr = &a.f1
-					a.published1 = true
+			if v.Ptr != nil && (*v.Ptr) != nil && l.IsDelim('[') {
+				if l.EnterArray() {
+					zjSlice := (*v.Ptr)
+					zjIndex := 0
+					for {
+						if zjIndex < cap(zjSlice) {
+							zjSlice = zjSlice[:zjIndex+1]
+						} else {
+							var zjZero byte
+							zjSlice = append(zjSlice, zjZero)
+						}
+						if !l.IsNull() {
+							zjSlice[zjIndex] = byte(l.ReadUint8())
+						}
+						zjIndex++
+						if l.Err() != nil || !l.NextElem() {
+							break
+						}
+					}
+					(*v.Ptr) = zjSlice[:zjIndex]
+				} else if l.Err() == nil {
+					(*v.Ptr) = make([]byte, 0)
 				}
+			} else {
+				if v.Ptr == nil {
+					if a.published1 {
+						v.Ptr = new([]byte)
+					} else {
+						v.Ptr = &a.f1
+						a.published1 = true
+					}
+				}
+				*v.Ptr = []byte(l.ReadBytesBase64())
 			}
-			*v.Ptr = []byte(l.ReadBytesBase64())
 		case "lists":
 			if v.Lists != nil {
 				if raw := l.RawValue(); l.Err() == nil {

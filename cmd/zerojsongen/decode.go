@@ -634,15 +634,15 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		// member, or a pre-populated target). null for the whole value is
 		// handled by the caller's IsNull check, which clears the field via
 		// emitNullSwitch (kByteSlice is a nullable field).
-		if !f.ptr {
-			g.p("%sif %s != nil && l.IsDelim('[') {", ind, target)
-			g.emitReusedByteSlice(f, target, ind+"\t")
-			g.p("%s} else {", ind)
-			assign(byteSliceReadExpr(f))
-			g.p("%s}", ind)
+		if f.ptr {
+			g.p("%sif %s != nil && %s != nil && l.IsDelim('[') {", ind, target, derefTarget)
 		} else {
-			assign(byteSliceReadExpr(f))
+			g.p("%sif %s != nil && l.IsDelim('[') {", ind, target)
 		}
+		g.emitReusedByteSlice(f, derefTarget, ind+"\t")
+		g.p("%s} else {", ind)
+		assign(byteSliceReadExpr(f))
+		g.p("%s}", ind)
 	case kEmptyStruct:
 		if f.ptr {
 			g.emitPointerCellInit(f, target, cell, ind)

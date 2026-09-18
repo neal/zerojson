@@ -29,8 +29,7 @@ var ErrDecimalRange = errors.New("zerojson: decimal out of range")
 // dependency-free, no big.Int, no external decimal library. The
 // coefficient's scale is preserved: AppendDecimalParts(dst, 18550, -2)
 // appends "185.50", and AppendDecimalParts(dst, 0, -2) appends "0.00".
-// This is an infallible append-style leaf helper (like every other
-// zerojson Append* function): exp outside [-maxDecimalExponent,
+// This helper has no error return: exp outside [-maxDecimalExponent,
 // maxDecimalExponent] panics, since producing it would mean a caller bug
 // (an out-of-range value being encoded), not bad input.
 func AppendDecimalParts(dst []byte, coeff int64, exp int32) []byte {

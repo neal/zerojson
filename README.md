@@ -57,9 +57,10 @@ if it returns an error. The generator supports nested structs, supported
 slices and string-keyed maps, standard JSON tags, and custom codecs;
 [see the supported shapes](docs/guide.md#supported-shapes).
 
-## Faster decode loops
+## Reset-first decoding
 
-Generate with `-pool` to get an `EventDecoder`:
+Generate with `-pool` to get an `EventDecoder` that resets the target before
+each decode. The flag does not guarantee faster decoding or fewer allocations:
 
 ```go
 //go:generate go tool zerojsongen -types Event -pool
@@ -67,8 +68,8 @@ Generate with `-pool` to get an `EventDecoder`:
 
 ```go
 var decoder events.EventDecoder
+var event events.Event
 for _, data := range messages {
-    var event events.Event
     if err := decoder.DecodeBorrow(data, &event); err != nil {
         return err
     }
