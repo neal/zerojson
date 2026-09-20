@@ -59,6 +59,54 @@ and runtime from that candidate while running the current challenge suite.
 `ZEROJSON_CHALLENGE_RACE=1` enables race/checkptr instrumentation;
 `ZEROJSON_CHALLENGE_NOUNSAFE=1` checks the safe implementation.
 
+`TestGraphAcceptance` builds separate external fixture modules against a
+candidate's generator and runtime. Its observers do not use the schema
+campaign's builders, cloners, projections, or divergence allowlists.
+
+- 324 initial graphs combine slice length/capacity, separate/shared/overlapping
+  backing storage, pointers into that storage, and nil/shared/separate maps.
+- All pairs from eight documents run through four entry points (copy, borrow,
+  reset-first copy, reset-first borrow), followed by an empty-object decode:
+  82,944 three-operation sequences per generation mode. Documents cover growth,
+  nulls, duplicate fields, byte-array reuse, and syntax/type failures.
+- Both ordered-enabled and `-no-ordered` generation run. Existing storage
+  intentionally selects fallback; generation mode alone does not prove that
+  an ordered path executed.
+- Checks include retained values, original backing arrays, pointer relationships,
+  propagation of later mutations, input integrity, successful callback traces,
+  and absence of callbacks on malformed documents. Observer self-tests must
+  detect equal-valued but differently aliased graphs.
+
+Failed partial targets and later callbacks after semantic errors need not match
+stdlib. Recovery therefore uses independently rebuilt destinations with the same
+Decoder, not either decoder's failed output as the next oracle. The random
+extension varies graph descriptors and eight-operation sequences over the same
+document palette; it is not arbitrary JSON or Go-schema generation. Registered
+readers and arbitrary callback programs remain outside this suite.
+
+Run a frozen candidate from the repository root:
+
+```sh
+ZEROJSON_GRAPH_CANDIDATE=/absolute/path/to/frozen-checkout \
+ZEROJSON_GRAPH_CALIBRATE=1 \
+ZEROJSON_GRAPH_RANDOM=10000 \
+go test ./conformance/generator -run '^TestGraphAcceptance$' -count=1 -v
+```
+
+Without `ZEROJSON_GRAPH_CANDIDATE`, it tests the current checkout. The default
+random count is 500; `ZEROJSON_GRAPH_SEED` accepts a decimal or `0x` seed.
+`ZEROJSON_GRAPH_RACE=1` instruments the fixture tests with race/checkptr checks.
+Calibration first requires a clean baseline, then requires three compile-valid
+faults to fail at behavioral assertions: speculative shared-storage replay,
+unwanted destination reset, and a repeated callback. Build errors and timeouts
+do not count as detections.
+
+For candidate acceptance, finish the fixed matrix, explicitly chosen seeds and
+sequence counts, and calibration on each selected toolchain/platform. Record
+the candidate commit and whether architecture execution was native or emulated.
+An unexplained difference blocks acceptance; completing this finite domain is
+evidence for these properties, not proof that the library has no bugs.
+
 Byte fuzzing varies documents, not Go method sets or object graphs. The
 generator families complement it with executable source fixtures:
 

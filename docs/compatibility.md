@@ -216,6 +216,9 @@ your schema, business rules, or resource limits.
   as failed output. A `Valid` pre-pass prevents syntax errors from reaching
   callbacks, but not later type or custom-validation errors. Public entry
   points perform that syntax pre-pass automatically.
+  Generated field traversal stops when a reader reports an error; stdlib may
+  continue after a type error. Later callback invocations therefore need not
+  match on failed decodes either.
 
 - **Delegated `UnmarshalJSON`/`UnmarshalText` run only on a cleanly
   captured value.** If the value's own grammar walk fails, the decode
