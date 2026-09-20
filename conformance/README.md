@@ -96,6 +96,8 @@ go test ./conformance/generator -run '^TestGraphAcceptance$' -count=1 -v
 Without `ZEROJSON_GRAPH_CANDIDATE`, it tests the current checkout. The default
 random count is 500; `ZEROJSON_GRAPH_SEED` accepts a decimal or `0x` seed.
 `ZEROJSON_GRAPH_RACE=1` instruments the fixture tests with race/checkptr checks.
+The fixture tests also inherit a parent `go test -race` build and the
+verification script's `ZEROJSON_CHECKPTR=1` setting automatically.
 Calibration first requires a clean baseline, then requires three compile-valid
 faults to fail at behavioral assertions: speculative shared-storage replay,
 unwanted destination reset, and a repeated callback. Build errors and timeouts
