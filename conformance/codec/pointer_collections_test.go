@@ -7,9 +7,8 @@ import (
 )
 
 // TestPointerCollectionsMatchStdlib pins *[]T / *map[string]T fields
-// against encoding/json across every pointer/pointee state, including the
-// case an independent review found panicking: decoding into a target whose
-// pointer is non-nil but points at a nil map.
+// against encoding/json across every pointer/pointee state, including a
+// non-nil pointer to a nil map.
 func TestPointerCollectionsMatchStdlib(t *testing.T) {
 	names := []string{"a", "b"}
 	emptyNames := []string{}

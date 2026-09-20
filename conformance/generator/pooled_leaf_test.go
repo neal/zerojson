@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// TestPooledPointerLeafAndSamePackageLeaf pins two generator gaps found by
-// review: (1) a pointer custom-leaf field under -pool must seed its arena
+// TestPooledPointerLeafAndSamePackageLeaf checks two contracts:
+// (1) a pointer custom-leaf field under -pool must seed its arena
 // cell from the target (or zero it) before the leaf Read runs, so a Read
 // that MERGES into its target cannot accumulate across pooled decodes of
 // fresh targets; (2) a -leaf codec that lives in the package being

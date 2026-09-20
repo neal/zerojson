@@ -22,7 +22,8 @@ stays dependency-free; see [repository layout](../CONTRIBUTING.md#repository-lay
 - `generator/` — generator compile, behavioral, and deterministic schema
   campaigns, plus `compat/` wrapper tests and the finite `typeshape/`
   classification matrix.
-- `mutation_test.go` — repository-wide curated mutation testing.
+- `mutation_test.go` — mutation runner; `mutation_catalog_test.go` holds
+  the curated faults and their behavioral detectors.
 - `ownership/` — bounded storage/callback transitions, cross-call result
   lifetimes, and collection-size benchmarks. See its
   [coverage inventory](ownership/README.md).
@@ -64,6 +65,9 @@ generator families complement it with executable source fixtures:
 - `publication_test.go` captures references during decoding, then exercises
   duplicate/null/replacement sequences. It compares retained values and
   pointer identity before the next pooled call, across copy/borrow modes.
+- `shared_storage_test.go` covers cross-field slice/map aliases, pointers
+  into collection storage, and replay boundaries. Its source fixtures live
+  in `generator/testdata/shared_storage/`.
 - `method_set_test.go` enumerates JSON/Text method-presence combinations on
   byte-backed fields and slices, checking both array and base64 inputs.
 - `package_layout_test.go` compiles dependencies named after every Go

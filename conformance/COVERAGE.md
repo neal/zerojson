@@ -11,6 +11,7 @@ or verified invariants. Use this checklist when extending the test framework.
 | Independent challenge | Typed observations without campaign helpers or projection | A small set of explicit scenarios, not a universal oracle |
 | Scalar reuse matrix | Every specialized scalar kind plus struct, pointer and interface controls; fields, pointer fields and named roots; duplicate keys, retained storage, pooled shrink/regrow sequences and empty-array capacity | Finite value sequences; custom codecs need their own tests |
 | Mutation catalog | Sensitivity to selected compile-valid defects | A catalog kill rate is not coverage of unknown defect classes; baseline detectors must pass first |
+| Shared storage | Cross-field slice/map aliases, pointers into collection storage, nested aliases, and callback replay; copy/borrow/reset-first modes | Finite reference graphs and value sequences; registered leaves still have an explicit replay-safety contract |
 | Ownership enumeration | Bounded slice transitions, callback snapshots, retained earlier results | See ownership/README.md for exercised dimensions and excluded interactions |
 | Resource tests | Selected allocation/scaling/depth boundaries | Not a universal memory ceiling; retained results/input and allocation churn still matter |
 

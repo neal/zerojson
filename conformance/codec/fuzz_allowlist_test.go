@@ -13,10 +13,8 @@ import "testing"
 //     those '+' bytes alone makes zerojson accept the document — presence
 //     of a "+" member is not enough, the '+' must be the cause.
 //
-// Two independent reviews found, in turn, a file-wide list that matched
-// `{"unknown":{"count":"+00"},"origin":123}` for every fuzz target, and a
-// per-type list that still exempted documents zerojson rejected for
-// unrelated reasons.
+// A file-wide field list can exempt unrelated targets; matching a field's
+// presence alone can hide another decode error. Neither is sufficient.
 func TestStricterAllowlistIsCausalAndScoped(t *testing.T) {
 	for _, doc := range []string{
 		`{"unknown":{"count":"+00"},"origin":123}`, // count nested one level too deep

@@ -237,7 +237,8 @@ and are compared by differential tests.
 
 Schemas with reachable JSON/Text/Appender decode callbacks use the keyed
 decoder directly to avoid replaying side effects. Reused targets with existing
-direct pointers or non-nil interface fields also bypass speculation. Registered
+non-nil pointers, slices, maps, or interface fields also bypass speculation,
+including those inside value-typed structs. Registered
 `-leaf` readers remain eligible and must tolerate replay (see
 [custom leaf types](#custom-leaf-types)).
 
