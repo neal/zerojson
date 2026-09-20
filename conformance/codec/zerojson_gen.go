@@ -1319,7 +1319,7 @@ func zjDecode_RawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHolder) {
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_RawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHolder) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
+	// Caller-owned references and dynamic receivers must not be replayed.
 	if v.Where != nil {
 		return false
 	}
@@ -1827,8 +1827,8 @@ func zjDecode_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjArenaOmitZ
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjArenaOmitZeroCases) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
-	if v.Ptr != nil {
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.Ptr != nil || v.NilSlice != nil || v.EmptySlice != nil {
 		return false
 	}
 	data, pos := l.DataAndPos()
@@ -4583,8 +4583,8 @@ func zjDecode_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZero, a *
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZero, a *zjArenaInteractionOmitZero) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
-	if v.When != nil || v.Both != nil {
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.When != nil || v.Both != nil || v.Items != nil {
 		return false
 	}
 	data, pos := l.DataAndPos()
@@ -6129,8 +6129,8 @@ func zjDecode_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaBytesCases)
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaBytesCases) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
-	if v.Ptr != nil {
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.Data != nil || v.Ptr != nil || v.Lists != nil || v.Index != nil {
 		return false
 	}
 	data, pos := l.DataAndPos()
@@ -8184,7 +8184,7 @@ func zjDecode_PointerCollections(l *zerojson.Lexer, v *PointerCollections, a *zj
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_PointerCollections(l *zerojson.Lexer, v *PointerCollections, a *zjArenaPointerCollections) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
+	// Caller-owned references and dynamic receivers must not be replayed.
 	if v.Names != nil || v.Index != nil || v.Legs != nil || v.Tags != nil {
 		return false
 	}
@@ -9046,8 +9046,8 @@ func zjDecode_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNumberCas
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNumberCases) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
-	if v.NP != nil || v.PtrS != nil {
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.NP != nil || v.NS != nil || v.NM != nil || v.PtrS != nil {
 		return false
 	}
 	data, pos := l.DataAndPos()
@@ -10040,7 +10040,7 @@ func zjDecode_EventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventMeta) {
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_EventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventMeta) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
+	// Caller-owned references and dynamic receivers must not be replayed.
 	if v.Note != nil || v.Cost != nil {
 		return false
 	}

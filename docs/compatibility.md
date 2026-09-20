@@ -195,11 +195,12 @@ your schema, business rules, or resource limits.
   `zerojson.Raw` stores the literal `null`. Quoted-int64 markers and registered
   leaves bypass JSON methods; see the [custom leaf rules](guide.md#custom-leaf-types).
 
-- **Reused targets with existing pointers or non-nil interface fields use
-  the keyed decoder.** Existing pointers retain their identity and may
-  share storage; interfaces may hold custom decoders. Speculative replay
-  cannot safely repeat their writes or callbacks. Fresh and pooled targets
-  keep the ordered fast path when their schema is otherwise eligible.
+- **Reused targets with non-nil pointers, slices, maps, or interface fields
+  use the keyed decoder.** Pointers and collections may share storage;
+  interfaces may hold custom decoders. Speculative replay cannot safely
+  repeat their writes or callbacks, especially after slice growth detaches
+  an alias. This also applies inside value-typed structs. Fresh and pooled
+  targets keep the ordered fast path when their schema is otherwise eligible.
 
 ### Errors and callbacks
 

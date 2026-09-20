@@ -122,6 +122,10 @@ func zjDecode_Sample(l *zerojson.Lexer, v *Sample, a *zjArenaSample) {
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_Sample(l *zerojson.Lexer, v *Sample, a *zjArenaSample) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.Values != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -1112,8 +1116,8 @@ func zjDecode_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) {
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
-	if v.Optional != nil {
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.Names != nil || v.Items != nil || v.Index != nil || v.Optional != nil {
 		return false
 	}
 	data, pos := l.DataAndPos()

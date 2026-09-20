@@ -137,15 +137,16 @@ func (g *generator) fieldHasReplayCallbacks(f fieldInfo, visiting map[string]boo
 	return false
 }
 
-// Existing pointers can share storage with other fields, and an existing
-// interface can carry an arbitrary callback. Neither can safely be replayed
-// after speculative writes. Check only reachable direct/value-struct fields:
-// collection elements are decoded from zero. Fresh/pool targets still order.
+// Existing pointers and collections can share storage with other fields, and
+// an existing interface can carry an arbitrary callback. Speculative writes
+// cannot safely be replayed: collection growth may detach one alias, making
+// the second traversal observably different. Guard collections themselves
+// and recurse through value structs. Fresh/reset-first targets still order.
 func (g *generator) orderedReuseGuards(ti typeInfo, prefix string) []string {
 	var guards []string
 	for _, f := range ti.fields {
 		target := prefix + f.access
-		if f.ptr || f.kind == kInterface {
+		if f.ptr || f.kind == kInterface || f.kind == kSlice || f.kind == kLeafSlice || f.kind == kByteSlice || f.kind == kMap {
 			guards = append(guards, target+" != nil")
 		} else if f.kind == kStruct {
 			for _, child := range g.types {
@@ -363,7 +364,7 @@ func (g *generator) emitOrderedDecode(ti typeInfo) {
 	g.p("func %s(l *zerojson.Lexer, v *%s, a *%s) bool {", orderedDecodeName(n), n, arenaName(n))
 	g.p("\t_ = a")
 	if guards := g.orderedReuseGuards(ti, "v."); len(guards) != 0 {
-		g.p("\t// Caller-owned pointers and dynamic receivers must not be replayed.")
+		g.p("\t// Caller-owned references and dynamic receivers must not be replayed.")
 		g.p("\tif %s { return false }", strings.Join(guards, " || "))
 	}
 	g.p("\tdata, pos := l.DataAndPos()")

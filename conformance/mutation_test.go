@@ -193,6 +193,12 @@ func mutationCatalog() []mutationCase {
 			detector: generatorDetector(`^TestIndependentChallenge$`), wantOutput: "scalar slice capacity:",
 		},
 		{
+			name: "ordered_replays_shared_collections", tier: "full", file: "cmd/zerojsongen/ordered.go",
+			old: `if f.ptr || f.kind == kInterface || f.kind == kSlice || f.kind == kLeafSlice || f.kind == kByteSlice || f.kind == kMap {`,
+			new: `if f.ptr || f.kind == kInterface {`, wantCount: 1,
+			detector: generatorDetector(`^TestSharedStorageReplay$`), wantOutput: "shared storage state=",
+		},
+		{
 			name: "custom_container_private_publication", tier: "full", file: "cmd/zerojsongen/decode.go",
 			old: `delegate := stdlibMethodContainer(f) || (collection && g.stdlibValue(f, map[string]bool{}) && g.fieldHasReplayCallbacks(f, map[string]bool{}))`,
 			new: `delegate := false && (stdlibMethodContainer(f) || (collection && g.stdlibValue(f, map[string]bool{}) && g.fieldHasReplayCallbacks(f, map[string]bool{})))`, wantCount: 1,

@@ -113,6 +113,10 @@ func zjDecode_C_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) {
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -454,6 +458,10 @@ func zjDecode_C_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjArenaC_byt
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjArenaC_bytes_named) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -795,6 +803,10 @@ func zjDecode_C_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a *zjAren
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a *zjArenaC_bytes_named_oe) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -1148,6 +1160,10 @@ func zjDecode_C_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_slice, a
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_slice, a *zjArenaC_bytes_nested_slice) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -1529,6 +1545,10 @@ func zjDecode_C_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested_slice
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_nested_slice_oe, a *zjArenaC_bytes_nested_slice_oe) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -1898,6 +1918,10 @@ func zjDecode_C_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_bytes_oe)
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_bytes_oe) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -2245,7 +2269,7 @@ func zjDecode_C_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_bytes_p
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_bytes_ptr) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
+	// Caller-owned references and dynamic receivers must not be replayed.
 	if v.F != nil {
 		return false
 	}
@@ -2622,6 +2646,10 @@ func zjDecode_C_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_map_byt
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_map_bytes) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -2975,6 +3003,10 @@ func zjDecode_C_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjArenaC_m
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjArenaC_map_bytes_oe) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -3328,6 +3360,10 @@ func zjDecode_C_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjArenaC_map
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjArenaC_map_decimal) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -3681,6 +3717,10 @@ func zjDecode_C_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a *zjAren
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a *zjArenaC_map_decimal_oe) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -4034,6 +4074,10 @@ func zjDecode_C_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_int) {
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_int) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -4387,6 +4431,10 @@ func zjDecode_C_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArenaC_map_i
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArenaC_map_int_oe) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -4741,6 +4789,10 @@ func zjDecode_C_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_set) {
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_set) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -5095,6 +5147,10 @@ func zjDecode_C_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArenaC_map_s
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArenaC_map_set_oe) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -5452,6 +5508,10 @@ func zjDecode_C_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArenaC_map_s
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArenaC_map_struct) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -5811,6 +5871,10 @@ func zjDecode_C_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *zjArenaC
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *zjArenaC_map_struct_oe) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -6162,6 +6226,10 @@ func zjDecode_C_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *zjArenaC
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *zjArenaC_slice_decimal) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -6527,6 +6595,10 @@ func zjDecode_C_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe, a *zj
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe, a *zjArenaC_slice_decimal_oe) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -6892,6 +6964,10 @@ func zjDecode_C_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_slice_i
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_slice_int) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -7311,6 +7387,10 @@ func zjDecode_C_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjArenaC_s
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjArenaC_slice_int_oe) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -7738,6 +7818,10 @@ func zjDecode_C_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a *zjAr
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, a *zjArenaC_slice_ptrstruct) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -8127,6 +8211,10 @@ func zjDecode_C_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct_oe, a
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruct_oe, a *zjArenaC_slice_ptrstruct_oe) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -8508,6 +8596,10 @@ func zjDecode_C_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjArenaC_s
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjArenaC_slice_string) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -8927,6 +9019,10 @@ func zjDecode_C_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a *zjAr
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, a *zjArenaC_slice_string_oe) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -9350,6 +9446,10 @@ func zjDecode_C_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjArenaC_s
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjArenaC_slice_struct) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -9731,6 +9831,10 @@ func zjDecode_C_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, a *zjAr
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_C_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, a *zjArenaC_slice_struct_oe) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.F != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
@@ -12064,7 +12168,7 @@ func zjDecode_L_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bool_ptr)
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_L_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bool_ptr) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
+	// Caller-owned references and dynamic receivers must not be replayed.
 	if v.F != nil {
 		return false
 	}
@@ -12947,7 +13051,7 @@ func zjDecode_L_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjArenaL_dec
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_L_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjArenaL_decimal_ptr) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
+	// Caller-owned references and dynamic receivers must not be replayed.
 	if v.F != nil {
 		return false
 	}
@@ -13850,7 +13954,7 @@ func zjDecode_L_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_enum_ptr)
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_L_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_enum_ptr) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
+	// Caller-owned references and dynamic receivers must not be replayed.
 	if v.F != nil {
 		return false
 	}
@@ -14755,7 +14859,7 @@ func zjDecode_L_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjArenaL_flo
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_L_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjArenaL_float32_ptr) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
+	// Caller-owned references and dynamic receivers must not be replayed.
 	if v.F != nil {
 		return false
 	}
@@ -15650,7 +15754,7 @@ func zjDecode_L_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjArenaL_flo
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_L_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjArenaL_float64_ptr) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
+	// Caller-owned references and dynamic receivers must not be replayed.
 	if v.F != nil {
 		return false
 	}
@@ -16816,7 +16920,7 @@ func zjDecode_L_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_int32_p
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_L_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_int32_ptr) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
+	// Caller-owned references and dynamic receivers must not be replayed.
 	if v.F != nil {
 		return false
 	}
@@ -17416,7 +17520,7 @@ func zjDecode_L_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_ptr) {
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_L_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_ptr) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
+	// Caller-owned references and dynamic receivers must not be replayed.
 	if v.F != nil {
 		return false
 	}
@@ -18737,7 +18841,7 @@ func zjDecode_L_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *zjArenaL
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_L_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *zjArenaL_quotedint_ptr) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
+	// Caller-owned references and dynamic receivers must not be replayed.
 	if v.F != nil {
 		return false
 	}
@@ -19620,7 +19724,7 @@ func zjDecode_L_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArenaL_strin
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_L_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArenaL_string_ptr) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
+	// Caller-owned references and dynamic receivers must not be replayed.
 	if v.F != nil {
 		return false
 	}
@@ -20932,7 +21036,7 @@ func zjDecode_L_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_time_ptr)
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_L_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_time_ptr) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
+	// Caller-owned references and dynamic receivers must not be replayed.
 	if v.F != nil {
 		return false
 	}
@@ -21815,7 +21919,7 @@ func zjDecode_L_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArenaL_uint1
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_L_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArenaL_uint16_ptr) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
+	// Caller-owned references and dynamic receivers must not be replayed.
 	if v.F != nil {
 		return false
 	}
@@ -22698,7 +22802,7 @@ func zjDecode_L_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uuid_ptr)
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_L_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uuid_ptr) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
+	// Caller-owned references and dynamic receivers must not be replayed.
 	if v.F != nil {
 		return false
 	}
@@ -23013,7 +23117,7 @@ func zjDecode_N_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) {
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_N_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
+	// Caller-owned references and dynamic receivers must not be replayed.
 	if v.F != nil {
 		return false
 	}
@@ -23772,7 +23876,7 @@ func zjDecode_N_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArenaN_struc
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_N_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArenaN_struct_ptr) bool {
 	_ = a
-	// Caller-owned pointers and dynamic receivers must not be replayed.
+	// Caller-owned references and dynamic receivers must not be replayed.
 	if v.F != nil {
 		return false
 	}
@@ -24756,6 +24860,10 @@ func zjDecode_Z_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_omitzero)
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_Z_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_omitzero) bool {
 	_ = a
+	// Caller-owned references and dynamic receivers must not be replayed.
+	if v.ES != nil {
+		return false
+	}
 	data, pos := l.DataAndPos()
 	if pos >= len(data) || data[pos] != '{' {
 		return false
