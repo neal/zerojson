@@ -51,6 +51,11 @@ Coverage and its oracles (extended campaigns run only when requested):
 See [coverage boundaries](COVERAGE.md) for what these checks do not establish
 and how to extend their observations without broadening exemptions.
 
+The graph acceptance, independent challenge, shared-storage, scalar-reuse, and
+schema campaigns propagate a parent race build and `ZEROJSON_CHECKPTR=1` to
+their generated test subprocesses. Their explicit instrumentation opt-ins
+remain available for standalone runs; the normal CI tiers need no extra flags.
+
 `TestIndependentChallenge` uses separate typed observations, without the schema
 campaign's graph cloners or allowlists. It covers overlapping slices, root
 collection aliases, nested callback replacement, and pooled error/panic recovery.

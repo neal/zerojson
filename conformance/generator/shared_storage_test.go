@@ -60,9 +60,8 @@ func TestSharedStorageReplay(t *testing.T) {
 		t.Fatalf("generate: %v\n%s", err, out)
 	}
 	args := []string{"test", ".", "-count=1"}
-	if os.Getenv("ZEROJSON_CHALLENGE_RACE") != "" {
-		args = append(args, "-race", "-gcflags=all=-d=checkptr=2")
-	}
+	explicit := os.Getenv("ZEROJSON_CHALLENGE_RACE") != ""
+	args = append(args, fixtureTestFlags(t, explicit, explicit)...)
 	cmd = exec.Command("go", args...)
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {

@@ -438,13 +438,7 @@ func TestGeneratedSchemaCampaign(t *testing.T) {
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("generator seed=%#x: %v\n%s", seed, err, out)
 			}
-			var instrumentation []string
-			if os.Getenv("ZEROJSON_SCHEMA_RACE") != "" {
-				instrumentation = append(instrumentation, "-race")
-			}
-			if os.Getenv("ZEROJSON_CHECKPTR") != "" {
-				instrumentation = append(instrumentation, "-gcflags=all=-d=checkptr=2")
-			}
+			instrumentation := fixtureTestFlags(t, os.Getenv("ZEROJSON_SCHEMA_RACE") != "", false)
 			testArgs := append([]string{"test", "-count=1", "-timeout=10m"}, instrumentation...)
 			cmd = exec.Command("go", append(testArgs, ".")...)
 			cmd.Dir = dir

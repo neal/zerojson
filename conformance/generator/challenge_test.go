@@ -72,9 +72,8 @@ func TestIndependentChallenge(t *testing.T) {
 			if mode == "compat" {
 				args = append(args, "-run", "^TestCompatContainerObservations$")
 			}
-			if os.Getenv("ZEROJSON_CHALLENGE_RACE") != "" {
-				args = append(args, "-race", "-gcflags=all=-d=checkptr=2")
-			}
+			explicit := os.Getenv("ZEROJSON_CHALLENGE_RACE") != ""
+			args = append(args, fixtureTestFlags(t, explicit, explicit)...)
 			if os.Getenv("ZEROJSON_CHALLENGE_NOUNSAFE") != "" {
 				args = append(args, "-tags=nounsafe")
 			}

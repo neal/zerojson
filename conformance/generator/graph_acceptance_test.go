@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -16,38 +15,6 @@ import (
 //
 //go:embed testdata/graph_acceptance/*.go
 var graphAcceptanceSource embed.FS
-
-func graphInstrumentation(race, checkptr, explicit bool) []string {
-	var args []string
-	if race || explicit {
-		args = append(args, "-race")
-	}
-	if checkptr || explicit {
-		args = append(args, "-gcflags=all=-d=checkptr=2")
-	}
-	return args
-}
-
-func TestGraphInstrumentation(t *testing.T) {
-	for _, tc := range []struct {
-		name                     string
-		race, checkptr, explicit bool
-		want                     []string
-	}{
-		{"ordinary", false, false, false, nil},
-		{"race", true, false, false, []string{"-race"}},
-		{"checkptr", false, true, false, []string{"-gcflags=all=-d=checkptr=2"}},
-		{"both", true, true, false, []string{"-race", "-gcflags=all=-d=checkptr=2"}},
-		{"explicit", false, false, true, []string{"-race", "-gcflags=all=-d=checkptr=2"}},
-		{"no_duplicates", true, true, true, []string{"-race", "-gcflags=all=-d=checkptr=2"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := graphInstrumentation(tc.race, tc.checkptr, tc.explicit); !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("instrumentation = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
 
 func TestGraphAcceptance(t *testing.T) {
 	if testing.Short() {
@@ -104,8 +71,8 @@ func TestGraphAcceptance(t *testing.T) {
 			}
 			args = []string{"go", "test", ".", "-count=1", "-v", "-timeout=5m"}
 			// Child go commands do not inherit the parent's instrumentation.
-			args = append(args, graphInstrumentation(raceDetectorEnabled,
-				os.Getenv("ZEROJSON_CHECKPTR") != "", os.Getenv("ZEROJSON_GRAPH_RACE") != "")...)
+			explicit := os.Getenv("ZEROJSON_GRAPH_RACE") != ""
+			args = append(args, fixtureTestFlags(t, explicit, explicit)...)
 			t.Logf("fixture command: %s", strings.Join(args, " "))
 			if out, err := run(dir, args...); err != nil {
 				t.Fatalf("acceptance candidate=%s: %v\n%s", root, err, out)
