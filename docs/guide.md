@@ -52,7 +52,10 @@ refuses to regenerate the codec while leaving that file to go stale.
 
 Hand-written custom methods are preserved during auto-discovery. Only methods
 from recognized zerojsongen/easyjson output are replaceable; an arbitrary
-`Code generated` header is insufficient. Explicit roots with hand-written
+`Code generated` header is insufficient. This applies to same-package structs
+and to named slices and maps used as fields: a field of a named map whose
+methods are generated output gets the inline map codec, so the result does not
+depend on whether the previous output was visible during regeneration. Explicit roots with hand-written
 JSON/Text methods are refused; remove those methods to generate a codec, or
 leave the type out of the explicit roots to retain its custom behavior.
 
@@ -136,7 +139,11 @@ does.
 - JSON/Text method pairs are delegated to. Signatures, not method names alone,
   determine interface satisfaction. Incomplete pairs are refused unless another
   supported codec takes precedence (such as an Appender/Reader pair).
-- `any` fields/elements/values encode through stdlib. Fresh interfaces decode
+- `any` fields/elements/values encode exactly as `json.Marshal` does. Nil,
+  bools, `time.Time`, strings needing no escapes, and JSON/Text marshalers
+  whose output stdlib would copy unchanged skip its reflection; other values,
+  and output stdlib would compact, escape, or reject, go through
+  `json.Marshal` with each method still called once. Fresh interfaces decode
   with zerojson's generic readers. An existing interface holding a non-nil
   concrete pointer decodes through stdlib into that receiver.
 - Type aliases are resolved while preserving usable source spellings.

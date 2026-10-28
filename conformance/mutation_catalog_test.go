@@ -18,6 +18,42 @@ func mutationCatalog() []mutationCase {
 			detector:  generatorDetector(`^TestGeneratorBehaviorMatrix/easyjson_only_field_refused$`), wantOutput: "want substring",
 		},
 		{
+			// A same-package named map whose methods are generated output must
+			// get the inline map codec; delegating to the methods makes
+			// regeneration change the codec.
+			name: "generated_named_map_methods_delegated", tier: "quick", file: "cmd/zerojsongen/load.go",
+			old:       "generatedContainer = true\n\t\t\t\thasM, hasU = false, false",
+			new:       "generatedContainer = false",
+			wantCount: 1,
+			detector:  generatorDetector(`^TestGeneratedNamedMapMethodsAreReplaced$`), wantOutput: "delegates to v.Set",
+		},
+		{
+			// AppendInterface may copy Marshaler output verbatim only when
+			// encoding/json would; HTML-sensitive bytes must be escaped.
+			name: "append_interface_verbatim_skips_html_escape", tier: "quick", file: "writer.go",
+			old:       "if c >= utf8.RuneSelf || c == '<' || c == '>' || c == '&' || c == '\\\\' {",
+			new:       "if c >= utf8.RuneSelf || c == '\\\\' {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestAppendInterfaceMatchesMarshal$`), wantOutput: "AppendInterface:",
+		},
+		{
+			// Output needing post-processing is replayed into json.Marshal,
+			// not re-encoded from the value, so the method runs once.
+			name: "append_interface_calls_marshaler_twice", tier: "quick", file: "writer.go",
+			old:       "return appendReplayed(dst, v, replayMarshaler{b, err})",
+			new:       "return appendStdlib(dst, v)",
+			wantCount: 1,
+			detector:  rootDetector(`^TestAppendInterfaceCallsMethodsOnce$`), wantOutput: "method called 2 times",
+		},
+		{
+			// A replayed Marshaler error must name v's type, not the stand-in.
+			name: "append_interface_error_names_stand_in", tier: "full", file: "writer.go",
+			old:       "retyped.Type = vt",
+			new:       "retyped.Type = st",
+			wantCount: 1,
+			detector:  rootDetector(`^TestAppendInterfaceMatchesMarshal$`), wantOutput: "errors differ",
+		},
+		{
 			// Appender slice elements and map values must call AppendZJSON;
 			// emitting nothing would produce "[,]".
 			name: "appender_element_encodes_nothing", tier: "quick", file: "cmd/zerojsongen/encode.go",

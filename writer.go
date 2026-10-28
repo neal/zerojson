@@ -1,11 +1,13 @@
 package zerojson
 
 import (
+	"encoding"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math"
 	"math/bits"
+	"reflect"
 	"strconv"
 	"time"
 	"unicode/utf8"
@@ -343,14 +345,154 @@ func AppendStringBytes(dst, b []byte) []byte {
 	return AppendString(dst, bytesToString(b))
 }
 
-// AppendInterface appends an arbitrary value, matching easyjson's handling
-// of interface{} fields (which fall back to encoding/json). Nested maps
-// therefore have sorted keys, unlike the range-order maps zerojson emits
-// for statically-typed map fields.
+// AppendInterface appends an arbitrary value exactly as json.Marshal encodes
+// it, matching easyjson's handling of interface{} fields (which fall back to
+// encoding/json). Nested maps therefore have sorted keys, unlike the
+// range-order maps zerojson emits for statically-typed map fields.
+//
+// Common values skip json.Marshal's reflection: nil, bools, strings that
+// need no escaping, and json.Marshaler/encoding.TextMarshaler values whose
+// output encoding/json would copy unchanged. Each method is called once.
+// Output that encoding/json would compact, escape, or reject is handed back
+// to json.Marshal through a stand-in that replays the method's result, so
+// the bytes and the error are json.Marshal's for v.
 func AppendInterface(dst []byte, v any) ([]byte, error) {
+	switch x := v.(type) {
+	case nil:
+		return append(dst, "null"...), nil
+	case bool:
+		return AppendBool(dst, x), nil
+	case string:
+		if verbatimString(x) {
+			dst = append(dst, '"')
+			dst = append(dst, x...)
+			return append(dst, '"'), nil
+		}
+	case time.Time:
+		// encoding/json/v2 formats times itself rather than calling
+		// MarshalJSON; AppendTime matches both, and the rare unencodable
+		// time takes encoding/json's own error.
+		if b, err := AppendTime(dst, x); err == nil {
+			return b, nil
+		}
+		return appendStdlib(dst, v)
+	case *time.Time:
+		if x == nil {
+			return append(dst, "null"...), nil
+		}
+		if b, err := AppendTime(dst, *x); err == nil {
+			return b, nil
+		}
+		return appendStdlib(dst, v)
+	case json.Marshaler:
+		if isNilPointer(v) {
+			return append(dst, "null"...), nil
+		}
+		b, err := x.MarshalJSON()
+		if err == nil && verbatimJSON(b) {
+			return append(dst, b...), nil
+		}
+		return appendReplayed(dst, v, replayMarshaler{b, err})
+	case encoding.TextMarshaler:
+		if isNilPointer(v) {
+			return append(dst, "null"...), nil
+		}
+		b, err := x.MarshalText()
+		if err == nil && verbatimString(b) {
+			dst = append(dst, '"')
+			dst = append(dst, b...)
+			return append(dst, '"'), nil
+		}
+		return appendReplayed(dst, v, replayTextMarshaler{b, err})
+	}
+	return appendStdlib(dst, v)
+}
+
+func appendStdlib(dst []byte, v any) ([]byte, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return dst, err
 	}
 	return append(dst, b...), nil
+}
+
+// appendReplayed appends json.Marshal(standIn), where standIn replays the
+// result of v's own method. A Marshaler error names standIn's type, so it is
+// renamed to the type json.Marshal(v) would name: v's type, or with an
+// encoding/json built on encoding/json/v2, a pointer to v's value type.
+func appendReplayed(dst []byte, v, standIn any) ([]byte, error) {
+	b, err := json.Marshal(standIn)
+	if err != nil {
+		if me, ok := err.(*json.MarshalerError); ok {
+			vt, st := reflect.TypeOf(v), reflect.TypeOf(standIn)
+			switch me.Type {
+			case st:
+			case reflect.PointerTo(st):
+				if vt.Kind() != reflect.Pointer {
+					vt = reflect.PointerTo(vt)
+				}
+			default:
+				return dst, err
+			}
+			retyped := *me
+			retyped.Type = vt
+			err = &retyped
+		}
+		return dst, err
+	}
+	return append(dst, b...), nil
+}
+
+// replayMarshaler and replayTextMarshaler return a result the user's method
+// already produced, so encoding/json post-processes it without calling the
+// method a second time.
+type replayMarshaler struct {
+	b   []byte
+	err error
+}
+
+func (r replayMarshaler) MarshalJSON() ([]byte, error) { return r.b, r.err }
+
+type replayTextMarshaler struct {
+	b   []byte
+	err error
+}
+
+func (r replayTextMarshaler) MarshalText() ([]byte, error) { return r.b, r.err }
+
+// isNilPointer reports whether v holds a nil pointer, which encoding/json
+// encodes as null without calling its Marshaler or TextMarshaler.
+func isNilPointer(v any) bool {
+	rv := reflect.ValueOf(v)
+	return rv.Kind() == reflect.Pointer && rv.IsNil()
+}
+
+// verbatimString reports whether encoding/json would quote s without
+// escaping anything: printable ASCII other than '"', '\\', and the HTML set.
+func verbatimString[T string | []byte](s T) bool {
+	for i := 0; i < len(s); i++ {
+		if !safeSet[s[i]] {
+			return false
+		}
+	}
+	return true
+}
+
+// verbatimJSON reports whether encoding/json would copy Marshaler output b
+// unchanged: valid, compact, ASCII, with no HTML-sensitive bytes and no
+// string escapes (left to encoding/json so its spelling stays authoritative).
+func verbatimJSON(b []byte) bool {
+	inString := false
+	for _, c := range b {
+		if c >= utf8.RuneSelf || c == '<' || c == '>' || c == '&' || c == '\\' {
+			return false
+		}
+		switch {
+		case c == '"':
+			inString = !inString
+		case !inString && (c == ' ' || c == '\t' || c == '\n' || c == '\r'):
+			return false
+		}
+	}
+	return Valid(b) == nil
 }

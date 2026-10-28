@@ -483,6 +483,21 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 			return
 		}
 
+		// Same-package named slices and maps follow the struct rule above:
+		// methods living only in generated files (easyjson output, or this
+		// generator's previous -compat output) are what this run replaces,
+		// so the type is encoded by its underlying slice or map. Delegating
+		// to them instead would make the codec depend on whether the load
+		// could blank the previous output, so regeneration would change it.
+		generatedContainer := false
+		if obj.Pkg() == g.pkg.Types && g.replaceableMethods(named) {
+			switch named.Underlying().(type) {
+			case *types.Slice, *types.Map:
+				generatedContainer = true
+				hasM, hasU = false, false
+			}
+		}
+
 		// Custom JSON methods win over structural handling: a type that
 		// defines its own wire format must be delegated to, even if it is
 		// a same-package struct we could otherwise generate for.
@@ -504,6 +519,9 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 		// Text marshalers (e.g. civil.Date) serialize as quoted strings,
 		// exactly as encoding/json and easyjson treat them.
 		hasMT, hasUT := hasMarshalText(named), hasUnmarshalText(named)
+		if generatedContainer {
+			hasMT, hasUT = false, false
+		}
 		if hasMT != hasUT {
 			log.Fatalf("%s: %s has only one of MarshalText/UnmarshalText — implement both", ctx, t)
 		}
