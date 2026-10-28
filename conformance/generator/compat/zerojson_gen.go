@@ -10,8 +10,9 @@ import (
 	strings_ "strings"
 )
 
-// zjArenaPoint holds first-use pointer cells for a decoded Point in one
-// allocation, plus working container headers for this call only.
+// zjArenaPoint holds per-call working state for a decoded Point: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaPoint struct {
 }

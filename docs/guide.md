@@ -172,7 +172,10 @@ reserved; a target package declaring that name at package scope is refused.
 `-pool` emits a reset-first `<Type>Decoder` per listed type. The flag name
 is retained for compatibility; the Decoder now uses fresh storage per call,
 not a persistent arena. Leaf-only borrowing shapes can still allocate zero
-bytes. Pointer and container shapes allocate as needed.
+bytes. Pointer and container shapes allocate as needed: the cells that back
+newly set pointer fields come from one block per decode, allocated only when
+the input sets a nil pointer field and shared with nested structs decoded
+after it, so a message that sets no pointer field pays nothing for them.
 
 ```go
 var d models.EventDecoder // one per goroutine
@@ -314,7 +317,7 @@ a type generated in one package can be a field, pointer, slice element
 (`[]T`, `[]*T`), or map value of a type generated in another (generate the
 inner package first). The pair drives every one of those positions, for
 hand-written Appenders too, and takes precedence over JSON methods in each.
-Same-package generated structs share the parent's arena directly.
+Same-package generated structs share the parent's decode state directly.
 
 Appenders must preserve the output prefix and produce one valid JSON value.
 Readers consume one value and report errors through the Lexer. These callbacks

@@ -631,6 +631,7 @@ func (g *generator) generate() string {
 }
 
 func arenaName(t string) string  { return "zjArena" + t }
+func cellsName(t string) string  { return "zjCells" + t }
 func decodeName(t string) string { return "zjDecode_" + t }
 
 // qualify returns the emitted-code qualifier ("pkg.") for a package and

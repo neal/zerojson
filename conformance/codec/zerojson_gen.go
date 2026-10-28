@@ -14,34 +14,51 @@ import (
 	"time"
 )
 
-// zjArenaEvent holds first-use pointer cells for a decoded Event in one
-// allocation, plus working container headers for this call only.
+// zjArenaEvent holds per-call working state for a decoded Event: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaEvent struct {
+	zjBlock     *zjCellsEvent
 	published1  bool
-	f1          time.Time
 	published3  bool
-	f3          testleaf.Decimal
 	published4  bool
-	f4          testleaf.Decimal
 	published6  bool
-	f6          string
 	published9  bool
-	f9          Phase
 	published11 bool
-	f11         StrInt64
 	a14         zjArenaEventMeta
 	published15 bool
-	v15         EventMeta
 	a15         zjArenaEventMeta
 	c16         []EventLeg
 	c17         []*EventLeg
 	c18         []string
 	published26 bool
-	f26         YMD
 	m27         map[string]testleaf.Decimal
 	m29         map[string]any
 	c30         []any
+}
+
+// zjCellsEvent holds the first-use pointer cells of one Event decode, and those of
+// its nested structs, in a single allocation made only when the input
+// sets a nil pointer field.
+type zjCellsEvent struct {
+	f1  time.Time
+	f3  testleaf.Decimal
+	f4  testleaf.Decimal
+	f6  string
+	f9  Phase
+	f11 StrInt64
+	s14 zjCellsEventMeta
+	v15 EventMeta
+	s15 zjCellsEventMeta
+	f26 YMD
+}
+
+func (a *zjArenaEvent) zjCells() *zjCellsEvent {
+	if a.zjBlock == nil {
+		a.zjBlock = new(zjCellsEvent)
+	}
+	return a.zjBlock
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -749,7 +766,7 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 				if a.published1 {
 					v.ClosedAt = new(time.Time)
 				} else {
-					v.ClosedAt = &a.f1
+					v.ClosedAt = &a.zjCells().f1
 					a.published1 = true
 				}
 			}
@@ -761,7 +778,7 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 				if a.published3 {
 					v.Size = new(testleaf.Decimal)
 				} else {
-					v.Size = &a.f3
+					v.Size = &a.zjCells().f3
 					a.published3 = true
 				}
 			}
@@ -771,7 +788,7 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 				if a.published4 {
 					v.Total = new(testleaf.Decimal)
 				} else {
-					v.Total = &a.f4
+					v.Total = &a.zjCells().f4
 					a.published4 = true
 				}
 			}
@@ -783,7 +800,7 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 				if a.published6 {
 					v.Location = new(string)
 				} else {
-					v.Location = &a.f6
+					v.Location = &a.zjCells().f6
 					a.published6 = true
 				}
 			}
@@ -804,7 +821,7 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 				if a.published9 {
 					v.Phase = new(Phase)
 				} else {
-					v.Phase = &a.f9
+					v.Phase = &a.zjCells().f9
 					a.published9 = true
 				}
 			}
@@ -823,7 +840,7 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 				if a.published11 {
 					v.RecvNs = new(StrInt64)
 				} else {
-					v.RecvNs = &a.f11
+					v.RecvNs = &a.zjCells().f11
 					a.published11 = true
 				}
 			}
@@ -841,15 +858,21 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 				}
 			}
 		case "meta":
+			if a.a14.zjBlock == nil && a.zjBlock != nil {
+				a.a14.zjBlock = &a.zjBlock.s14
+			}
 			zjDecode_EventMeta(l, &v.Meta, &a.a14)
 		case "meta_ptr":
 			if v.MetaPtr == nil {
 				if a.published15 {
 					v.MetaPtr = new(EventMeta)
 				} else {
-					v.MetaPtr = &a.v15
+					v.MetaPtr = &a.zjCells().v15
 					a.published15 = true
 				}
+			}
+			if a.a15.zjBlock == nil && a.zjBlock != nil {
+				a.a15.zjBlock = &a.zjBlock.s15
 			}
 			zjDecode_EventMeta(l, v.MetaPtr, &a.a15)
 		case "items":
@@ -999,7 +1022,7 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 				if a.published26 {
 					v.SecondDate = new(YMD)
 				} else {
-					v.SecondDate = &a.f26
+					v.SecondDate = &a.zjCells().f26
 					a.published26 = true
 				}
 			}
@@ -1185,12 +1208,27 @@ func (d *EventDecoder) DecodeBorrow(data []byte, v *Event) error {
 	return l.Err()
 }
 
-// zjArenaRawHolder holds first-use pointer cells for a decoded RawHolder in one
-// allocation, plus working container headers for this call only.
+// zjArenaRawHolder holds per-call working state for a decoded RawHolder: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaRawHolder struct {
+	zjBlock    *zjCellsRawHolder
 	published2 bool
-	f2         zerojson.Raw
+}
+
+// zjCellsRawHolder holds the first-use pointer cells of one RawHolder decode, and those of
+// its nested structs, in a single allocation made only when the input
+// sets a nil pointer field.
+type zjCellsRawHolder struct {
+	f2 zerojson.Raw
+}
+
+func (a *zjArenaRawHolder) zjCells() *zjCellsRawHolder {
+	if a.zjBlock == nil {
+		a.zjBlock = new(zjCellsRawHolder)
+	}
+	return a.zjBlock
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -1431,7 +1469,7 @@ func zjDecodeOrderedField_RawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaR
 			if a.published2 {
 				v.Where = new(zerojson.Raw)
 			} else {
-				v.Where = &a.f2
+				v.Where = &a.zjCells().f2
 				a.published2 = true
 			}
 		}
@@ -1540,7 +1578,7 @@ func zjDecodeFallback_RawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHo
 				if a.published2 {
 					v.Where = new(zerojson.Raw)
 				} else {
-					v.Where = &a.f2
+					v.Where = &a.zjCells().f2
 					a.published2 = true
 				}
 			}
@@ -1613,14 +1651,29 @@ func (d *RawHolderDecoder) DecodeBorrow(data []byte, v *RawHolder) error {
 	return l.Err()
 }
 
-// zjArenaOmitZeroCases holds first-use pointer cells for a decoded OmitZeroCases in one
-// allocation, plus working container headers for this call only.
+// zjArenaOmitZeroCases holds per-call working state for a decoded OmitZeroCases: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaOmitZeroCases struct {
+	zjBlock    *zjCellsOmitZeroCases
 	published5 bool
-	f5         int
 	c6         []string
 	c7         []string
+}
+
+// zjCellsOmitZeroCases holds the first-use pointer cells of one OmitZeroCases decode, and those of
+// its nested structs, in a single allocation made only when the input
+// sets a nil pointer field.
+type zjCellsOmitZeroCases struct {
+	f5 int
+}
+
+func (a *zjArenaOmitZeroCases) zjCells() *zjCellsOmitZeroCases {
+	if a.zjBlock == nil {
+		a.zjBlock = new(zjCellsOmitZeroCases)
+	}
+	return a.zjBlock
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -1947,7 +2000,7 @@ func zjDecodeOrderedField_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *
 			if a.published5 {
 				v.Ptr = new(int)
 			} else {
-				v.Ptr = &a.f5
+				v.Ptr = &a.zjCells().f5
 				a.published5 = true
 			}
 		}
@@ -2234,7 +2287,7 @@ func zjDecodeFallback_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjAr
 				if a.published5 {
 					v.Ptr = new(int)
 				} else {
-					v.Ptr = &a.f5
+					v.Ptr = &a.zjCells().f5
 					a.published5 = true
 				}
 			}
@@ -2427,8 +2480,9 @@ func (d *OmitZeroCasesDecoder) DecodeBorrow(data []byte, v *OmitZeroCases) error
 	return l.Err()
 }
 
-// zjArenaStringOptCases holds first-use pointer cells for a decoded StringOptCases in one
-// allocation, plus working container headers for this call only.
+// zjArenaStringOptCases holds per-call working state for a decoded StringOptCases: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaStringOptCases struct {
 }
@@ -2799,12 +2853,27 @@ func (d *StringOptCasesDecoder) DecodeBorrow(data []byte, v *StringOptCases) err
 	return l.Err()
 }
 
-// zjArenaAppenderCases holds first-use pointer cells for a decoded AppenderCases in one
-// allocation, plus working container headers for this call only.
+// zjArenaAppenderCases holds per-call working state for a decoded AppenderCases: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaAppenderCases struct {
+	zjBlock    *zjCellsAppenderCases
 	published1 bool
-	f1         Cents
+}
+
+// zjCellsAppenderCases holds the first-use pointer cells of one AppenderCases decode, and those of
+// its nested structs, in a single allocation made only when the input
+// sets a nil pointer field.
+type zjCellsAppenderCases struct {
+	f1 Cents
+}
+
+func (a *zjArenaAppenderCases) zjCells() *zjCellsAppenderCases {
+	if a.zjBlock == nil {
+		a.zjBlock = new(zjCellsAppenderCases)
+	}
+	return a.zjBlock
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -2942,7 +3011,7 @@ func zjDecodeFallback_AppenderCases(l *zerojson.Lexer, v *AppenderCases, a *zjAr
 				if a.published1 {
 					v.Cost = new(Cents)
 				} else {
-					v.Cost = &a.f1
+					v.Cost = &a.zjCells().f1
 					a.published1 = true
 				}
 			}
@@ -3015,8 +3084,9 @@ func (d *AppenderCasesDecoder) DecodeBorrow(data []byte, v *AppenderCases) error
 	return l.Err()
 }
 
-// zjArenaMapFieldsLike holds first-use pointer cells for a decoded MapFieldsLike in one
-// allocation, plus working container headers for this call only.
+// zjArenaMapFieldsLike holds per-call working state for a decoded MapFieldsLike: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaMapFieldsLike struct {
 }
@@ -3251,8 +3321,9 @@ func (d *MapFieldsLikeDecoder) DecodeBorrow(data []byte, v *MapFieldsLike) error
 	return l.Err()
 }
 
-// zjArenaEventLeg holds first-use pointer cells for a decoded EventLeg in one
-// allocation, plus working container headers for this call only.
+// zjArenaEventLeg holds per-call working state for a decoded EventLeg: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaEventLeg struct {
 }
@@ -3651,8 +3722,9 @@ func (d *EventLegDecoder) DecodeBorrow(data []byte, v *EventLeg) error {
 	return l.Err()
 }
 
-// zjArenaEmbedMid holds first-use pointer cells for a decoded EmbedMid in one
-// allocation, plus working container headers for this call only.
+// zjArenaEmbedMid holds per-call working state for a decoded EmbedMid: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaEmbedMid struct {
 }
@@ -4063,8 +4135,9 @@ func (d *EmbedMidDecoder) DecodeBorrow(data []byte, v *EmbedMid) error {
 	return l.Err()
 }
 
-// zjArenaEventProjection holds first-use pointer cells for a decoded EventProjection in one
-// allocation, plus working container headers for this call only.
+// zjArenaEventProjection holds per-call working state for a decoded EventProjection: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaEventProjection struct {
 }
@@ -4423,15 +4496,30 @@ func (d *EventProjectionDecoder) DecodeBorrow(data []byte, v *EventProjection) e
 	return l.Err()
 }
 
-// zjArenaInteractionOmitZero holds first-use pointer cells for a decoded InteractionOmitZero in one
-// allocation, plus working container headers for this call only.
+// zjArenaInteractionOmitZero holds per-call working state for a decoded InteractionOmitZero: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaInteractionOmitZero struct {
+	zjBlock    *zjCellsInteractionOmitZero
 	published0 bool
-	f0         time.Time
 	published1 bool
-	f1         time.Time
 	c3         []int
+}
+
+// zjCellsInteractionOmitZero holds the first-use pointer cells of one InteractionOmitZero decode, and those of
+// its nested structs, in a single allocation made only when the input
+// sets a nil pointer field.
+type zjCellsInteractionOmitZero struct {
+	f0 time.Time
+	f1 time.Time
+}
+
+func (a *zjArenaInteractionOmitZero) zjCells() *zjCellsInteractionOmitZero {
+	if a.zjBlock == nil {
+		a.zjBlock = new(zjCellsInteractionOmitZero)
+	}
+	return a.zjBlock
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -4693,7 +4781,7 @@ func zjDecodeOrderedField_InteractionOmitZero(l *zerojson.Lexer, v *InteractionO
 			if a.published0 {
 				v.When = new(time.Time)
 			} else {
-				v.When = &a.f0
+				v.When = &a.zjCells().f0
 				a.published0 = true
 			}
 		}
@@ -4703,7 +4791,7 @@ func zjDecodeOrderedField_InteractionOmitZero(l *zerojson.Lexer, v *InteractionO
 			if a.published1 {
 				v.Both = new(time.Time)
 			} else {
-				v.Both = &a.f1
+				v.Both = &a.zjCells().f1
 				a.published1 = true
 			}
 		}
@@ -4882,7 +4970,7 @@ func zjDecodeFallback_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZ
 				if a.published0 {
 					v.When = new(time.Time)
 				} else {
-					v.When = &a.f0
+					v.When = &a.zjCells().f0
 					a.published0 = true
 				}
 			}
@@ -4892,7 +4980,7 @@ func zjDecodeFallback_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZ
 				if a.published1 {
 					v.Both = new(time.Time)
 				} else {
-					v.Both = &a.f1
+					v.Both = &a.zjCells().f1
 					a.published1 = true
 				}
 			}
@@ -5027,8 +5115,9 @@ func (d *InteractionOmitZeroDecoder) DecodeBorrow(data []byte, v *InteractionOmi
 	return l.Err()
 }
 
-// zjArenaMapPointerMethods holds first-use pointer cells for a decoded MapPointerMethods in one
-// allocation, plus working container headers for this call only.
+// zjArenaMapPointerMethods holds per-call working state for a decoded MapPointerMethods: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaMapPointerMethods struct {
 	m0 map[string]PointerOnlyJSON
@@ -5271,14 +5360,29 @@ func (d *MapPointerMethodsDecoder) DecodeBorrow(data []byte, v *MapPointerMethod
 	return l.Err()
 }
 
-// zjArenaReuseSemantics holds first-use pointer cells for a decoded ReuseSemantics in one
-// allocation, plus working container headers for this call only.
+// zjArenaReuseSemantics holds per-call working state for a decoded ReuseSemantics: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaReuseSemantics struct {
+	zjBlock    *zjCellsReuseSemantics
 	m0         map[string]int
 	published1 bool
-	v1         ReuseInner
 	a1         zjArenaReuseInner
+}
+
+// zjCellsReuseSemantics holds the first-use pointer cells of one ReuseSemantics decode, and those of
+// its nested structs, in a single allocation made only when the input
+// sets a nil pointer field.
+type zjCellsReuseSemantics struct {
+	v1 ReuseInner
+}
+
+func (a *zjArenaReuseSemantics) zjCells() *zjCellsReuseSemantics {
+	if a.zjBlock == nil {
+		a.zjBlock = new(zjCellsReuseSemantics)
+	}
+	return a.zjBlock
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -5475,7 +5579,7 @@ func zjDecodeFallback_ReuseSemantics(l *zerojson.Lexer, v *ReuseSemantics, a *zj
 				if a.published1 {
 					v.Inner = new(ReuseInner)
 				} else {
-					v.Inner = &a.v1
+					v.Inner = &a.zjCells().v1
 					a.published1 = true
 				}
 			}
@@ -5554,8 +5658,9 @@ func (d *ReuseSemanticsDecoder) DecodeBorrow(data []byte, v *ReuseSemantics) err
 	return l.Err()
 }
 
-// zjArenaOrderedSideEffects holds first-use pointer cells for a decoded OrderedSideEffects in one
-// allocation, plus working container headers for this call only.
+// zjArenaOrderedSideEffects holds per-call working state for a decoded OrderedSideEffects: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaOrderedSideEffects struct {
 }
@@ -5761,12 +5866,27 @@ func (d *OrderedSideEffectsDecoder) DecodeBorrow(data []byte, v *OrderedSideEffe
 	return l.Err()
 }
 
-// zjArenaPoolAppenderHolder holds first-use pointer cells for a decoded PoolAppenderHolder in one
-// allocation, plus working container headers for this call only.
+// zjArenaPoolAppenderHolder holds per-call working state for a decoded PoolAppenderHolder: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaPoolAppenderHolder struct {
+	zjBlock    *zjCellsPoolAppenderHolder
 	published0 bool
-	f0         PoolAccumulator
+}
+
+// zjCellsPoolAppenderHolder holds the first-use pointer cells of one PoolAppenderHolder decode, and those of
+// its nested structs, in a single allocation made only when the input
+// sets a nil pointer field.
+type zjCellsPoolAppenderHolder struct {
+	f0 PoolAccumulator
+}
+
+func (a *zjArenaPoolAppenderHolder) zjCells() *zjCellsPoolAppenderHolder {
+	if a.zjBlock == nil {
+		a.zjBlock = new(zjCellsPoolAppenderHolder)
+	}
+	return a.zjBlock
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -5886,7 +6006,7 @@ func zjDecodeFallback_PoolAppenderHolder(l *zerojson.Lexer, v *PoolAppenderHolde
 				if a.published0 {
 					v.Value = new(PoolAccumulator)
 				} else {
-					v.Value = &a.f0
+					v.Value = &a.zjCells().f0
 					a.published0 = true
 				}
 			}
@@ -5959,14 +6079,29 @@ func (d *PoolAppenderHolderDecoder) DecodeBorrow(data []byte, v *PoolAppenderHol
 	return l.Err()
 }
 
-// zjArenaBytesCases holds first-use pointer cells for a decoded BytesCases in one
-// allocation, plus working container headers for this call only.
+// zjArenaBytesCases holds per-call working state for a decoded BytesCases: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaBytesCases struct {
+	zjBlock    *zjCellsBytesCases
 	published1 bool
-	f1         []byte
 	c2         [][]byte
 	m3         map[string][]byte
+}
+
+// zjCellsBytesCases holds the first-use pointer cells of one BytesCases decode, and those of
+// its nested structs, in a single allocation made only when the input
+// sets a nil pointer field.
+type zjCellsBytesCases struct {
+	f1 []byte
+}
+
+func (a *zjArenaBytesCases) zjCells() *zjCellsBytesCases {
+	if a.zjBlock == nil {
+		a.zjBlock = new(zjCellsBytesCases)
+	}
+	return a.zjBlock
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -6292,7 +6427,7 @@ func zjDecodeOrderedField_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjAren
 				if a.published1 {
 					v.Ptr = new([]byte)
 				} else {
-					v.Ptr = &a.f1
+					v.Ptr = &a.zjCells().f1
 					a.published1 = true
 				}
 			}
@@ -6529,7 +6664,7 @@ func zjDecodeFallback_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaByt
 					if a.published1 {
 						v.Ptr = new([]byte)
 					} else {
-						v.Ptr = &a.f1
+						v.Ptr = &a.zjCells().f1
 						a.published1 = true
 					}
 				}
@@ -7972,22 +8107,37 @@ func (d *DecimalListDecoder) DecodeBorrow(data []byte, v *DecimalList) error {
 	return l.Err()
 }
 
-// zjArenaPointerCollections holds first-use pointer cells for a decoded PointerCollections in one
-// allocation, plus working container headers for this call only.
+// zjArenaPointerCollections holds per-call working state for a decoded PointerCollections: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaPointerCollections struct {
+	zjBlock    *zjCellsPointerCollections
 	published0 bool
-	f0         []string
 	c0         []string
 	published1 bool
-	f1         map[string]int
 	m1         map[string]int
 	published2 bool
-	f2         []EventLeg
 	c2         []EventLeg
 	published3 bool
-	f3         map[string]string
 	m3         map[string]string
+}
+
+// zjCellsPointerCollections holds the first-use pointer cells of one PointerCollections decode, and those of
+// its nested structs, in a single allocation made only when the input
+// sets a nil pointer field.
+type zjCellsPointerCollections struct {
+	f0 []string
+	f1 map[string]int
+	f2 []EventLeg
+	f3 map[string]string
+}
+
+func (a *zjArenaPointerCollections) zjCells() *zjCellsPointerCollections {
+	if a.zjBlock == nil {
+		a.zjBlock = new(zjCellsPointerCollections)
+	}
+	return a.zjBlock
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -8353,7 +8503,7 @@ func zjDecodeOrderedField_PointerCollections(l *zerojson.Lexer, v *PointerCollec
 				if a.published0 {
 					v.Names = new([]string)
 				} else {
-					v.Names = &a.f0
+					v.Names = &a.zjCells().f0
 					a.published0 = true
 				}
 			}
@@ -8387,7 +8537,7 @@ func zjDecodeOrderedField_PointerCollections(l *zerojson.Lexer, v *PointerCollec
 			if a.published1 {
 				v.Index = new(map[string]int)
 			} else {
-				v.Index = &a.f1
+				v.Index = &a.zjCells().f1
 				a.published1 = true
 			}
 		}
@@ -8426,7 +8576,7 @@ func zjDecodeOrderedField_PointerCollections(l *zerojson.Lexer, v *PointerCollec
 			if a.published2 {
 				v.Legs = new([]EventLeg)
 			} else {
-				v.Legs = &a.f2
+				v.Legs = &a.zjCells().f2
 				a.published2 = true
 			}
 		}
@@ -8459,7 +8609,7 @@ func zjDecodeOrderedField_PointerCollections(l *zerojson.Lexer, v *PointerCollec
 			if a.published3 {
 				v.Tags = new(map[string]string)
 			} else {
-				v.Tags = &a.f3
+				v.Tags = &a.zjCells().f3
 				a.published3 = true
 			}
 		}
@@ -8635,7 +8785,7 @@ func zjDecodeFallback_PointerCollections(l *zerojson.Lexer, v *PointerCollection
 					if a.published0 {
 						v.Names = new([]string)
 					} else {
-						v.Names = &a.f0
+						v.Names = &a.zjCells().f0
 						a.published0 = true
 					}
 				}
@@ -8669,7 +8819,7 @@ func zjDecodeFallback_PointerCollections(l *zerojson.Lexer, v *PointerCollection
 				if a.published1 {
 					v.Index = new(map[string]int)
 				} else {
-					v.Index = &a.f1
+					v.Index = &a.zjCells().f1
 					a.published1 = true
 				}
 			}
@@ -8708,7 +8858,7 @@ func zjDecodeFallback_PointerCollections(l *zerojson.Lexer, v *PointerCollection
 				if a.published2 {
 					v.Legs = new([]EventLeg)
 				} else {
-					v.Legs = &a.f2
+					v.Legs = &a.zjCells().f2
 					a.published2 = true
 				}
 			}
@@ -8741,7 +8891,7 @@ func zjDecodeFallback_PointerCollections(l *zerojson.Lexer, v *PointerCollection
 				if a.published3 {
 					v.Tags = new(map[string]string)
 				} else {
-					v.Tags = &a.f3
+					v.Tags = &a.zjCells().f3
 					a.published3 = true
 				}
 			}
@@ -8814,16 +8964,31 @@ func (d *PointerCollectionsDecoder) DecodeBorrow(data []byte, v *PointerCollecti
 	return l.Err()
 }
 
-// zjArenaNumberCases holds first-use pointer cells for a decoded NumberCases in one
-// allocation, plus working container headers for this call only.
+// zjArenaNumberCases holds per-call working state for a decoded NumberCases: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaNumberCases struct {
+	zjBlock    *zjCellsNumberCases
 	published2 bool
-	f2         json_.Number
 	c3         []json_.Number
 	m4         map[string]json_.Number
 	published6 bool
-	f6         int64
+}
+
+// zjCellsNumberCases holds the first-use pointer cells of one NumberCases decode, and those of
+// its nested structs, in a single allocation made only when the input
+// sets a nil pointer field.
+type zjCellsNumberCases struct {
+	f2 json_.Number
+	f6 int64
+}
+
+func (a *zjArenaNumberCases) zjCells() *zjCellsNumberCases {
+	if a.zjBlock == nil {
+		a.zjBlock = new(zjCellsNumberCases)
+	}
+	return a.zjBlock
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -9162,7 +9327,7 @@ func zjDecodeOrderedField_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjAr
 			if a.published2 {
 				v.NP = new(json_.Number)
 			} else {
-				v.NP = &a.f2
+				v.NP = &a.zjCells().f2
 				a.published2 = true
 			}
 		}
@@ -9265,7 +9430,7 @@ func zjDecodeOrderedField_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjAr
 				if a.published6 {
 					v.PtrS = new(int64)
 				} else {
-					v.PtrS = &a.f6
+					v.PtrS = &a.zjCells().f6
 					a.published6 = true
 				}
 			}
@@ -9419,7 +9584,7 @@ func zjDecodeFallback_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaN
 				if a.published2 {
 					v.NP = new(json_.Number)
 				} else {
-					v.NP = &a.f2
+					v.NP = &a.zjCells().f2
 					a.published2 = true
 				}
 			}
@@ -9522,7 +9687,7 @@ func zjDecodeFallback_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaN
 					if a.published6 {
 						v.PtrS = new(int64)
 					} else {
-						v.PtrS = &a.f6
+						v.PtrS = &a.zjCells().f6
 						a.published6 = true
 					}
 				}
@@ -9596,14 +9761,29 @@ func (d *NumberCasesDecoder) DecodeBorrow(data []byte, v *NumberCases) error {
 	return l.Err()
 }
 
-// zjArenaNullCases holds first-use pointer cells for a decoded NullCases in one
-// allocation, plus working container headers for this call only.
+// zjArenaNullCases holds per-call working state for a decoded NullCases: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaNullCases struct {
+	zjBlock    *zjCellsNullCases
 	c1         []NullAware
 	m2         map[string]NullAware
 	published3 bool
-	f3         NullAware
+}
+
+// zjCellsNullCases holds the first-use pointer cells of one NullCases decode, and those of
+// its nested structs, in a single allocation made only when the input
+// sets a nil pointer field.
+type zjCellsNullCases struct {
+	f3 NullAware
+}
+
+func (a *zjArenaNullCases) zjCells() *zjCellsNullCases {
+	if a.zjBlock == nil {
+		a.zjBlock = new(zjCellsNullCases)
+	}
+	return a.zjBlock
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -9835,7 +10015,7 @@ func zjDecodeFallback_NullCases(l *zerojson.Lexer, v *NullCases, a *zjArenaNullC
 				if a.published3 {
 					v.Ptr = new(NullAware)
 				} else {
-					v.Ptr = &a.f3
+					v.Ptr = &a.zjCells().f3
 					a.published3 = true
 				}
 			}
@@ -9912,14 +10092,29 @@ func (d *NullCasesDecoder) DecodeBorrow(data []byte, v *NullCases) error {
 	return l.Err()
 }
 
-// zjArenaEventMeta holds first-use pointer cells for a decoded EventMeta in one
-// allocation, plus working container headers for this call only.
+// zjArenaEventMeta holds per-call working state for a decoded EventMeta: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaEventMeta struct {
+	zjBlock    *zjCellsEventMeta
 	published0 bool
-	f0         string
 	published1 bool
-	f1         testleaf.Decimal
+}
+
+// zjCellsEventMeta holds the first-use pointer cells of one EventMeta decode, and those of
+// its nested structs, in a single allocation made only when the input
+// sets a nil pointer field.
+type zjCellsEventMeta struct {
+	f0 string
+	f1 testleaf.Decimal
+}
+
+func (a *zjArenaEventMeta) zjCells() *zjCellsEventMeta {
+	if a.zjBlock == nil {
+		a.zjBlock = new(zjCellsEventMeta)
+	}
+	return a.zjBlock
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -10148,7 +10343,7 @@ func zjDecodeOrderedField_EventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaE
 			if a.published0 {
 				v.Note = new(string)
 			} else {
-				v.Note = &a.f0
+				v.Note = &a.zjCells().f0
 				a.published0 = true
 			}
 		}
@@ -10158,7 +10353,7 @@ func zjDecodeOrderedField_EventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaE
 			if a.published1 {
 				v.Cost = new(testleaf.Decimal)
 			} else {
-				v.Cost = &a.f1
+				v.Cost = &a.zjCells().f1
 				a.published1 = true
 			}
 		}
@@ -10265,7 +10460,7 @@ func zjDecodeFallback_EventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEvent
 				if a.published0 {
 					v.Note = new(string)
 				} else {
-					v.Note = &a.f0
+					v.Note = &a.zjCells().f0
 					a.published0 = true
 				}
 			}
@@ -10275,7 +10470,7 @@ func zjDecodeFallback_EventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEvent
 				if a.published1 {
 					v.Cost = new(testleaf.Decimal)
 				} else {
-					v.Cost = &a.f1
+					v.Cost = &a.zjCells().f1
 					a.published1 = true
 				}
 			}
@@ -10299,8 +10494,9 @@ func zjDecodeFallback_EventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEvent
 	}
 }
 
-// zjArenaReuseInner holds first-use pointer cells for a decoded ReuseInner in one
-// allocation, plus working container headers for this call only.
+// zjArenaReuseInner holds per-call working state for a decoded ReuseInner: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaReuseInner struct {
 }

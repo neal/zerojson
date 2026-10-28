@@ -10,8 +10,9 @@ import (
 	"sync/atomic"
 )
 
-// zjArenaSample holds first-use pointer cells for a decoded Sample in one
-// allocation, plus working container headers for this call only.
+// zjArenaSample holds per-call working state for a decoded Sample: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaSample struct {
 	c0 []int
@@ -484,8 +485,9 @@ func (d *SampleDecoder) DecodeBorrow(data []byte, v *Sample) error {
 	return l.Err()
 }
 
-// zjArenaItem holds first-use pointer cells for a decoded Item in one
-// allocation, plus working container headers for this call only.
+// zjArenaItem holds per-call working state for a decoded Item: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaItem struct {
 }
@@ -874,15 +876,30 @@ func (d *ItemDecoder) DecodeBorrow(data []byte, v *Item) error {
 	return l.Err()
 }
 
-// zjArenaPayload holds first-use pointer cells for a decoded Payload in one
-// allocation, plus working container headers for this call only.
+// zjArenaPayload holds per-call working state for a decoded Payload: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaPayload struct {
+	zjBlock    *zjCellsPayload
 	c4         []string
 	c5         []Item
 	m6         map[string]int
 	published7 bool
-	f7         int
+}
+
+// zjCellsPayload holds the first-use pointer cells of one Payload decode, and those of
+// its nested structs, in a single allocation made only when the input
+// sets a nil pointer field.
+type zjCellsPayload struct {
+	f7 int
+}
+
+func (a *zjArenaPayload) zjCells() *zjCellsPayload {
+	if a.zjBlock == nil {
+		a.zjBlock = new(zjCellsPayload)
+	}
+	return a.zjBlock
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -1360,7 +1377,7 @@ func zjDecodeOrderedField_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPaylo
 			if a.published7 {
 				v.Optional = new(int)
 			} else {
-				v.Optional = &a.f7
+				v.Optional = &a.zjCells().f7
 				a.published7 = true
 			}
 		}
@@ -1651,7 +1668,7 @@ func zjDecodeFallback_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) 
 				if a.published7 {
 					v.Optional = new(int)
 				} else {
-					v.Optional = &a.f7
+					v.Optional = &a.zjCells().f7
 					a.published7 = true
 				}
 			}
@@ -1724,8 +1741,9 @@ func (d *PayloadDecoder) DecodeBorrow(data []byte, v *Payload) error {
 	return l.Err()
 }
 
-// zjArenaObservedPayload holds first-use pointer cells for a decoded ObservedPayload in one
-// allocation, plus working container headers for this call only.
+// zjArenaObservedPayload holds per-call working state for a decoded ObservedPayload: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaObservedPayload struct {
 	c0 []Observed

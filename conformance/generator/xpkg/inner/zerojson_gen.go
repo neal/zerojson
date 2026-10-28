@@ -10,14 +10,29 @@ import (
 	"sync/atomic"
 )
 
-// zjArenaExt holds first-use pointer cells for a decoded Ext in one
-// allocation, plus working container headers for this call only.
+// zjArenaExt holds per-call working state for a decoded Ext: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaExt struct {
+	zjBlock    *zjCellsExt
 	c4         []string
 	published5 bool
-	v5         Sub
 	a5         zjArenaSub
+}
+
+// zjCellsExt holds the first-use pointer cells of one Ext decode, and those of
+// its nested structs, in a single allocation made only when the input
+// sets a nil pointer field.
+type zjCellsExt struct {
+	v5 Sub
+}
+
+func (a *zjArenaExt) zjCells() *zjCellsExt {
+	if a.zjBlock == nil {
+		a.zjBlock = new(zjCellsExt)
+	}
+	return a.zjBlock
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -376,7 +391,7 @@ func zjDecodeOrderedField_Ext(l *zerojson.Lexer, v *Ext, a *zjArenaExt, k int) b
 			if a.published5 {
 				v.Sub = new(Sub)
 			} else {
-				v.Sub = &a.v5
+				v.Sub = &a.zjCells().v5
 				a.published5 = true
 			}
 		}
@@ -589,7 +604,7 @@ func zjDecodeFallback_Ext(l *zerojson.Lexer, v *Ext, a *zjArenaExt) {
 				if a.published5 {
 					v.Sub = new(Sub)
 				} else {
-					v.Sub = &a.v5
+					v.Sub = &a.zjCells().v5
 					a.published5 = true
 				}
 			}
@@ -964,8 +979,9 @@ func (d *ExtIndexDecoder) DecodeBorrow(data []byte, v *ExtIndex) error {
 	return l.Err()
 }
 
-// zjArenaSub holds first-use pointer cells for a decoded Sub in one
-// allocation, plus working container headers for this call only.
+// zjArenaSub holds per-call working state for a decoded Sub: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaSub struct {
 	c1 []int

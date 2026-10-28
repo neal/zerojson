@@ -28,6 +28,16 @@ func mutationCatalog() []mutationCase {
 			detector:  generatorDetector(`^TestGeneratedNamedMapMethodsAreReplaced$`), wantOutput: "delegates to v.Set",
 		},
 		{
+			// Nested structs must share the decode's cell block once it
+			// exists; otherwise every nested type pays its own allocation.
+			name: "nested_cells_not_shared", tier: "quick", file: "cmd/zerojsongen/decode.go",
+			old:        `g.p("%s\ta.a%s.zjBlock = &a.zjBlock.s%s", ind, f.cellName, f.cellName)`,
+			new:        `g.p("%s\t_ = a", ind)`,
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestLazyCellBlockAllocations$`), wantOutput: "want 1",
+		},
+		{
 			// AppendInterface may copy Marshaler output verbatim only when
 			// encoding/json would; HTML-sensitive bytes must be escaped.
 			name: "append_interface_verbatim_skips_html_escape", tier: "quick", file: "writer.go",

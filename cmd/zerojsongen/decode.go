@@ -103,24 +103,27 @@ func (g *generator) emitEnumHelpers() {
 }
 
 func (g *generator) genArena(ti typeInfo) {
+	ownCells := false
+	for _, f := range ti.fields {
+		ownCells = ownCells || f.ptr
+	}
+	block := g.typeHasCells(ti.name, map[string]bool{})
 	g.p("")
-	g.p("// %s holds first-use pointer cells for a decoded %s in one", arenaName(ti.name), ti.name)
-	g.p("// allocation, plus working container headers for this call only.")
+	g.p("// %s holds per-call working state for a decoded %s: publication", arenaName(ti.name), ti.name)
+	g.p("// flags, container headers, and nested types' arenas. It stays off the")
+	g.p("// heap; pointer cells live in a cell block allocated on first use.")
 	g.p("// Detached storage is not reused within the same decode.")
 	g.p("type %s struct {", arenaName(ti.name))
+	if block {
+		g.p("\tzjBlock *%s", cellsName(ti.name))
+	}
 	for _, f := range ti.fields {
 		if f.ptr {
 			g.p("\tpublished%s bool", f.cellName)
 		}
 		if f.kind == kStruct {
-			if f.ptr {
-				g.p("\tv%s %s", f.cellName, f.elem)
-			}
 			g.p("\ta%s %s", f.cellName, arenaName(f.elem))
 			continue
-		}
-		if f.ptr {
-			g.p("\tf%s %s", f.cellName, f.typeStr)
 		}
 		switch f.kind {
 		case kSlice:
@@ -132,6 +135,71 @@ func (g *generator) genArena(ti typeInfo) {
 		}
 	}
 	g.p("}")
+	if !block {
+		return
+	}
+	g.p("")
+	g.p("// %s holds the first-use pointer cells of one %s decode, and those of", cellsName(ti.name), ti.name)
+	g.p("// its nested structs, in a single allocation made only when the input")
+	g.p("// sets a nil pointer field.")
+	g.p("type %s struct {", cellsName(ti.name))
+	for _, f := range ti.fields {
+		switch {
+		case f.ptr && f.kind == kStruct:
+			g.p("\tv%s %s", f.cellName, f.elem)
+		case f.ptr:
+			g.p("\tf%s %s", f.cellName, f.typeStr)
+		}
+		if f.kind == kStruct && g.typeHasCells(f.elem, map[string]bool{}) {
+			g.p("\ts%s %s", f.cellName, cellsName(f.elem))
+		}
+	}
+	g.p("}")
+	if !ownCells {
+		return
+	}
+	g.p("")
+	g.p("func (a *%s) zjCells() *%s {", arenaName(ti.name), cellsName(ti.name))
+	g.p("\tif a.zjBlock == nil {")
+	g.p("\t\ta.zjBlock = new(%s)", cellsName(ti.name))
+	g.p("\t}")
+	g.p("\treturn a.zjBlock")
+	g.p("}")
+}
+
+// typeHasCells reports whether decoding the named generated struct can
+// publish a pointer cell, in its own fields or in a nested struct field's.
+func (g *generator) typeHasCells(name string, visiting map[string]bool) bool {
+	if visiting[name] {
+		return false
+	}
+	visiting[name] = true
+	defer delete(visiting, name)
+	for _, ti := range g.types {
+		if ti.name != name {
+			continue
+		}
+		for _, f := range ti.fields {
+			if f.ptr || (f.kind == kStruct && g.typeHasCells(f.elem, visiting)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// emitShareCells points a nested struct's arena at its slot in this
+// decode's cell block when the block already exists, so a populated
+// message keeps one cell allocation. Otherwise the nested decode allocates
+// its own block on first use. The link is made only while the nested arena
+// has no block, so a published cell never moves.
+func (g *generator) emitShareCells(f fieldInfo, ind string) {
+	if !g.typeHasCells(f.elem, map[string]bool{}) {
+		return
+	}
+	g.p("%sif a.a%s.zjBlock == nil && a.zjBlock != nil {", ind, f.cellName)
+	g.p("%s\ta.a%s.zjBlock = &a.zjBlock.s%s", ind, f.cellName, f.cellName)
+	g.p("%s}", ind)
 }
 
 func sliceCellType(elemType string, elemPtr bool) string {
@@ -189,7 +257,7 @@ func (g *generator) emitPointerCellInit(f fieldInfo, target, cell, ind string) {
 	g.p("%s\tif a.published%s {", ind, f.cellName)
 	g.p("%s\t\t%s = new(%s)", ind, target, f.typeStr)
 	g.p("%s\t} else {", ind)
-	// An unpublished cell in this call's fresh arena is already zero.
+	// An unpublished cell in this call's fresh cell block is already zero.
 	g.p("%s\t%s = &%s", ind, target, cell)
 	g.p("%s\ta.published%s = true", ind, f.cellName)
 	g.p("%s\t}", ind)
@@ -527,7 +595,7 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		g.p("%s} else {", ind)
 		defer g.p("%s}", ind)
 	}
-	cell := "a.f" + f.cellName
+	cell := "a.zjCells().f" + f.cellName
 	// A mid-loop element error (kSlice/kLeafSlice/kMap) breaks out of
 	// the element loop rather than returning, so control reaches the
 	// enclosing decoder's error check, which annotates the error with
@@ -684,9 +752,11 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 			}
 		}
 		if f.ptr {
-			g.emitPointerCellInit(f, target, "a.v"+f.cellName, ind)
+			g.emitPointerCellInit(f, target, "a.zjCells().v"+f.cellName, ind)
+			g.emitShareCells(f, ind)
 			nestedCall(target, "&a.a"+f.cellName)
 		} else {
+			g.emitShareCells(f, ind)
 			nestedCall("&"+target, "&a.a"+f.cellName)
 		}
 	case kMarshaler:

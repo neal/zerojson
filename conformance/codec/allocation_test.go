@@ -301,10 +301,11 @@ func TestReusedScalarSliceAllocationBudget(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	// The containing non-pooled arena escapes; the scalar traversal itself
-	// must not add stdlib state or string-copy allocations in borrow mode.
-	if n > 1 {
-		t.Fatalf("reused scalar slice allocations=%g, budget 1", n)
+	// The arena stays on the stack and the reused slice needs no pointer
+	// cell; the scalar traversal must not add stdlib state or string-copy
+	// allocations in borrow mode.
+	if n != 0 {
+		t.Fatalf("reused scalar slice allocations=%g, budget 0", n)
 	}
 }
 
@@ -335,9 +336,46 @@ func TestPointerCollectionsPooledFallbackAllocationBudget(t *testing.T) {
 		// Revisited slices preserve stdlib element reuse, with generated
 		// scalar traversal where eligible.
 		// This is a ceiling: newer stdlib implementations can allocate less.
-		want := 5.0 // fresh arena, slice growth, and map storage
+		want := 5.0 // pointer cell block, slice growth, and map storage
 		if allocs > want {
 			t.Errorf("%s: PointerCollectionsDecoder.DecodeBorrow allocations=%v, budget %v", name, allocs, want)
+		}
+	}
+}
+
+// TestLazyCellBlockAllocations pins the decode arena's allocation model: the
+// arena itself stays off the heap, and pointer cells come from one block per
+// decode that is allocated only when the input sets a nil pointer field.
+// Nested structs share that block once it exists, so a populated message
+// pays one cell allocation, not one per nested type.
+func TestLazyCellBlockAllocations(t *testing.T) {
+	requireStableAllocationInstrumentation(t)
+	for _, c := range []struct {
+		name string
+		doc  string
+		want float64
+	}{
+		{"no pointer fields", `{"created_at":"2026-10-28T09:30:00Z","origin":"x","count":3,"active":true,"meta":{"internal":true}}`, 0},
+		{"parent pointer then nested value struct", `{"size":"2","meta":{"note":"n","cost":"3"}}`, 1},
+		{"nested pointer struct", `{"meta_ptr":{"note":"n","cost":"3"}}`, 1},
+		{"both nested structs after a parent pointer", `{"location":"l","meta":{"note":"n"},"meta_ptr":{"cost":"3"}}`, 1},
+		// The nested arena cannot reach a block allocated after it publishes,
+		// so this order pays one block for each.
+		{"nested value struct before any parent pointer", `{"meta":{"note":"n"},"size":"2"}`, 2},
+	} {
+		data := []byte(c.doc)
+		var v Event
+		if err := v.UnmarshalZJSONBorrow(data); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		got := testing.AllocsPerRun(500, func() {
+			v = Event{}
+			if err := v.UnmarshalZJSONBorrow(data); err != nil {
+				t.Fatalf("%s: %v", c.name, err)
+			}
+		})
+		if got != c.want {
+			t.Errorf("%s: Event.UnmarshalZJSONBorrow allocations=%v, want %v", c.name, got, c.want)
 		}
 	}
 }

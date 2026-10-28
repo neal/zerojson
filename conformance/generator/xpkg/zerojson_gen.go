@@ -9,15 +9,30 @@ import (
 	"sync/atomic"
 )
 
-// zjArenaOuter holds first-use pointer cells for a decoded Outer in one
-// allocation, plus working container headers for this call only.
+// zjArenaOuter holds per-call working state for a decoded Outer: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaOuter struct {
+	zjBlock    *zjCellsOuter
 	published2 bool
-	f2         inner.Ext
 	c3         []inner.Ext
 	c4         []*inner.Ext
 	m5         map[string]inner.Ext
+}
+
+// zjCellsOuter holds the first-use pointer cells of one Outer decode, and those of
+// its nested structs, in a single allocation made only when the input
+// sets a nil pointer field.
+type zjCellsOuter struct {
+	f2 inner.Ext
+}
+
+func (a *zjArenaOuter) zjCells() *zjCellsOuter {
+	if a.zjBlock == nil {
+		a.zjBlock = new(zjCellsOuter)
+	}
+	return a.zjBlock
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -308,7 +323,7 @@ func zjDecodeFallback_Outer(l *zerojson.Lexer, v *Outer, a *zjArenaOuter) {
 				if a.published2 {
 					v.P = new(inner.Ext)
 				} else {
-					v.P = &a.f2
+					v.P = &a.zjCells().f2
 					a.published2 = true
 				}
 			}
@@ -472,13 +487,29 @@ func (d *OuterDecoder) DecodeBorrow(data []byte, v *Outer) error {
 	return l.Err()
 }
 
-// zjArenaChain holds first-use pointer cells for a decoded Chain in one
-// allocation, plus working container headers for this call only.
+// zjArenaChain holds per-call working state for a decoded Chain: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaChain struct {
+	zjBlock    *zjCellsChain
 	published1 bool
-	v1         Outer
 	a1         zjArenaOuter
+}
+
+// zjCellsChain holds the first-use pointer cells of one Chain decode, and those of
+// its nested structs, in a single allocation made only when the input
+// sets a nil pointer field.
+type zjCellsChain struct {
+	v1 Outer
+	s1 zjCellsOuter
+}
+
+func (a *zjArenaChain) zjCells() *zjCellsChain {
+	if a.zjBlock == nil {
+		a.zjBlock = new(zjCellsChain)
+	}
+	return a.zjBlock
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -608,9 +639,12 @@ func zjDecodeFallback_Chain(l *zerojson.Lexer, v *Chain, a *zjArenaChain) {
 				if a.published1 {
 					v.Outer = new(Outer)
 				} else {
-					v.Outer = &a.v1
+					v.Outer = &a.zjCells().v1
 					a.published1 = true
 				}
+			}
+			if a.a1.zjBlock == nil && a.zjBlock != nil {
+				a.a1.zjBlock = &a.zjBlock.s1
 			}
 			zjDecode_Outer(l, v.Outer, &a.a1)
 		default:
