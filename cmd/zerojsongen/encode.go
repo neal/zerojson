@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strings"
 )
 
@@ -528,5 +529,17 @@ func (g *generator) emitLeafAppend(fi *fieldInfo, expr, ind string) {
 	case kEmptyStruct:
 		g.p("%s_ = %s", ind, expr)
 		g.p("%sdst = append(dst, \"{}\"...)", ind)
+	case kAppender:
+		// A hand-written Appender, or a type generated in another package
+		// (whose generated AppendZJSON/ReadZJSON pair is the Appender/
+		// Reader interface). expr is always addressable here: a slice
+		// element or a map-range variable.
+		g.p("%svar err error", ind)
+		g.p("%sdst, err = %s.AppendZJSON(dst)", ind, expr)
+		g.p("%sif err != nil { return dst, err }", ind)
+	default:
+		// Emitting nothing would silently produce invalid JSON (e.g. "[,]"),
+		// so an unhandled kind is a generator bug, reported at generate time.
+		log.Fatalf("zerojsongen internal error: no element encoder for kind %d (%s)", fi.kind, fi.typeStr)
 	}
 }

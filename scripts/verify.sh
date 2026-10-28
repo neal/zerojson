@@ -69,7 +69,7 @@ if [[ $mode == full ]]; then
 	echo "zerojson verify: regenerate committed fixtures"
 	(
 		cd "$root/conformance"
-		go generate ./codec ./generator/compat ./generator/typeshape ./ownership
+		go generate ./codec ./generator/compat ./generator/typeshape ./ownership ./generator/xpkg/inner ./generator/xpkg
 	)
 	git -C "$root" diff --exit-code -- \
 		conformance/codec/easyjson_oracle_easyjson.go \
@@ -81,7 +81,11 @@ if [[ $mode == full ]]; then
 		conformance/generator/typeshape/oracle_gen.go \
 		conformance/generator/typeshape/oracle_gen_easyjson.go \
 		conformance/generator/typeshape/zerojson_gen.go \
-		conformance/ownership/zerojson_gen.go
+		conformance/ownership/zerojson_gen.go \
+		conformance/generator/xpkg/inner/zerojson_gen.go \
+		conformance/generator/xpkg/inner/zerojson_gen_fuzz_test.go \
+		conformance/generator/xpkg/zerojson_gen.go \
+		conformance/generator/xpkg/zerojson_gen_fuzz_test.go
 
 	echo "zerojson verify: exhaustive runtime domains"
 	(

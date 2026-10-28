@@ -128,6 +128,14 @@ byte-identity guarantee.
   Its output can differ from classic-v1 fixtures, including invalid UTF-8
   replacement spelling under the v2-backed implementation.
 
+Types whose only custom codec is easyjson's are refused at generate time.
+easyjson calls a type's hand-written `MarshalEasyJSON`/`UnmarshalEasyJSON`
+ahead of everything else; zerojson cannot call them, so encoding such a type
+by its Go structure would silently change its wire format. Give the type a
+`MarshalJSON`/`UnmarshalJSON` (or `AppendZJSON`/`ReadZJSON`) pair producing
+the same bytes and zerojson delegates to it. easyjson's own generated methods
+and zerojson's `-compat-easyjson` wrappers don't count.
+
 Maps use Go range order, so multi-key map encodings are not deterministic even
 between two calls to the same encoder. Compare those objects semantically or
 normalize key order; use byte comparisons where ordering is deterministic.

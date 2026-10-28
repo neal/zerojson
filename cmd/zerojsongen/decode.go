@@ -766,8 +766,8 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 			g.p("%s} else {", ind)
 		}
 		if f.elemPtr {
-			// Rare (only Marshaler/TextMarshaler elements can be
-			// pointers): pool the outer slice-of-pointers only, same
+			// Rare (only Marshaler/TextMarshaler/Appender elements can
+			// be pointers): pool the outer slice-of-pointers only, same
 			// reset-first discipline as kSlice.
 			g.p("%s%s = %s[:0]", ind, cell, cell)
 			g.p("%sif l.EnterArray() {", ind)
@@ -780,6 +780,8 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 				g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := e.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
 			case kTextMarshaler:
 				g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := e.UnmarshalText(txt); err != nil { l.AddError(err) } }", ind)
+			case kAppender:
+				g.p("%s\t\te.ReadZJSON(l)", ind)
 			}
 			g.p("%s\t}", ind)
 			g.p("%s\tif l.Err() != nil { %s }", ind, retStmt)
@@ -811,6 +813,8 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 			g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := %s[idx].UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind, cell)
 		case kTextMarshaler:
 			g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := %s[idx].UnmarshalText(txt); err != nil { l.AddError(err) } }", ind, cell)
+		case kAppender:
+			g.p("%s\t\t%s[idx].ReadZJSON(l)", ind, cell)
 		case kInterface:
 			g.p("%s\t\t%s[idx] = l.ReadInterface()", ind, cell)
 		default:
@@ -873,6 +877,8 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 			g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := mv.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
 		case kTextMarshaler:
 			g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := mv.UnmarshalText(txt); err != nil { l.AddError(err) } }", ind)
+		case kAppender:
+			g.p("%s\t\tmv.ReadZJSON(l)", ind)
 		case kQuotedInt:
 			if !f.valInfo.marshalOnValue {
 				g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := mv.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)

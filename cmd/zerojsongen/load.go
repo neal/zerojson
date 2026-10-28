@@ -440,6 +440,15 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 
 		hasM, hasU := hasMarshalJSON(named), hasUnmarshalJSON(named)
 
+		// easyjson calls a type's own MarshalEasyJSON/UnmarshalEasyJSON
+		// ahead of everything else; zerojson cannot call them. Without a
+		// JSON (or Appender/Reader) pair to delegate to, zerojson would
+		// encode the type by its Go structure and silently change the wire
+		// format of a migrated type, so refuse instead.
+		if m := g.handwrittenEasyjsonMethod(named); m != "" && !(hasM && hasU) {
+			log.Fatalf("%s: %s", ctx, easyjsonOnlyMessage(t.String(), m))
+		}
+
 		// Same-package structs get generated codecs when explicitly
 		// listed, when they have no JSON methods, or when their methods
 		// live in generated files (easyjson output — exactly what is
@@ -594,18 +603,12 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 		}
 		vi := &fieldInfo{}
 		g.classify(vi, elem, ctx+"[elem]")
-		if vi.kind == kAppender {
-			// Appender/Reader elements have no slice codec yet; a type
-			// that ALSO carries MarshalJSON/UnmarshalJSON is delegated to
-			// those in this position (its own fields keep the fast pair).
-			if !g.demoteAppenderToMarshaler(vi, elem) {
-				log.Fatalf("%s: slice of an Appender-interface type (%s) is not supported yet — add MarshalJSON/UnmarshalJSON to the element type, which are used in this position while fields keep AppendZJSON/ReadZJSON", ctx, t)
-			}
-		}
 		if fi.elemPtr {
 			// Pointer elements: only self-marshaling types (nil -> null).
+			// An Appender element is a hand-written AppendZJSON/ReadZJSON
+			// pair or a type generated in another package.
 			switch vi.kind {
-			case kMarshaler, kTextMarshaler:
+			case kMarshaler, kTextMarshaler, kAppender:
 				fi.kind = kLeafSlice
 				fi.valInfo = vi
 				return
@@ -614,7 +617,7 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 		}
 		switch vi.kind {
 		case kString, kEnum, kBool, kInt, kUint, kFloat32, kFloat64,
-			kQuotedInt, kTime, kUUID, kCustomLeaf, kMarshaler, kTextMarshaler, kInterface, kByteSlice, kJSONNumber:
+			kQuotedInt, kTime, kUUID, kCustomLeaf, kMarshaler, kTextMarshaler, kAppender, kInterface, kByteSlice, kJSONNumber:
 			fi.kind = kLeafSlice
 			fi.valInfo = vi
 			return
@@ -641,13 +644,10 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 			if vi.kind == kStruct {
 				rejectGenericType(m.Elem(), ctx+"[value]")
 			}
-			if vi.kind == kAppender && !g.demoteAppenderToMarshaler(vi, m.Elem()) {
-				log.Fatalf("%s: map of an Appender-interface type (%s) is not supported yet — add MarshalJSON/UnmarshalJSON to the value type, which are used in this position while fields keep AppendZJSON/ReadZJSON", ctx, m.Elem())
-			}
 		}
 		switch vi.kind {
 		case kString, kEnum, kBool, kInt, kUint, kFloat32, kFloat64,
-			kQuotedInt, kTime, kUUID, kCustomLeaf, kEmptyStruct, kStruct, kMarshaler, kTextMarshaler, kInterface, kByteSlice, kJSONNumber:
+			kQuotedInt, kTime, kUUID, kCustomLeaf, kEmptyStruct, kStruct, kMarshaler, kTextMarshaler, kAppender, kInterface, kByteSlice, kJSONNumber:
 		default:
 			log.Fatalf("%s: unsupported map value kind for %s", ctx, m.Elem())
 		}
@@ -682,26 +682,6 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 func isEmptyStruct(t types.Type) bool {
 	s, ok := t.Underlying().(*types.Struct)
 	return ok && s.NumFields() == 0
-}
-
-// demoteAppenderToMarshaler re-classifies an Appender/Reader element or
-// map value as a Marshaler when its type also implements
-// MarshalJSON/UnmarshalJSON, since the generator has no slice/map codec
-// for the Appender pair yet. Reports whether it could.
-func (g *generator) demoteAppenderToMarshaler(vi *fieldInfo, t types.Type) bool {
-	named, ok := types.Unalias(t).(*types.Named)
-	if !ok || !hasMarshalJSON(named) || !hasUnmarshalJSON(named) {
-		return false
-	}
-	vi.kind = kMarshaler
-	vi.marshalOnValue = hasMarshalJSONValue(named)
-	switch named.Underlying().(type) {
-	case *types.Slice:
-		vi.marshalerIsSlice = true
-	case *types.Map:
-		vi.marshalerIsMap = true
-	}
-	return true
 }
 
 // rejectGeneric refuses to generate a codec for a generic type (or an
@@ -1008,6 +988,42 @@ func structEdges(f fieldInfo) []string {
 		}
 	}
 	return nil
+}
+
+// hasEasyjsonMethodSig reports whether named has a method called name
+// with easyjson's Marshaler/Unmarshaler shape: exactly one parameter of
+// type *pkgPath.typeName and no results.
+func hasEasyjsonMethodSig(named *types.Named, name, pkgPath, typeName string) bool {
+	sig := methodSig(named, name)
+	if sig == nil || sig.Variadic() || sig.Params().Len() != 1 || sig.Results().Len() != 0 {
+		return false
+	}
+	ptr, ok := sig.Params().At(0).Type().(*types.Pointer)
+	if !ok {
+		return false
+	}
+	n, ok := ptr.Elem().(*types.Named)
+	return ok && n.Obj().Name() == typeName && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == pkgPath
+}
+
+// handwrittenEasyjsonMethod returns the name of a hand-written easyjson
+// Marshaler or Unmarshaler method on named, or "" if it has none.
+// easyjson's own generated output and zerojson's -compat-easyjson wrappers
+// live in replaceable generated files and do not count.
+func (g *generator) handwrittenEasyjsonMethod(named *types.Named) string {
+	if hasEasyjsonMethodSig(named, "MarshalEasyJSON", easyjsonJwriterPkg, "Writer") && g.handwritten(named, "MarshalEasyJSON") {
+		return "MarshalEasyJSON"
+	}
+	if hasEasyjsonMethodSig(named, "UnmarshalEasyJSON", easyjsonJlexerPkg, "Lexer") && g.handwritten(named, "UnmarshalEasyJSON") {
+		return "UnmarshalEasyJSON"
+	}
+	return ""
+}
+
+func easyjsonOnlyMessage(typ, method string) string {
+	return fmt.Sprintf("%s has a hand-written %s method but no MarshalJSON/UnmarshalJSON (or AppendZJSON/ReadZJSON) pair — "+
+		"easyjson calls %s, zerojson cannot, and encoding the type by its Go structure would silently change its wire format; "+
+		"add a MarshalJSON/UnmarshalJSON pair (or the AppendZJSON/ReadZJSON pair) that produces the same bytes", typ, method, method)
 }
 
 // handwritten reports whether named has a method called name that was NOT

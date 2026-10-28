@@ -66,9 +66,11 @@ following build reports that reference. Unrelated package errors still
 require manual repair.
 
 Generated declarations must not collide with hand-written ones: a type named
-like a `-pool` Decoder (`EventDecoder`), or a hand-written
-`MarshalEasyJSON` on a type `-compat-easyjson` would wrap, is refused with
-its location rather than written into a file that cannot compile.
+like a `-pool` Decoder (`EventDecoder`), or a hand-written method that
+`-compat-easyjson` would redeclare, is refused with its location rather than
+written into a file that cannot compile. (A hand-written easyjson
+`MarshalEasyJSON`/`UnmarshalEasyJSON` pair is refused earlier, as a custom
+wire format; see [easyjson migration](compatibility.md#easyjson-migration).)
 
 The generator refuses to overwrite a file without a recognized codec header
 before the package clause; `-force` overrides that protection. It cannot detect
@@ -300,10 +302,12 @@ and [Reader](https://pkg.go.dev/github.com/neal/zerojson#Reader) instead of
 registering free leaf functions. The generator gives this pair precedence over
 JSON/Text methods for fields.
 
-Generated types also implement the pair, enabling fields to compose across
-packages. Same-package generated structs share the parent's arena directly.
-For slice elements and map values, Appender types must also provide a
-JSON method pair (for example through `-compat`); otherwise that shape is refused.
+Generated types also implement the pair, so types compose across packages:
+a type generated in one package can be a field, pointer, slice element
+(`[]T`, `[]*T`), or map value of a type generated in another (generate the
+inner package first). The pair drives every one of those positions, for
+hand-written Appenders too, and takes precedence over JSON methods in each.
+Same-package generated structs share the parent's arena directly.
 
 Appenders must preserve the output prefix and produce one valid JSON value.
 Readers consume one value and report errors through the Lexer. These callbacks

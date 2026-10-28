@@ -284,7 +284,7 @@ func (g *generator) emitRootSliceDecode(ti typeInfo) {
 func (g *generator) emitRootLeafSliceBody(rf *fieldInfo, cell, ind string) {
 	vi := rf.valInfo
 	if rf.elemPtr {
-		// Only Marshaler/TextMarshaler elements can be pointers.
+		// Only Marshaler/TextMarshaler/Appender elements can be pointers.
 		g.p("%s\tvar e *%s", ind, vi.typeStr)
 		g.p("%s\tif !l.IsNull() {", ind)
 		g.p("%s\t\te = new(%s)", ind, vi.typeStr)
@@ -293,6 +293,8 @@ func (g *generator) emitRootLeafSliceBody(rf *fieldInfo, cell, ind string) {
 			g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := e.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
 		case kTextMarshaler:
 			g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := e.UnmarshalText(txt); err != nil { l.AddError(err) } }", ind)
+		case kAppender:
+			g.p("%s\t\te.ReadZJSON(l)", ind)
 		}
 		g.p("%s\t}", ind)
 		g.p("%s\tif l.Err() != nil { return }", ind)
@@ -319,6 +321,8 @@ func (g *generator) emitRootLeafSliceBody(rf *fieldInfo, cell, ind string) {
 		g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := %s[idx].UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind, cell)
 	case kTextMarshaler:
 		g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := %s[idx].UnmarshalText(txt); err != nil { l.AddError(err) } }", ind, cell)
+	case kAppender:
+		g.p("%s\t\t%s[idx].ReadZJSON(l)", ind, cell)
 	case kInterface:
 		g.p("%s\t\t%s[idx] = l.ReadInterface()", ind, cell)
 	default:
@@ -366,6 +370,8 @@ func (g *generator) emitRootMapDecode(ti typeInfo) {
 		g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := mv.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
 	case kTextMarshaler:
 		g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := mv.UnmarshalText(txt); err != nil { l.AddError(err) } }", ind)
+	case kAppender:
+		g.p("%s\t\tmv.ReadZJSON(l)", ind)
 	case kQuotedInt:
 		if !vi.marshalOnValue {
 			g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := mv.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)

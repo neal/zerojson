@@ -389,6 +389,9 @@ func main() {
 			log.Fatalf("type %s is not a named type", n)
 		}
 		rejectGeneric(named, n)
+		if m := g.handwrittenEasyjsonMethod(named); m != "" {
+			log.Fatalf("%s: type has a hand-written %s method — easyjson calls it, so it defines this type's wire format, and zerojsongen will not silently replace a custom wire format; remove it from -types and give it a MarshalJSON/UnmarshalJSON (or AppendZJSON/ReadZJSON) pair producing the same bytes, so containing types delegate to it", n, m)
+		}
 		if g.explicit[n] && !g.replaceableMethods(named) {
 			log.Fatalf("%s: explicitly listed type has hand-written JSON/Text methods — zerojsongen will not silently replace a custom wire format; remove it from -types and let containing types delegate to it (implement AppendZJSON/ReadZJSON on the custom type as well if that delegated path must be allocation-free)", n)
 		}

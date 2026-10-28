@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/neal/zerojson/conformance/internal/oracle"
+	"github.com/neal/zerojson"
 	decimal "github.com/neal/zerojson/conformance/internal/testleaf"
 )
 
@@ -159,6 +159,14 @@ func TestEventLegNonPooledDecodeBorrowAllocationBudget(t *testing.T) {
 // allocation on their own, independent of zerojson's own code. Pinned
 // exactly so a change to the fast-path fields' encoding doesn't silently
 // add to this floor.
+//
+// What the encoder delegates is measured at run time and subtracted
+// (delegatedEncodeAllocs): the interface{} fallback's encoding/json calls
+// and the fixture's own MarshalJSON/MarshalText methods (Tags.MarshalJSON
+// itself calls json.Marshal). That share moves with the Go release — the
+// v2-backed encoding/json that Go 1.27 ships allocates more on it than
+// classic v1 did — while what this test pins is zerojson's own count, so
+// it stays exact on any toolchain without per-implementation constants.
 func TestEventEncodeAllocationBudget(t *testing.T) {
 	requireStableAllocationInstrumentation(t)
 	tr := variants()["full"]
@@ -190,19 +198,47 @@ func TestEventEncodeAllocationBudget(t *testing.T) {
 		// race is still caught) but doesn't assert a specific count.
 		return
 	}
-	// Event's Extra/Bag/AnyList fields delegate to encoding/json, so part
-	// of this budget is stdlib's, not zerojson's: the v2-backed
-	// encoding/json that Go 1.27 ships allocates more on that path than
-	// classic v1 did. Both figures are pinned; which one applies is
-	// detected by probing the oracle (see internal/oracle), so the budget
-	// stays exact under either implementation.
-	wantAllocs := 22.0
-	if oracle.StdlibJSONV2 {
-		wantAllocs = 29.0
+	delegated := delegatedEncodeAllocs(tr)
+	t.Logf("of which delegated (encoding/json fallback and user marshal methods): %v", delegated)
+	const wantOwnAllocs = 0.0 // every remaining allocation is in delegated code
+	if own := allocs - delegated; own != wantOwnAllocs {
+		t.Fatalf("Event.AppendZJSON (reused buffer) allocations=%v, of which delegated %v: own=%v, want %v (update deliberately if a field's encoding legitimately changed; investigate if not)", allocs, delegated, own, wantOwnAllocs)
 	}
-	if allocs != wantAllocs {
-		t.Fatalf("Event.AppendZJSON (reused buffer) allocations=%v, want %v (update deliberately if a field's encoding legitimately changed; investigate if not)", allocs, wantAllocs)
+}
+
+// delegatedEncodeAllocs measures what Event's generated encoder spends in
+// code it delegates to, call for call: one zerojson.AppendInterface
+// (json.Marshal) per Extra, per Bag value, and per AnyList element, plus the
+// Tags/Parents MarshalJSON and PrimaryDate/SecondDate MarshalText calls. The
+// fallback buffer is pre-sized, so only json.Marshal's own allocations count.
+func delegatedEncodeAllocs(e *Event) float64 {
+	var calls []func()
+	buf := make([]byte, 0, 4096)
+	fallback := func(v any) func() {
+		return func() { buf, _ = zerojson.AppendInterface(buf[:0], v) }
 	}
+	if e.Extra != nil {
+		calls = append(calls, fallback(e.Extra))
+	}
+	for _, v := range e.Bag {
+		calls = append(calls, fallback(v))
+	}
+	for _, v := range e.AnyList {
+		calls = append(calls, fallback(v))
+	}
+	if len(e.Tags) != 0 {
+		calls = append(calls, func() { _, _ = e.Tags.MarshalJSON() })
+	}
+	calls = append(calls, func() { _, _ = e.Parents.MarshalJSON() })
+	calls = append(calls, func() { _, _ = e.PrimaryDate.MarshalText() })
+	if e.SecondDate != nil {
+		calls = append(calls, func() { _, _ = e.SecondDate.MarshalText() })
+	}
+	var total float64
+	for _, call := range calls {
+		total += testing.AllocsPerRun(1000, call)
+	}
+	return total
 }
 
 // TestEventPooledDecodeBorrowAllocationBudget pins Event's pooled

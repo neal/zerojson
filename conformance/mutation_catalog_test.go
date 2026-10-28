@@ -8,6 +8,25 @@ func mutationCatalog() []mutationCase {
 	)
 	return []mutationCase{
 		{
+			// A type whose only custom codec is a hand-written
+			// MarshalEasyJSON must be refused, not encoded by its Go
+			// structure (which silently changes a migrated wire format).
+			name: "easyjson_only_type_is_encoded_structurally", tier: "quick", file: "cmd/zerojsongen/load.go",
+			old:       `if m := g.handwrittenEasyjsonMethod(named); m != "" && !(hasM && hasU) {`,
+			new:       `if m := g.handwrittenEasyjsonMethod(named); false && m != "" && !(hasM && hasU) {`,
+			wantCount: 1,
+			detector:  generatorDetector(`^TestGeneratorBehaviorMatrix/easyjson_only_field_refused$`), wantOutput: "want substring",
+		},
+		{
+			// Appender slice elements and map values must call AppendZJSON;
+			// emitting nothing would produce "[,]".
+			name: "appender_element_encodes_nothing", tier: "quick", file: "cmd/zerojsongen/encode.go",
+			old:        `g.p("%sdst, err = %s.AppendZJSON(dst)", ind, expr)`,
+			new:        `g.p("%s_ = %s", ind, expr)`,
+			occurrence: 1, wantCount: 2,
+			detector: generatorDetector(`^TestGeneratorShapeValidation/slice,_pointer_slice,_and_map_of_hand-written_Appender_struct$`), wantOutput: "encode: got",
+		},
+		{
 			name: "empty_slice_keeps_previous_capacity", tier: "full", file: "cmd/zerojsongen/decode.go",
 			old: `g.p("%sif len(%s) == 0 {", ind, cell)`,
 			new: `g.p("%sif %s == nil {", ind, cell)`, wantCount: 1,

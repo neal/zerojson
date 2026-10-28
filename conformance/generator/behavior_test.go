@@ -15,6 +15,7 @@ import (
 // creation, generator invocation, compilation, and behavioral execution.
 type behaviorCase struct {
 	name         string
+	imports      string // extra import lines for types.go, e.g. easyjson's jwriter/jlexer
 	declarations string
 	types        string
 	flags        []string
@@ -514,6 +515,71 @@ type Root struct { Child Child ` + "`json:\"child\"`" + ` }
 			wantGenError: "explicitly listed type has hand-written JSON/Text methods",
 		},
 		{
+			// easyjson calls MarshalEasyJSON ahead of anything else; zerojson
+			// cannot, so a type whose only custom codec is easyjson's must be
+			// refused rather than silently encoded by its Go structure.
+			name: "easyjson_only_field_refused",
+			imports: `	"github.com/mailru/easyjson/jlexer"
+	"github.com/mailru/easyjson/jwriter"
+`,
+			declarations: `
+type Cents struct{ V int64 }
+func (c Cents) MarshalEasyJSON(w *jwriter.Writer) { w.RawString("\"1.00\"") }
+func (c *Cents) UnmarshalEasyJSON(l *jlexer.Lexer) { l.Skip() }
+type Root struct { Amount Cents ` + "`json:\"amount\"`" + ` }
+`,
+			types:        "Root",
+			wantGenError: "has a hand-written MarshalEasyJSON method but no MarshalJSON/UnmarshalJSON",
+		},
+		{
+			name: "easyjson_only_scalar_field_refused",
+			imports: `	"github.com/mailru/easyjson/jlexer"
+`,
+			declarations: `
+type Code int
+func (c *Code) UnmarshalEasyJSON(l *jlexer.Lexer) { *c = Code(len(l.String())) }
+type Root struct { Code Code ` + "`json:\"code\"`" + ` }
+`,
+			types:        "Root",
+			wantGenError: "has a hand-written UnmarshalEasyJSON method but no MarshalJSON/UnmarshalJSON",
+		},
+		{
+			name: "easyjson_only_root_refused",
+			imports: `	"github.com/mailru/easyjson/jwriter"
+`,
+			declarations: `
+type Root struct { V int ` + "`json:\"v\"`" + ` }
+func (r Root) MarshalEasyJSON(w *jwriter.Writer) { w.RawString("1") }
+`,
+			types:        "Root",
+			wantGenError: "type has a hand-written MarshalEasyJSON method",
+		},
+		{
+			// With a JSON pair alongside, zerojson delegates to MarshalJSON,
+			// which (by the type author's contract) matches MarshalEasyJSON.
+			name: "easyjson_and_json_pair_delegates",
+			imports: `	"github.com/mailru/easyjson/jlexer"
+	"github.com/mailru/easyjson/jwriter"
+`,
+			declarations: `
+type Cents struct{ V int64 }
+func (c Cents) MarshalEasyJSON(w *jwriter.Writer) { w.RawString("\"1.00\"") }
+func (c *Cents) UnmarshalEasyJSON(l *jlexer.Lexer) { l.Skip(); c.V = 100 }
+func (c Cents) MarshalJSON() ([]byte, error) { w := jwriter.Writer{}; c.MarshalEasyJSON(&w); return w.BuildBytes() }
+func (c *Cents) UnmarshalJSON(b []byte) error { l := jlexer.Lexer{Data: b}; c.UnmarshalEasyJSON(&l); return l.Error() }
+type Root struct { Amount Cents ` + "`json:\"amount\"`" + ` }
+`,
+			types: "Root",
+			testBody: `
+		got, err := (&Root{}).AppendZJSON(nil)
+		if err != nil { t.Fatal(err) }
+		if string(got) != ` + "`{\"amount\":\"1.00\"}`" + ` { t.Fatalf("encode: got %s", got) }
+		var zj Root
+		if err := zj.UnmarshalZJSON([]byte(` + "`{\"amount\":\"x\"}`" + `)); err != nil { t.Fatal(err) }
+		if zj.Amount.V != 100 { t.Fatalf("decode did not delegate: %+v", zj) }
+`,
+		},
+		{
 			name: "marshal_text_only_refused",
 			declarations: `
 type Text int
@@ -554,7 +620,7 @@ import (
 	"errors"
 
 	"github.com/neal/zerojson"
-)
+` + tc.imports + `)
 
 var _ = json.Marshal
 var _ = errors.New
