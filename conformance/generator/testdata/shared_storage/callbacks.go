@@ -24,8 +24,11 @@ type Callbacks struct {
 	A Callback
 	S []Callback
 	M map[string]Callback
+	I CallbackInner
 	Z int
 }
+
+type CallbackInner struct{ N int }
 type Leaf int64
 
 var LeafCalls int

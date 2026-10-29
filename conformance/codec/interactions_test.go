@@ -189,20 +189,25 @@ func TestReusedTargetAndDuplicateCompositeSemantics(t *testing.T) {
 }
 
 func TestOrderedFallbackDoesNotReplayCallbacks(t *testing.T) {
-	in := []byte(`{"first":1,"last" :2}`)
-	sideEffectCalls = 0
-	var std OrderedSideEffects
-	if err := json.Unmarshal(in, &std); err != nil {
-		t.Fatal(err)
-	}
-	wantCalls := sideEffectCalls
-	sideEffectCalls = 0
-	var zj OrderedSideEffects
-	if err := zj.UnmarshalZJSON(in); err != nil {
-		t.Fatal(err)
-	}
-	if sideEffectCalls != wantCalls {
-		t.Fatalf("callback count: stdlib=%d zerojson=%d", wantCalls, sideEffectCalls)
+	for _, doc := range []string{
+		`{"first":1,"last" :2}`,            // a key deviation: the keyed loop carries on
+		`{"first":1,"inner":{ },"last":2}`, // a nested object the ordered path cannot match restarts it
+	} {
+		in := []byte(doc)
+		sideEffectCalls = 0
+		var std OrderedSideEffects
+		if err := json.Unmarshal(in, &std); err != nil {
+			t.Fatal(err)
+		}
+		wantCalls := sideEffectCalls
+		sideEffectCalls = 0
+		var zj OrderedSideEffects
+		if err := zj.UnmarshalZJSON(in); err != nil {
+			t.Fatal(err)
+		}
+		if sideEffectCalls != wantCalls {
+			t.Fatalf("%s: callback count: stdlib=%d zerojson=%d", doc, wantCalls, sideEffectCalls)
+		}
 	}
 }
 

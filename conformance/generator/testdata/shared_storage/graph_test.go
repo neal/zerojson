@@ -10,7 +10,9 @@ func TestGraphReplay(t *testing.T) {
 	values := []string{`null`, `{}`, `{"x":null}`, `{"x":{"N":1,"P":2,"S":[null,3]}}`, `{"x":{"S":[]}}`, `{"x":{"S":[1,2,3,4]}}`}
 	for _, a := range values {
 		for _, b := range values {
-			for _, tail := range []string{`,"C":0}`, `, "C":0}`, `,"A":{"x":{"N":7}}}`, `,"\u0043":0}`} {
+			// A whitespace-padded empty Child makes the ordered path bail and
+			// restart the object after A, B, Items, and P.
+			for _, tail := range []string{`,"C":0}`, `, "C":0}`, `,"A":{"x":{"N":7}}}`, `,"\u0043":0}`, `{ },"C":0}`} {
 				for state := 0; state < 3; state++ {
 					for mode := 0; mode < 4; mode++ {
 						makeValue := func() (Graph, []int, *Node) {
@@ -29,7 +31,12 @@ func TestGraphReplay(t *testing.T) {
 						got, ga, gn := makeValue()
 						want, wa, wn := makeValue()
 						oldp := got.P
-						data := []byte(`{"A":` + a + `,"B":` + b + `,"Items":[{"P":4,"S":[null,6]}],"P":3,"Child":{"S":[null,4]}` + tail)
+						data := []byte(`{"A":` + a + `,"B":` + b + `,"Items":[{"P":4,"S":[null,6]}],"P":3,"Child":`)
+						if tail[0] == '{' {
+							data = append(data, tail...)
+						} else {
+							data = append(append(data, `{"S":[null,4]}`...), tail...)
+						}
 						original := string(data)
 						var e error
 						var d GraphDecoder

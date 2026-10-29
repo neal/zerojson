@@ -3908,6 +3908,7 @@ func FuzzOrderedSideEffectsZJSON(f *testing.F) {
 	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"first\":null}"))
 	f.Add([]byte("{\"first\":\"bad\"}"))
+	f.Add([]byte("{\"inner\":{}}"))
 	f.Add([]byte("{\"last\":1}"))
 	f.Add([]byte("{\"last\":\"1\"}"))
 	f.Add([]byte("{\"last\":1,\"last\":2}"))
@@ -3926,7 +3927,7 @@ func FuzzOrderedSideEffectsZJSON(f *testing.F) {
 			var stdRaw, zjRaw OrderedSideEffects
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Last")) {
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Inner") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Last")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -3999,14 +4000,18 @@ func FuzzOrderedSideEffectsZJSON(f *testing.F) {
 }
 
 func FuzzOrderedSideEffectsZJSONSequence(f *testing.F) {
-	f.Add([]byte("{}"), []byte("{}"), []byte("{\"first\":null}"), []byte("{\"last\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{}"), []byte("{\"first\":null}"), []byte("{\"inner\":{}}"), uint8(0x0))
 	f.Add([]byte("{}"), []byte("{}"), []byte("{"), []byte("{\"first\":null}"), uint8(0xf))
 	f.Add([]byte("{}"), []byte("{\"first\":null}"), []byte("{}"), []byte("["), uint8(0x5))
-	f.Add([]byte("{"), []byte("{}"), []byte("{\"last\":1}"), []byte("{}"), uint8(0xa))
-	f.Add([]byte("{\"first\":null}"), []byte("{}"), []byte("{\"last\":1}"), []byte("{}"), uint8(0x0))
-	f.Add([]byte("{}"), []byte("{\"first\":null}"), []byte("{"), []byte("{\"last\":1}"), uint8(0xf))
-	f.Add([]byte("{\"first\":null}"), []byte("{\"last\":1}"), []byte("{}"), []byte("["), uint8(0x5))
-	f.Add([]byte("{"), []byte("{\"first\":null}"), []byte("{}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{"), []byte("{}"), []byte("{\"inner\":{}}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"first\":null}"), []byte("{}"), []byte("{\"inner\":{}}"), []byte("{\"last\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"first\":null}"), []byte("{"), []byte("{\"inner\":{}}"), uint8(0xf))
+	f.Add([]byte("{\"first\":null}"), []byte("{\"inner\":{}}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"first\":null}"), []byte("{\"last\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"inner\":{}}"), []byte("{}"), []byte("{\"last\":1}"), []byte("{}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"inner\":{}}"), []byte("{"), []byte("{\"last\":1}"), uint8(0xf))
+	f.Add([]byte("{\"inner\":{}}"), []byte("{\"last\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"inner\":{}}"), []byte("{}"), []byte("{}"), uint8(0xa))
 	f.Add([]byte("{\"last\":1}"), []byte("{}"), []byte("{}"), []byte("{\"first\":null}"), uint8(0x0))
 	f.Add([]byte("{}"), []byte("{\"last\":1}"), []byte("{"), []byte("{}"), uint8(0xf))
 	f.Add([]byte("{\"last\":1}"), []byte("{}"), []byte("{}"), []byte("["), uint8(0x5))

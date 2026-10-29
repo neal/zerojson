@@ -26,8 +26,13 @@ import (
 // diverge: the public path rejects the trailing "0", a bare
 // zjDecodeFallback_Event call ignores it — not a decode bug, just this
 // helper not applying the same entry-point contract the comparison
-// needs to be meaningful.
+// needs to be meaningful. The same goes for the wrapper's Valid
+// preflight: the known-field readers rely on it (see Lexer.Skip), so a
+// raw control byte in a string field is rejected only there.
 func decodeFallbackOnly(data []byte, borrow bool) (Event, error) {
+	if err := zerojson.Valid(data); err != nil {
+		return Event{}, err
+	}
 	l := zerojson.NewLexer(data, borrow)
 	var v Event
 	// Mirror the entry-point wrapper's top-level null handling too: null is

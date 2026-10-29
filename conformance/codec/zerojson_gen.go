@@ -6523,6 +6523,7 @@ func (d *ReuseSemanticsDecoder) DecodeBorrow(data []byte, v *ReuseSemantics) err
 // heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaOrderedSideEffects struct {
+	a1 zjArenaReuseInner
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -6544,6 +6545,17 @@ func (v *OrderedSideEffects) AppendZJSON(dst []byte) ([]byte, error) {
 			return dst, err
 		}
 		dst = append(dst, raw...)
+	}
+	{
+		if len(dst) > n {
+			dst = append(dst, ',')
+		}
+		dst = append(dst, `"inner":`...)
+		var err error
+		dst, err = v.Inner.AppendZJSON(dst)
+		if err != nil {
+			return dst, err
+		}
 	}
 	{
 		if len(dst) > n {
@@ -6593,6 +6605,8 @@ func zjFieldName_OrderedSideEffects(name string) string {
 	switch name {
 	case "first":
 		return name
+	case "inner":
+		return name
 	case "last":
 		return name
 	}
@@ -6619,6 +6633,8 @@ func zjFoldFieldName_OrderedSideEffects(name string) string {
 	switch string(lower[:len(name)]) {
 	case "first":
 		return "first"
+	case "inner":
+		return "inner"
 	case "last":
 		return "last"
 	}
@@ -6626,6 +6642,9 @@ func zjFoldFieldName_OrderedSideEffects(name string) string {
 zjUnicode:
 	if strings_.EqualFold(name, "first") {
 		return "first"
+	}
+	if strings_.EqualFold(name, "inner") {
+		return "inner"
 	}
 	if strings_.EqualFold(name, "last") {
 		return "last"
@@ -6684,6 +6703,8 @@ func zjDecodeFallback_OrderedSideEffects(l *zerojson.Lexer, v *OrderedSideEffect
 					l.AddError(err)
 				}
 			}
+		case "inner":
+			zjDecode_ReuseInner(l, &v.Inner, &a.a1)
 		case "last":
 			v.Last = int(l.ReadInt())
 		default:

@@ -2,7 +2,7 @@ func Test$NAME(t *testing.T) {
 	values := []string{$VALUES}
 	for _, x := range values {
 		for _, y := range values {
-			for _, tail := range []string{",\"C\":0}", ", \"C\":0}", ",\"A\":[null]}", ",\"\\u0043\":0}"} {
+			for _, tail := range []string{",\"C\":0}", ", \"C\":0}", ",\"A\":[null]}", ",\"\\u0043\":0}", ",\"D\":{ }}"} {
 				for state := 0; state < 4; state++ {
 					for _, mode := range []string{"copy", "borrow", "poolcopy", "poolborrow"} {
 						makeValue := func() ($NAME, []$ELEM) {

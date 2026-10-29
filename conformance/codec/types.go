@@ -567,6 +567,7 @@ func (v *SideEffectValue) UnmarshalJSON([]byte) error {
 
 type OrderedSideEffects struct {
 	First SideEffectValue `json:"first"`
+	Inner ReuseInner      `json:"inner"` // a nested bail restarts the whole object
 	Last  int             `json:"last"`
 }
 

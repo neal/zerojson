@@ -22,14 +22,18 @@ func TestSharedStorageReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	source := "package p\ntype Row struct { N int }\n"
+	// Pad gives every type a nested struct after its collections: written
+	// as a whitespace-padded empty object it makes the ordered path bail,
+	// which restarts the object, so the reuse guards decide whether A and B
+	// replay.
+	source := "package p\ntype Row struct { N int }\ntype Pad struct { N int }\n"
 	tests := "package p\nimport (\"encoding/json\";\"reflect\";\"testing\";zj \"github.com/neal/zerojson\")\n"
 	for _, c := range []struct{ name, elem, seed, values string }{
 		{"Ints", "int", "9,8,7", "`null`,`[]`,`[null]`,`[1]`,`[null,null]`,`[2,3]`,`[null,3,4]`"},
 		{"Bytes", "byte", "9,8,7", "`null`,`[]`,`[null]`,`[1]`,`[null,null]`,`[2,3]`,`[null,3,4]`"},
 		{"Rows", "Row", "{9},{8},{7}", "`null`,`[]`,`[null]`,`[{\"N\":1}]`,`[null,null]`,`[{\"N\":2},{\"N\":3}]`,`[null,{\"N\":3},{\"N\":4}]`"},
 	} {
-		source += "type " + c.name + " struct { A []" + c.elem + "; B []" + c.elem + "; C int }; type Outer" + c.name + " struct { Child " + c.name + " }\n"
+		source += "type " + c.name + " struct { A []" + c.elem + "; B []" + c.elem + "; C int; D Pad }; type Outer" + c.name + " struct { Child " + c.name + " }\n"
 		tests += strings.NewReplacer("$NAME", c.name, "$ELEM", c.elem, "$SEED", c.seed, "$VALUES", c.values).Replace(sharedStorageFixture)
 	}
 	for name, data := range map[string]string{"types.go": source, "shared_test.go": tests} {
