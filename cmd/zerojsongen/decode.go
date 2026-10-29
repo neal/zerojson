@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // leafRead emits a decode statement for a custom leaf into ptrExpr.
@@ -396,7 +398,7 @@ func (g *generator) genDecode(ti typeInfo) {
 		g.emitDecode(f, false)
 	}
 	g.p("\t\tdefault:")
-	g.p("\t\t\tif folded := zjFieldName_%s(name); folded != name { name = folded; goto zjDispatch }", ti.name)
+	g.p("\t\t\tif folded := %s(name); folded != name { name = folded; goto zjDispatch }", foldFieldNameFunc(ti.name))
 	g.p("\t\t\tl.Skip()")
 	g.p("\t\t}")
 	g.p("\t\tif l.Err() != nil {")
@@ -410,6 +412,8 @@ func (g *generator) genDecode(ti typeInfo) {
 
 // Exact names take precedence. Folded ties follow field index order, like
 // encoding/json's first folded-name match, including Unicode simple folds.
+// zjFieldName_<T> checks the exact names first; callers that have already
+// ruled them out call zjFoldFieldName_<T> directly.
 func (g *generator) emitFieldName(ti typeInfo) {
 	g.p("func zjFieldName_%s(name string) string {", ti.name)
 	if len(ti.fields) != 0 {
@@ -418,14 +422,109 @@ func (g *generator) emitFieldName(ti typeInfo) {
 			g.p("\tcase %q: return name", f.jsonName)
 		}
 		g.p("\t}")
-		q := g.importAlias("strings", "strings")
-		for _, f := range ti.fields {
-			g.p("\tif %s.EqualFold(name, %q) { return %q }", q, f.jsonName, f.jsonName)
+	}
+	g.p("\treturn %s(name)", foldFieldNameFunc(ti.name))
+	g.p("}")
+	g.p("")
+	g.emitFoldFieldName(ti)
+}
+
+// emitFoldFieldName emits zjFoldFieldName_<T>(name), the first declared
+// name that strings.EqualFold matches, or name itself. name must not be a
+// declared name exactly: an exact match can also fold onto an earlier field.
+//
+// An all-ASCII key, nearly every key on the wire, matches a declared name
+// exactly when the key, lowercased, equals that name's ASCII fold key (see
+// asciiFoldKey), so one switch replaces a strings.EqualFold call per field.
+// Any other key takes the EqualFold chain.
+func (g *generator) emitFoldFieldName(ti typeInfo) {
+	n := ti.name
+	g.p("func %s(name string) string {", foldFieldNameFunc(n))
+	if len(ti.fields) == 0 {
+		g.p("\treturn name")
+		g.p("}")
+		return
+	}
+	type foldCase struct{ key, name string }
+	var cases []foldCase
+	seen := map[string]bool{}
+	width := 0
+	for _, f := range ti.fields {
+		key, ok := asciiFoldKey(f.jsonName)
+		if !ok || seen[key] {
+			continue
 		}
+		seen[key] = true
+		cases = append(cases, foldCase{key, f.jsonName})
+		width = max(width, len(key))
+	}
+	if len(cases) == 0 {
+		g.p("\tfor i := 0; i < len(name); i++ {")
+		g.p("\t\tif name[i] >= 0x80 { goto zjUnicode }")
+		g.p("\t}")
+		g.p("\treturn name")
+	} else {
+		g.p("\tvar lower [%d]byte", width)
+		g.p("\tfor i := 0; i < len(name); i++ {")
+		g.p("\t\tc := name[i]")
+		g.p("\t\tif c >= 0x80 { goto zjUnicode }")
+		g.p("\t\tif i < len(lower) {")
+		g.p("\t\t\tif 'A' <= c && c <= 'Z' { c += 'a' - 'A' }")
+		g.p("\t\t\tlower[i] = c")
+		g.p("\t\t}")
+		g.p("\t}")
+		g.p("\tif len(name) > len(lower) { return name }")
+		g.p("\tswitch string(lower[:len(name)]) {")
+		for _, c := range cases {
+			g.p("\tcase %q: return %q", c.key, c.name)
+		}
+		g.p("\t}")
+		g.p("\treturn name")
+	}
+	g.p("zjUnicode:")
+	q := g.importAlias("strings", "strings")
+	for _, f := range ti.fields {
+		g.p("\tif %s.EqualFold(name, %q) { return %q }", q, f.jsonName, f.jsonName)
 	}
 	g.p("\treturn name")
 	g.p("}")
 }
+
+// asciiFoldKey returns the lowercase ASCII string that an all-ASCII key,
+// lowercased, must equal to match name under strings.EqualFold. EqualFold
+// compares rune by rune, and an ASCII byte matches exactly the runes whose
+// simple-fold orbit contains it, so each rune of name contributes the
+// lowercased ASCII member of its orbit: itself for ASCII, 'k' for the
+// Kelvin sign, 's' for long s. It reports false when some rune's orbit has
+// no ASCII member, since no ASCII key can then match name.
+func asciiFoldKey(name string) (string, bool) {
+	key := make([]byte, 0, len(name))
+	for _, r := range name {
+		c, ok := asciiFoldMember(r)
+		if !ok {
+			return "", false
+		}
+		key = append(key, c)
+	}
+	return string(key), true
+}
+
+func asciiFoldMember(r rune) (byte, bool) {
+	for f := r; ; {
+		if f < utf8.RuneSelf {
+			c := byte(f)
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			return c, true
+		}
+		if f = unicode.SimpleFold(f); f == r {
+			return 0, false
+		}
+	}
+}
+
+func foldFieldNameFunc(t string) string { return "zjFoldFieldName_" + t }
 
 // genReadZJSON emits ReadZJSON, zerojson.Reader's method, next to the
 // generated AppendZJSON (which already satisfies zerojson.Appender). The

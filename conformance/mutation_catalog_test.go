@@ -141,6 +141,30 @@ func mutationCatalog() []mutationCase {
 			detector: generatorDetector(`^TestIndependentChallenge$`), wantOutput: "ordinary compatibility",
 		},
 		{
+			// An ASCII key reaches a declared name with a Kelvin sign or long
+			// s only through the ASCII switch; dropping such names from it
+			// sends "K" to the later field "k".
+			name: "ascii_fold_drops_unicode_names", tier: "quick", file: "cmd/zerojsongen/decode.go",
+			old: `c, ok := asciiFoldMember(r)`, new: `c, ok := byte(r), r < utf8.RuneSelf`, wantCount: 1,
+			regenerate: true,
+			detector:   codecDetector(`^TestFoldFieldNameMatchesReference$`), wantOutput: `zjFieldName_FoldNames("K") = "k"`,
+		},
+		{
+			// Folded ties go to the first field in declaration order.
+			name: "ascii_fold_tie_takes_last_field", tier: "quick", file: "cmd/zerojsongen/decode.go",
+			old:        "if !ok || seen[key] {\n\t\t\tcontinue\n\t\t}",
+			new:        "if !ok {\n\t\t\tcontinue\n\t\t}\n\t\tif seen[key] {\n\t\t\tfor i := range cases {\n\t\t\t\tif cases[i].key == key {\n\t\t\t\t\tcases[i].name = f.jsonName\n\t\t\t\t}\n\t\t\t}\n\t\t\tcontinue\n\t\t}",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestFoldFieldNameMatchesReference$`), wantOutput: `zjFieldName_FoldNames("ORDERID") = "OrderId"`,
+		},
+		{
+			name: "ascii_fold_skips_lowercasing", tier: "full", file: "cmd/zerojsongen/decode.go",
+			old: `g.p("\t\t\tif 'A' <= c && c <= 'Z' { c += 'a' - 'A' }")`, new: `g.p("\t\t\t_ = 'A'")`, wantCount: 1,
+			regenerate: true,
+			detector:   codecDetector(`^TestFoldFieldNameMatchesReference$`), wantOutput: `zjFieldName_FoldNames("SIZE") = "SIZE"`,
+		},
+		{
 			name: "field_lookup_drops_case_folding", tier: "full", file: "cmd/zerojsongen/decode.go",
 			old: `g.p("\tif %s.EqualFold(name, %q) { return %q }", q, f.jsonName, f.jsonName)`, new: `g.p("\tif false && %s.EqualFold(name, %q) { return %q }", q, f.jsonName, f.jsonName)`, wantCount: 1,
 			detector: generatorDetector(`^TestIndependentChallenge$`), wantOutput: "ordinary compatibility",

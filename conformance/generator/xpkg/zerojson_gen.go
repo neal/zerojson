@@ -231,6 +231,48 @@ func zjFieldName_Outer(name string) string {
 	case "tail":
 		return name
 	}
+	return zjFoldFieldName_Outer(name)
+}
+
+func zjFoldFieldName_Outer(name string) string {
+	var lower [5]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "id":
+		return "id"
+	case "v":
+		return "v"
+	case "p":
+		return "p"
+	case "s":
+		return "s"
+	case "sp":
+		return "sp"
+	case "m":
+		return "m"
+	case "roots":
+		return "roots"
+	case "index":
+		return "index"
+	case "tail":
+		return "tail"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "id") {
 		return "id"
 	}
@@ -420,7 +462,7 @@ func zjDecodeFallback_Outer(l *zerojson.Lexer, v *Outer, a *zjArenaOuter) {
 		case "tail":
 			v.Tail = int(l.ReadInt())
 		default:
-			if folded := zjFieldName_Outer(name); folded != name {
+			if folded := zjFoldFieldName_Outer(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -580,6 +622,34 @@ func zjFieldName_Chain(name string) string {
 	case "outer":
 		return name
 	}
+	return zjFoldFieldName_Chain(name)
+}
+
+func zjFoldFieldName_Chain(name string) string {
+	var lower [5]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "head":
+		return "head"
+	case "outer":
+		return "outer"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "head") {
 		return "head"
 	}
@@ -648,7 +718,7 @@ func zjDecodeFallback_Chain(l *zerojson.Lexer, v *Chain, a *zjArenaChain) {
 			}
 			zjDecode_Outer(l, v.Outer, &a.a1)
 		default:
-			if folded := zjFieldName_Chain(name); folded != name {
+			if folded := zjFoldFieldName_Chain(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}

@@ -84,6 +84,32 @@ func zjFieldName_Sample(name string) string {
 	case "Values":
 		return name
 	}
+	return zjFoldFieldName_Sample(name)
+}
+
+func zjFoldFieldName_Sample(name string) string {
+	var lower [6]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "values":
+		return "Values"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "Values") {
 		return "Values"
 	}
@@ -336,7 +362,7 @@ func zjIsDeclaredKeySample(name string) bool {
 	case "Values":
 		return true
 	}
-	return zjFieldName_Sample(name) != name
+	return zjFoldFieldName_Sample(name) != name
 }
 
 // zjDecodeFallback_Sample is the general keyed decoder: every member is read via
@@ -438,7 +464,7 @@ func zjDecodeMembers_Sample(l *zerojson.Lexer, v *Sample, a *zjArenaSample) {
 				v.Values = a.c0
 			}
 		default:
-			if folded := zjFieldName_Sample(name); folded != name {
+			if folded := zjFoldFieldName_Sample(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -589,6 +615,36 @@ func zjFieldName_Item(name string) string {
 	case "Price":
 		return name
 	}
+	return zjFoldFieldName_Item(name)
+}
+
+func zjFoldFieldName_Item(name string) string {
+	var lower [8]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "id":
+		return "ID"
+	case "quantity":
+		return "Quantity"
+	case "price":
+		return "Price"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "ID") {
 		return "ID"
 	}
@@ -805,7 +861,7 @@ func zjIsDeclaredKeyItem(name string) bool {
 	case "ID", "Quantity", "Price":
 		return true
 	}
-	return zjFieldName_Item(name) != name
+	return zjFoldFieldName_Item(name) != name
 }
 
 // zjDecodeFallback_Item is the general keyed decoder: every member is read via
@@ -849,7 +905,7 @@ func zjDecodeMembers_Item(l *zerojson.Lexer, v *Item, a *zjArenaItem) {
 		case "Price":
 			v.Price = float64(l.ReadFloat64())
 		default:
-			if folded := zjFieldName_Item(name); folded != name {
+			if folded := zjFoldFieldName_Item(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -1113,6 +1169,46 @@ func zjFieldName_Payload(name string) string {
 	case "Optional":
 		return name
 	}
+	return zjFoldFieldName_Payload(name)
+}
+
+func zjFoldFieldName_Payload(name string) string {
+	var lower [8]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "id":
+		return "ID"
+	case "count":
+		return "Count"
+	case "ratio":
+		return "Ratio"
+	case "stamp":
+		return "Stamp"
+	case "names":
+		return "Names"
+	case "items":
+		return "Items"
+	case "index":
+		return "Index"
+	case "optional":
+		return "Optional"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "ID") {
 		return "ID"
 	}
@@ -1544,7 +1640,7 @@ func zjIsDeclaredKeyPayload(name string) bool {
 	case "ID", "Count", "Ratio", "Stamp", "Names", "Items", "Index", "Optional":
 		return true
 	}
-	return zjFieldName_Payload(name) != name
+	return zjFoldFieldName_Payload(name) != name
 }
 
 // zjDecodeFallback_Payload is the general keyed decoder: every member is read via
@@ -1734,7 +1830,7 @@ func zjDecodeMembers_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) {
 			}
 			*v.Optional = int(l.ReadInt())
 		default:
-			if folded := zjFieldName_Payload(name); folded != name {
+			if folded := zjFoldFieldName_Payload(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -1882,6 +1978,32 @@ func zjFieldName_ObservedPayload(name string) string {
 	case "Values":
 		return name
 	}
+	return zjFoldFieldName_ObservedPayload(name)
+}
+
+func zjFoldFieldName_ObservedPayload(name string) string {
+	var lower [6]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "values":
+		return "Values"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "Values") {
 		return "Values"
 	}
@@ -1938,7 +2060,7 @@ func zjDecodeFallback_ObservedPayload(l *zerojson.Lexer, v *ObservedPayload, a *
 				}
 			}
 		default:
-			if folded := zjFieldName_ObservedPayload(name); folded != name {
+			if folded := zjFoldFieldName_ObservedPayload(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}

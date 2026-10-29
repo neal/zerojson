@@ -75,6 +75,32 @@ func zjFieldName_C_bytes(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_bytes(name)
+}
+
+func zjFoldFieldName_C_bytes(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -294,7 +320,7 @@ func zjIsDeclaredKeyC_bytes(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_bytes(name) != name
+	return zjFoldFieldName_C_bytes(name) != name
 }
 
 // zjDecodeFallback_C_bytes is the general keyed decoder: every member is read via
@@ -363,7 +389,7 @@ func zjDecodeMembers_C_bytes(l *zerojson.Lexer, v *C_bytes, a *zjArenaC_bytes) {
 				v.F = []byte(l.ReadBytesBase64())
 			}
 		default:
-			if folded := zjFieldName_C_bytes(name); folded != name {
+			if folded := zjFoldFieldName_C_bytes(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -441,6 +467,32 @@ func zjFieldName_C_bytes_named(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_bytes_named(name)
+}
+
+func zjFoldFieldName_C_bytes_named(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -660,7 +712,7 @@ func zjIsDeclaredKeyC_bytes_named(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_bytes_named(name) != name
+	return zjFoldFieldName_C_bytes_named(name) != name
 }
 
 // zjDecodeFallback_C_bytes_named is the general keyed decoder: every member is read via
@@ -729,7 +781,7 @@ func zjDecodeMembers_C_bytes_named(l *zerojson.Lexer, v *C_bytes_named, a *zjAre
 				v.F = Blob(l.ReadBytesBase64())
 			}
 		default:
-			if folded := zjFieldName_C_bytes_named(name); folded != name {
+			if folded := zjFoldFieldName_C_bytes_named(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -807,6 +859,32 @@ func zjFieldName_C_bytes_named_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_bytes_named_oe(name)
+}
+
+func zjFoldFieldName_C_bytes_named_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -1026,7 +1104,7 @@ func zjIsDeclaredKeyC_bytes_named_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_bytes_named_oe(name) != name
+	return zjFoldFieldName_C_bytes_named_oe(name) != name
 }
 
 // zjDecodeFallback_C_bytes_named_oe is the general keyed decoder: every member is read via
@@ -1095,7 +1173,7 @@ func zjDecodeMembers_C_bytes_named_oe(l *zerojson.Lexer, v *C_bytes_named_oe, a 
 				v.F = Blob(l.ReadBytesBase64())
 			}
 		default:
-			if folded := zjFieldName_C_bytes_named_oe(name); folded != name {
+			if folded := zjFoldFieldName_C_bytes_named_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -1185,6 +1263,32 @@ func zjFieldName_C_bytes_nested_slice(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_bytes_nested_slice(name)
+}
+
+func zjFoldFieldName_C_bytes_nested_slice(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -1418,7 +1522,7 @@ func zjIsDeclaredKeyC_bytes_nested_slice(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_bytes_nested_slice(name) != name
+	return zjFoldFieldName_C_bytes_nested_slice(name) != name
 }
 
 // zjDecodeFallback_C_bytes_nested_slice is the general keyed decoder: every member is read via
@@ -1501,7 +1605,7 @@ func zjDecodeMembers_C_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_s
 				v.F = a.c0
 			}
 		default:
-			if folded := zjFieldName_C_bytes_nested_slice(name); folded != name {
+			if folded := zjFoldFieldName_C_bytes_nested_slice(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -1591,6 +1695,32 @@ func zjFieldName_C_bytes_nested_slice_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_bytes_nested_slice_oe(name)
+}
+
+func zjFoldFieldName_C_bytes_nested_slice_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -1824,7 +1954,7 @@ func zjIsDeclaredKeyC_bytes_nested_slice_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_bytes_nested_slice_oe(name) != name
+	return zjFoldFieldName_C_bytes_nested_slice_oe(name) != name
 }
 
 // zjDecodeFallback_C_bytes_nested_slice_oe is the general keyed decoder: every member is read via
@@ -1907,7 +2037,7 @@ func zjDecodeMembers_C_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_neste
 				v.F = a.c0
 			}
 		default:
-			if folded := zjFieldName_C_bytes_nested_slice_oe(name); folded != name {
+			if folded := zjFoldFieldName_C_bytes_nested_slice_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -1985,6 +2115,32 @@ func zjFieldName_C_bytes_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_bytes_oe(name)
+}
+
+func zjFoldFieldName_C_bytes_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -2204,7 +2360,7 @@ func zjIsDeclaredKeyC_bytes_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_bytes_oe(name) != name
+	return zjFoldFieldName_C_bytes_oe(name) != name
 }
 
 // zjDecodeFallback_C_bytes_oe is the general keyed decoder: every member is read via
@@ -2273,7 +2429,7 @@ func zjDecodeMembers_C_bytes_oe(l *zerojson.Lexer, v *C_bytes_oe, a *zjArenaC_by
 				v.F = []byte(l.ReadBytesBase64())
 			}
 		default:
-			if folded := zjFieldName_C_bytes_oe(name); folded != name {
+			if folded := zjFoldFieldName_C_bytes_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -2371,6 +2527,32 @@ func zjFieldName_C_bytes_ptr(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_bytes_ptr(name)
+}
+
+func zjFoldFieldName_C_bytes_ptr(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -2598,7 +2780,7 @@ func zjIsDeclaredKeyC_bytes_ptr(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_bytes_ptr(name) != name
+	return zjFoldFieldName_C_bytes_ptr(name) != name
 }
 
 // zjDecodeFallback_C_bytes_ptr is the general keyed decoder: every member is read via
@@ -2675,7 +2857,7 @@ func zjDecodeMembers_C_bytes_ptr(l *zerojson.Lexer, v *C_bytes_ptr, a *zjArenaC_
 				*v.F = []byte(l.ReadBytesBase64())
 			}
 		default:
-			if folded := zjFieldName_C_bytes_ptr(name); folded != name {
+			if folded := zjFoldFieldName_C_bytes_ptr(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -2769,6 +2951,32 @@ func zjFieldName_C_map_bytes(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_map_bytes(name)
+}
+
+func zjFoldFieldName_C_map_bytes(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -2986,7 +3194,7 @@ func zjIsDeclaredKeyC_map_bytes(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_map_bytes(name) != name
+	return zjFoldFieldName_C_map_bytes(name) != name
 }
 
 // zjDecodeFallback_C_map_bytes is the general keyed decoder: every member is read via
@@ -3053,7 +3261,7 @@ func zjDecodeMembers_C_map_bytes(l *zerojson.Lexer, v *C_map_bytes, a *zjArenaC_
 			}
 			v.F = a.m0
 		default:
-			if folded := zjFieldName_C_map_bytes(name); folded != name {
+			if folded := zjFoldFieldName_C_map_bytes(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -3147,6 +3355,32 @@ func zjFieldName_C_map_bytes_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_map_bytes_oe(name)
+}
+
+func zjFoldFieldName_C_map_bytes_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -3364,7 +3598,7 @@ func zjIsDeclaredKeyC_map_bytes_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_map_bytes_oe(name) != name
+	return zjFoldFieldName_C_map_bytes_oe(name) != name
 }
 
 // zjDecodeFallback_C_map_bytes_oe is the general keyed decoder: every member is read via
@@ -3431,7 +3665,7 @@ func zjDecodeMembers_C_map_bytes_oe(l *zerojson.Lexer, v *C_map_bytes_oe, a *zjA
 			}
 			v.F = a.m0
 		default:
-			if folded := zjFieldName_C_map_bytes_oe(name); folded != name {
+			if folded := zjFoldFieldName_C_map_bytes_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -3525,6 +3759,32 @@ func zjFieldName_C_map_decimal(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_map_decimal(name)
+}
+
+func zjFoldFieldName_C_map_decimal(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -3742,7 +4002,7 @@ func zjIsDeclaredKeyC_map_decimal(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_map_decimal(name) != name
+	return zjFoldFieldName_C_map_decimal(name) != name
 }
 
 // zjDecodeFallback_C_map_decimal is the general keyed decoder: every member is read via
@@ -3809,7 +4069,7 @@ func zjDecodeMembers_C_map_decimal(l *zerojson.Lexer, v *C_map_decimal, a *zjAre
 			}
 			v.F = a.m0
 		default:
-			if folded := zjFieldName_C_map_decimal(name); folded != name {
+			if folded := zjFoldFieldName_C_map_decimal(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -3903,6 +4163,32 @@ func zjFieldName_C_map_decimal_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_map_decimal_oe(name)
+}
+
+func zjFoldFieldName_C_map_decimal_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -4120,7 +4406,7 @@ func zjIsDeclaredKeyC_map_decimal_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_map_decimal_oe(name) != name
+	return zjFoldFieldName_C_map_decimal_oe(name) != name
 }
 
 // zjDecodeFallback_C_map_decimal_oe is the general keyed decoder: every member is read via
@@ -4187,7 +4473,7 @@ func zjDecodeMembers_C_map_decimal_oe(l *zerojson.Lexer, v *C_map_decimal_oe, a 
 			}
 			v.F = a.m0
 		default:
-			if folded := zjFieldName_C_map_decimal_oe(name); folded != name {
+			if folded := zjFoldFieldName_C_map_decimal_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -4281,6 +4567,32 @@ func zjFieldName_C_map_int(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_map_int(name)
+}
+
+func zjFoldFieldName_C_map_int(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -4498,7 +4810,7 @@ func zjIsDeclaredKeyC_map_int(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_map_int(name) != name
+	return zjFoldFieldName_C_map_int(name) != name
 }
 
 // zjDecodeFallback_C_map_int is the general keyed decoder: every member is read via
@@ -4565,7 +4877,7 @@ func zjDecodeMembers_C_map_int(l *zerojson.Lexer, v *C_map_int, a *zjArenaC_map_
 			}
 			v.F = a.m0
 		default:
-			if folded := zjFieldName_C_map_int(name); folded != name {
+			if folded := zjFoldFieldName_C_map_int(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -4659,6 +4971,32 @@ func zjFieldName_C_map_int_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_map_int_oe(name)
+}
+
+func zjFoldFieldName_C_map_int_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -4876,7 +5214,7 @@ func zjIsDeclaredKeyC_map_int_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_map_int_oe(name) != name
+	return zjFoldFieldName_C_map_int_oe(name) != name
 }
 
 // zjDecodeFallback_C_map_int_oe is the general keyed decoder: every member is read via
@@ -4943,7 +5281,7 @@ func zjDecodeMembers_C_map_int_oe(l *zerojson.Lexer, v *C_map_int_oe, a *zjArena
 			}
 			v.F = a.m0
 		default:
-			if folded := zjFieldName_C_map_int_oe(name); folded != name {
+			if folded := zjFoldFieldName_C_map_int_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -5038,6 +5376,32 @@ func zjFieldName_C_map_set(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_map_set(name)
+}
+
+func zjFoldFieldName_C_map_set(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -5255,7 +5619,7 @@ func zjIsDeclaredKeyC_map_set(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_map_set(name) != name
+	return zjFoldFieldName_C_map_set(name) != name
 }
 
 // zjDecodeFallback_C_map_set is the general keyed decoder: every member is read via
@@ -5322,7 +5686,7 @@ func zjDecodeMembers_C_map_set(l *zerojson.Lexer, v *C_map_set, a *zjArenaC_map_
 			}
 			v.F = a.m0
 		default:
-			if folded := zjFieldName_C_map_set(name); folded != name {
+			if folded := zjFoldFieldName_C_map_set(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -5417,6 +5781,32 @@ func zjFieldName_C_map_set_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_map_set_oe(name)
+}
+
+func zjFoldFieldName_C_map_set_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -5634,7 +6024,7 @@ func zjIsDeclaredKeyC_map_set_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_map_set_oe(name) != name
+	return zjFoldFieldName_C_map_set_oe(name) != name
 }
 
 // zjDecodeFallback_C_map_set_oe is the general keyed decoder: every member is read via
@@ -5701,7 +6091,7 @@ func zjDecodeMembers_C_map_set_oe(l *zerojson.Lexer, v *C_map_set_oe, a *zjArena
 			}
 			v.F = a.m0
 		default:
-			if folded := zjFieldName_C_map_set_oe(name); folded != name {
+			if folded := zjFoldFieldName_C_map_set_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -5799,6 +6189,32 @@ func zjFieldName_C_map_struct(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_map_struct(name)
+}
+
+func zjFoldFieldName_C_map_struct(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -6017,7 +6433,7 @@ func zjIsDeclaredKeyC_map_struct(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_map_struct(name) != name
+	return zjFoldFieldName_C_map_struct(name) != name
 }
 
 // zjDecodeFallback_C_map_struct is the general keyed decoder: every member is read via
@@ -6085,7 +6501,7 @@ func zjDecodeMembers_C_map_struct(l *zerojson.Lexer, v *C_map_struct, a *zjArena
 			}
 			v.F = a.m0
 		default:
-			if folded := zjFieldName_C_map_struct(name); folded != name {
+			if folded := zjFoldFieldName_C_map_struct(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -6183,6 +6599,32 @@ func zjFieldName_C_map_struct_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_map_struct_oe(name)
+}
+
+func zjFoldFieldName_C_map_struct_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -6401,7 +6843,7 @@ func zjIsDeclaredKeyC_map_struct_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_map_struct_oe(name) != name
+	return zjFoldFieldName_C_map_struct_oe(name) != name
 }
 
 // zjDecodeFallback_C_map_struct_oe is the general keyed decoder: every member is read via
@@ -6469,7 +6911,7 @@ func zjDecodeMembers_C_map_struct_oe(l *zerojson.Lexer, v *C_map_struct_oe, a *z
 			}
 			v.F = a.m0
 		default:
-			if folded := zjFieldName_C_map_struct_oe(name); folded != name {
+			if folded := zjFoldFieldName_C_map_struct_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -6559,6 +7001,32 @@ func zjFieldName_C_slice_decimal(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_slice_decimal(name)
+}
+
+func zjFoldFieldName_C_slice_decimal(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -6784,7 +7252,7 @@ func zjIsDeclaredKeyC_slice_decimal(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_slice_decimal(name) != name
+	return zjFoldFieldName_C_slice_decimal(name) != name
 }
 
 // zjDecodeFallback_C_slice_decimal is the general keyed decoder: every member is read via
@@ -6859,7 +7327,7 @@ func zjDecodeMembers_C_slice_decimal(l *zerojson.Lexer, v *C_slice_decimal, a *z
 			}
 			v.F = a.c0
 		default:
-			if folded := zjFieldName_C_slice_decimal(name); folded != name {
+			if folded := zjFoldFieldName_C_slice_decimal(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -6949,6 +7417,32 @@ func zjFieldName_C_slice_decimal_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_slice_decimal_oe(name)
+}
+
+func zjFoldFieldName_C_slice_decimal_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -7174,7 +7668,7 @@ func zjIsDeclaredKeyC_slice_decimal_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_slice_decimal_oe(name) != name
+	return zjFoldFieldName_C_slice_decimal_oe(name) != name
 }
 
 // zjDecodeFallback_C_slice_decimal_oe is the general keyed decoder: every member is read via
@@ -7249,7 +7743,7 @@ func zjDecodeMembers_C_slice_decimal_oe(l *zerojson.Lexer, v *C_slice_decimal_oe
 			}
 			v.F = a.c0
 		default:
-			if folded := zjFieldName_C_slice_decimal_oe(name); folded != name {
+			if folded := zjFoldFieldName_C_slice_decimal_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -7339,6 +7833,32 @@ func zjFieldName_C_slice_int(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_slice_int(name)
+}
+
+func zjFoldFieldName_C_slice_int(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -7591,7 +8111,7 @@ func zjIsDeclaredKeyC_slice_int(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_slice_int(name) != name
+	return zjFoldFieldName_C_slice_int(name) != name
 }
 
 // zjDecodeFallback_C_slice_int is the general keyed decoder: every member is read via
@@ -7693,7 +8213,7 @@ func zjDecodeMembers_C_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_
 				v.F = a.c0
 			}
 		default:
-			if folded := zjFieldName_C_slice_int(name); folded != name {
+			if folded := zjFoldFieldName_C_slice_int(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -7783,6 +8303,32 @@ func zjFieldName_C_slice_int_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_slice_int_oe(name)
+}
+
+func zjFoldFieldName_C_slice_int_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -8035,7 +8581,7 @@ func zjIsDeclaredKeyC_slice_int_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_slice_int_oe(name) != name
+	return zjFoldFieldName_C_slice_int_oe(name) != name
 }
 
 // zjDecodeFallback_C_slice_int_oe is the general keyed decoder: every member is read via
@@ -8137,7 +8683,7 @@ func zjDecodeMembers_C_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjA
 				v.F = a.c0
 			}
 		default:
-			if folded := zjFieldName_C_slice_int_oe(name); folded != name {
+			if folded := zjFoldFieldName_C_slice_int_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -8235,6 +8781,32 @@ func zjFieldName_C_slice_ptrstruct(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_slice_ptrstruct(name)
+}
+
+func zjFoldFieldName_C_slice_ptrstruct(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -8468,7 +9040,7 @@ func zjIsDeclaredKeyC_slice_ptrstruct(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_slice_ptrstruct(name) != name
+	return zjFoldFieldName_C_slice_ptrstruct(name) != name
 }
 
 // zjDecodeFallback_C_slice_ptrstruct is the general keyed decoder: every member is read via
@@ -8551,7 +9123,7 @@ func zjDecodeMembers_C_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, 
 				v.F = a.c0
 			}
 		default:
-			if folded := zjFieldName_C_slice_ptrstruct(name); folded != name {
+			if folded := zjFoldFieldName_C_slice_ptrstruct(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -8649,6 +9221,32 @@ func zjFieldName_C_slice_ptrstruct_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_slice_ptrstruct_oe(name)
+}
+
+func zjFoldFieldName_C_slice_ptrstruct_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -8882,7 +9480,7 @@ func zjIsDeclaredKeyC_slice_ptrstruct_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_slice_ptrstruct_oe(name) != name
+	return zjFoldFieldName_C_slice_ptrstruct_oe(name) != name
 }
 
 // zjDecodeFallback_C_slice_ptrstruct_oe is the general keyed decoder: every member is read via
@@ -8965,7 +9563,7 @@ func zjDecodeMembers_C_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruc
 				v.F = a.c0
 			}
 		default:
-			if folded := zjFieldName_C_slice_ptrstruct_oe(name); folded != name {
+			if folded := zjFoldFieldName_C_slice_ptrstruct_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -9055,6 +9653,32 @@ func zjFieldName_C_slice_string(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_slice_string(name)
+}
+
+func zjFoldFieldName_C_slice_string(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -9307,7 +9931,7 @@ func zjIsDeclaredKeyC_slice_string(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_slice_string(name) != name
+	return zjFoldFieldName_C_slice_string(name) != name
 }
 
 // zjDecodeFallback_C_slice_string is the general keyed decoder: every member is read via
@@ -9409,7 +10033,7 @@ func zjDecodeMembers_C_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjA
 				v.F = a.c0
 			}
 		default:
-			if folded := zjFieldName_C_slice_string(name); folded != name {
+			if folded := zjFoldFieldName_C_slice_string(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -9499,6 +10123,32 @@ func zjFieldName_C_slice_string_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_slice_string_oe(name)
+}
+
+func zjFoldFieldName_C_slice_string_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -9751,7 +10401,7 @@ func zjIsDeclaredKeyC_slice_string_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_slice_string_oe(name) != name
+	return zjFoldFieldName_C_slice_string_oe(name) != name
 }
 
 // zjDecodeFallback_C_slice_string_oe is the general keyed decoder: every member is read via
@@ -9853,7 +10503,7 @@ func zjDecodeMembers_C_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, 
 				v.F = a.c0
 			}
 		default:
-			if folded := zjFieldName_C_slice_string_oe(name); folded != name {
+			if folded := zjFoldFieldName_C_slice_string_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -9947,6 +10597,32 @@ func zjFieldName_C_slice_struct(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_slice_struct(name)
+}
+
+func zjFoldFieldName_C_slice_struct(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -10178,7 +10854,7 @@ func zjIsDeclaredKeyC_slice_struct(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_slice_struct(name) != name
+	return zjFoldFieldName_C_slice_struct(name) != name
 }
 
 // zjDecodeFallback_C_slice_struct is the general keyed decoder: every member is read via
@@ -10259,7 +10935,7 @@ func zjDecodeMembers_C_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjA
 				v.F = a.c0
 			}
 		default:
-			if folded := zjFieldName_C_slice_struct(name); folded != name {
+			if folded := zjFoldFieldName_C_slice_struct(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -10353,6 +11029,32 @@ func zjFieldName_C_slice_struct_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_C_slice_struct_oe(name)
+}
+
+func zjFoldFieldName_C_slice_struct_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -10584,7 +11286,7 @@ func zjIsDeclaredKeyC_slice_struct_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_C_slice_struct_oe(name) != name
+	return zjFoldFieldName_C_slice_struct_oe(name) != name
 }
 
 // zjDecodeFallback_C_slice_struct_oe is the general keyed decoder: every member is read via
@@ -10665,7 +11367,7 @@ func zjDecodeMembers_C_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, 
 				v.F = a.c0
 			}
 		default:
-			if folded := zjFieldName_C_slice_struct_oe(name); folded != name {
+			if folded := zjFoldFieldName_C_slice_struct_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -10761,6 +11463,36 @@ func zjFieldName_E_embed_first(name string) string {
 	case "last":
 		return name
 	}
+	return zjFoldFieldName_E_embed_first(name)
+}
+
+func zjFoldFieldName_E_embed_first(name string) string {
+	var lower [10]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "created_by":
+		return "created_by"
+	case "version":
+		return "version"
+	case "last":
+		return "last"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "created_by") {
 		return "created_by"
 	}
@@ -10977,7 +11709,7 @@ func zjIsDeclaredKeyE_embed_first(name string) bool {
 	case "created_by", "version", "last":
 		return true
 	}
-	return zjFieldName_E_embed_first(name) != name
+	return zjFoldFieldName_E_embed_first(name) != name
 }
 
 // zjDecodeFallback_E_embed_first is the general keyed decoder: every member is read via
@@ -11021,7 +11753,7 @@ func zjDecodeMembers_E_embed_first(l *zerojson.Lexer, v *E_embed_first, a *zjAre
 		case "last":
 			v.Last = l.ReadString()
 		default:
-			if folded := zjFieldName_E_embed_first(name); folded != name {
+			if folded := zjFoldFieldName_E_embed_first(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -11117,6 +11849,36 @@ func zjFieldName_E_embed_last(name string) string {
 	case "version":
 		return name
 	}
+	return zjFoldFieldName_E_embed_last(name)
+}
+
+func zjFoldFieldName_E_embed_last(name string) string {
+	var lower [10]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "first":
+		return "first"
+	case "created_by":
+		return "created_by"
+	case "version":
+		return "version"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "first") {
 		return "first"
 	}
@@ -11333,7 +12095,7 @@ func zjIsDeclaredKeyE_embed_last(name string) bool {
 	case "first", "created_by", "version":
 		return true
 	}
-	return zjFieldName_E_embed_last(name) != name
+	return zjFoldFieldName_E_embed_last(name) != name
 }
 
 // zjDecodeFallback_E_embed_last is the general keyed decoder: every member is read via
@@ -11377,7 +12139,7 @@ func zjDecodeMembers_E_embed_last(l *zerojson.Lexer, v *E_embed_last, a *zjArena
 		case "version":
 			v.Audit.Version = int(l.ReadInt())
 		default:
-			if folded := zjFieldName_E_embed_last(name); folded != name {
+			if folded := zjFoldFieldName_E_embed_last(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -11464,6 +12226,34 @@ func zjFieldName_E_embed_unexported(name string) string {
 	case "own":
 		return name
 	}
+	return zjFoldFieldName_E_embed_unexported(name)
+}
+
+func zjFoldFieldName_E_embed_unexported(name string) string {
+	var lower [7]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "visible":
+		return "visible"
+	case "own":
+		return "own"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "visible") {
 		return "visible"
 	}
@@ -11665,7 +12455,7 @@ func zjIsDeclaredKeyE_embed_unexported(name string) bool {
 	case "visible", "own":
 		return true
 	}
-	return zjFieldName_E_embed_unexported(name) != name
+	return zjFoldFieldName_E_embed_unexported(name) != name
 }
 
 // zjDecodeFallback_E_embed_unexported is the general keyed decoder: every member is read via
@@ -11707,7 +12497,7 @@ func zjDecodeMembers_E_embed_unexported(l *zerojson.Lexer, v *E_embed_unexported
 		case "own":
 			v.Own = l.ReadString()
 		default:
-			if folded := zjFieldName_E_embed_unexported(name); folded != name {
+			if folded := zjFoldFieldName_E_embed_unexported(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -11789,6 +12579,32 @@ func zjFieldName_L_appender(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_appender(name)
+}
+
+func zjFoldFieldName_L_appender(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -11843,7 +12659,7 @@ func zjDecodeFallback_L_appender(l *zerojson.Lexer, v *L_appender, a *zjArenaL_a
 		case "f":
 			(&v.F).ReadZJSON(l)
 		default:
-			if folded := zjFieldName_L_appender(name); folded != name {
+			if folded := zjFoldFieldName_L_appender(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -11925,6 +12741,32 @@ func zjFieldName_L_appender_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_appender_oe(name)
+}
+
+func zjFoldFieldName_L_appender_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -11979,7 +12821,7 @@ func zjDecodeFallback_L_appender_oe(l *zerojson.Lexer, v *L_appender_oe, a *zjAr
 		case "f":
 			(&v.F).ReadZJSON(l)
 		default:
-			if folded := zjFieldName_L_appender_oe(name); folded != name {
+			if folded := zjFoldFieldName_L_appender_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -12081,6 +12923,32 @@ func zjFieldName_L_appender_ptr(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_appender_ptr(name)
+}
+
+func zjFoldFieldName_L_appender_ptr(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -12141,7 +13009,7 @@ func zjDecodeFallback_L_appender_ptr(l *zerojson.Lexer, v *L_appender_ptr, a *zj
 			}
 			v.F.ReadZJSON(l)
 		default:
-			if folded := zjFieldName_L_appender_ptr(name); folded != name {
+			if folded := zjFoldFieldName_L_appender_ptr(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -12219,6 +13087,32 @@ func zjFieldName_L_bool(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_bool(name)
+}
+
+func zjFoldFieldName_L_bool(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -12405,7 +13299,7 @@ func zjIsDeclaredKeyL_bool(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_bool(name) != name
+	return zjFoldFieldName_L_bool(name) != name
 }
 
 // zjDecodeFallback_L_bool is the general keyed decoder: every member is read via
@@ -12445,7 +13339,7 @@ func zjDecodeMembers_L_bool(l *zerojson.Lexer, v *L_bool, a *zjArenaL_bool) {
 		case "f":
 			v.F = bool(l.ReadBool())
 		default:
-			if folded := zjFieldName_L_bool(name); folded != name {
+			if folded := zjFoldFieldName_L_bool(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -12523,6 +13417,32 @@ func zjFieldName_L_bool_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_bool_oe(name)
+}
+
+func zjFoldFieldName_L_bool_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -12709,7 +13629,7 @@ func zjIsDeclaredKeyL_bool_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_bool_oe(name) != name
+	return zjFoldFieldName_L_bool_oe(name) != name
 }
 
 // zjDecodeFallback_L_bool_oe is the general keyed decoder: every member is read via
@@ -12749,7 +13669,7 @@ func zjDecodeMembers_L_bool_oe(l *zerojson.Lexer, v *L_bool_oe, a *zjArenaL_bool
 		case "f":
 			v.F = bool(l.ReadBool())
 		default:
-			if folded := zjFieldName_L_bool_oe(name); folded != name {
+			if folded := zjFoldFieldName_L_bool_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -12847,6 +13767,32 @@ func zjFieldName_L_bool_ptr(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_bool_ptr(name)
+}
+
+func zjFoldFieldName_L_bool_ptr(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -13049,7 +13995,7 @@ func zjIsDeclaredKeyL_bool_ptr(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_bool_ptr(name) != name
+	return zjFoldFieldName_L_bool_ptr(name) != name
 }
 
 // zjDecodeFallback_L_bool_ptr is the general keyed decoder: every member is read via
@@ -13101,7 +14047,7 @@ func zjDecodeMembers_L_bool_ptr(l *zerojson.Lexer, v *L_bool_ptr, a *zjArenaL_bo
 			}
 			*v.F = bool(l.ReadBool())
 		default:
-			if folded := zjFieldName_L_bool_ptr(name); folded != name {
+			if folded := zjFoldFieldName_L_bool_ptr(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -13179,6 +14125,32 @@ func zjFieldName_L_decimal(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_decimal(name)
+}
+
+func zjFoldFieldName_L_decimal(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -13365,7 +14337,7 @@ func zjIsDeclaredKeyL_decimal(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_decimal(name) != name
+	return zjFoldFieldName_L_decimal(name) != name
 }
 
 // zjDecodeFallback_L_decimal is the general keyed decoder: every member is read via
@@ -13405,7 +14377,7 @@ func zjDecodeMembers_L_decimal(l *zerojson.Lexer, v *L_decimal, a *zjArenaL_deci
 		case "f":
 			testleaf.Read(l, &v.F)
 		default:
-			if folded := zjFieldName_L_decimal(name); folded != name {
+			if folded := zjFoldFieldName_L_decimal(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -13483,6 +14455,32 @@ func zjFieldName_L_decimal_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_decimal_oe(name)
+}
+
+func zjFoldFieldName_L_decimal_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -13669,7 +14667,7 @@ func zjIsDeclaredKeyL_decimal_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_decimal_oe(name) != name
+	return zjFoldFieldName_L_decimal_oe(name) != name
 }
 
 // zjDecodeFallback_L_decimal_oe is the general keyed decoder: every member is read via
@@ -13709,7 +14707,7 @@ func zjDecodeMembers_L_decimal_oe(l *zerojson.Lexer, v *L_decimal_oe, a *zjArena
 		case "f":
 			testleaf.Read(l, &v.F)
 		default:
-			if folded := zjFieldName_L_decimal_oe(name); folded != name {
+			if folded := zjFoldFieldName_L_decimal_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -13807,6 +14805,32 @@ func zjFieldName_L_decimal_ptr(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_decimal_ptr(name)
+}
+
+func zjFoldFieldName_L_decimal_ptr(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -14009,7 +15033,7 @@ func zjIsDeclaredKeyL_decimal_ptr(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_decimal_ptr(name) != name
+	return zjFoldFieldName_L_decimal_ptr(name) != name
 }
 
 // zjDecodeFallback_L_decimal_ptr is the general keyed decoder: every member is read via
@@ -14061,7 +15085,7 @@ func zjDecodeMembers_L_decimal_ptr(l *zerojson.Lexer, v *L_decimal_ptr, a *zjAre
 			}
 			testleaf.Read(l, v.F)
 		default:
-			if folded := zjFieldName_L_decimal_ptr(name); folded != name {
+			if folded := zjFoldFieldName_L_decimal_ptr(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -14139,6 +15163,32 @@ func zjFieldName_L_enum(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_enum(name)
+}
+
+func zjFoldFieldName_L_enum(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -14330,7 +15380,7 @@ func zjIsDeclaredKeyL_enum(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_enum(name) != name
+	return zjFoldFieldName_L_enum(name) != name
 }
 
 // zjDecodeFallback_L_enum is the general keyed decoder: every member is read via
@@ -14375,7 +15425,7 @@ func zjDecodeMembers_L_enum(l *zerojson.Lexer, v *L_enum, a *zjArenaL_enum) {
 				v.F = Mode(string(b))
 			}
 		default:
-			if folded := zjFieldName_L_enum(name); folded != name {
+			if folded := zjFoldFieldName_L_enum(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -14453,6 +15503,32 @@ func zjFieldName_L_enum_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_enum_oe(name)
+}
+
+func zjFoldFieldName_L_enum_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -14644,7 +15720,7 @@ func zjIsDeclaredKeyL_enum_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_enum_oe(name) != name
+	return zjFoldFieldName_L_enum_oe(name) != name
 }
 
 // zjDecodeFallback_L_enum_oe is the general keyed decoder: every member is read via
@@ -14689,7 +15765,7 @@ func zjDecodeMembers_L_enum_oe(l *zerojson.Lexer, v *L_enum_oe, a *zjArenaL_enum
 				v.F = Mode(string(b))
 			}
 		default:
-			if folded := zjFieldName_L_enum_oe(name); folded != name {
+			if folded := zjFoldFieldName_L_enum_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -14787,6 +15863,32 @@ func zjFieldName_L_enum_ptr(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_enum_ptr(name)
+}
+
+func zjFoldFieldName_L_enum_ptr(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -14994,7 +16096,7 @@ func zjIsDeclaredKeyL_enum_ptr(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_enum_ptr(name) != name
+	return zjFoldFieldName_L_enum_ptr(name) != name
 }
 
 // zjDecodeFallback_L_enum_ptr is the general keyed decoder: every member is read via
@@ -15051,7 +16153,7 @@ func zjDecodeMembers_L_enum_ptr(l *zerojson.Lexer, v *L_enum_ptr, a *zjArenaL_en
 				*v.F = Mode(string(b))
 			}
 		default:
-			if folded := zjFieldName_L_enum_ptr(name); folded != name {
+			if folded := zjFoldFieldName_L_enum_ptr(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -15133,6 +16235,32 @@ func zjFieldName_L_float32(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_float32(name)
+}
+
+func zjFoldFieldName_L_float32(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -15319,7 +16447,7 @@ func zjIsDeclaredKeyL_float32(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_float32(name) != name
+	return zjFoldFieldName_L_float32(name) != name
 }
 
 // zjDecodeFallback_L_float32 is the general keyed decoder: every member is read via
@@ -15359,7 +16487,7 @@ func zjDecodeMembers_L_float32(l *zerojson.Lexer, v *L_float32, a *zjArenaL_floa
 		case "f":
 			v.F = float32(l.ReadFloat32())
 		default:
-			if folded := zjFieldName_L_float32(name); folded != name {
+			if folded := zjFoldFieldName_L_float32(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -15441,6 +16569,32 @@ func zjFieldName_L_float32_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_float32_oe(name)
+}
+
+func zjFoldFieldName_L_float32_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -15627,7 +16781,7 @@ func zjIsDeclaredKeyL_float32_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_float32_oe(name) != name
+	return zjFoldFieldName_L_float32_oe(name) != name
 }
 
 // zjDecodeFallback_L_float32_oe is the general keyed decoder: every member is read via
@@ -15667,7 +16821,7 @@ func zjDecodeMembers_L_float32_oe(l *zerojson.Lexer, v *L_float32_oe, a *zjArena
 		case "f":
 			v.F = float32(l.ReadFloat32())
 		default:
-			if folded := zjFieldName_L_float32_oe(name); folded != name {
+			if folded := zjFoldFieldName_L_float32_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -15769,6 +16923,32 @@ func zjFieldName_L_float32_ptr(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_float32_ptr(name)
+}
+
+func zjFoldFieldName_L_float32_ptr(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -15971,7 +17151,7 @@ func zjIsDeclaredKeyL_float32_ptr(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_float32_ptr(name) != name
+	return zjFoldFieldName_L_float32_ptr(name) != name
 }
 
 // zjDecodeFallback_L_float32_ptr is the general keyed decoder: every member is read via
@@ -16023,7 +17203,7 @@ func zjDecodeMembers_L_float32_ptr(l *zerojson.Lexer, v *L_float32_ptr, a *zjAre
 			}
 			*v.F = float32(l.ReadFloat32())
 		default:
-			if folded := zjFieldName_L_float32_ptr(name); folded != name {
+			if folded := zjFoldFieldName_L_float32_ptr(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -16105,6 +17285,32 @@ func zjFieldName_L_float64(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_float64(name)
+}
+
+func zjFoldFieldName_L_float64(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -16291,7 +17497,7 @@ func zjIsDeclaredKeyL_float64(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_float64(name) != name
+	return zjFoldFieldName_L_float64(name) != name
 }
 
 // zjDecodeFallback_L_float64 is the general keyed decoder: every member is read via
@@ -16331,7 +17537,7 @@ func zjDecodeMembers_L_float64(l *zerojson.Lexer, v *L_float64, a *zjArenaL_floa
 		case "f":
 			v.F = float64(l.ReadFloat64())
 		default:
-			if folded := zjFieldName_L_float64(name); folded != name {
+			if folded := zjFoldFieldName_L_float64(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -16413,6 +17619,32 @@ func zjFieldName_L_float64_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_float64_oe(name)
+}
+
+func zjFoldFieldName_L_float64_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -16599,7 +17831,7 @@ func zjIsDeclaredKeyL_float64_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_float64_oe(name) != name
+	return zjFoldFieldName_L_float64_oe(name) != name
 }
 
 // zjDecodeFallback_L_float64_oe is the general keyed decoder: every member is read via
@@ -16639,7 +17871,7 @@ func zjDecodeMembers_L_float64_oe(l *zerojson.Lexer, v *L_float64_oe, a *zjArena
 		case "f":
 			v.F = float64(l.ReadFloat64())
 		default:
-			if folded := zjFieldName_L_float64_oe(name); folded != name {
+			if folded := zjFoldFieldName_L_float64_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -16741,6 +17973,32 @@ func zjFieldName_L_float64_ptr(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_float64_ptr(name)
+}
+
+func zjFoldFieldName_L_float64_ptr(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -16943,7 +18201,7 @@ func zjIsDeclaredKeyL_float64_ptr(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_float64_ptr(name) != name
+	return zjFoldFieldName_L_float64_ptr(name) != name
 }
 
 // zjDecodeFallback_L_float64_ptr is the general keyed decoder: every member is read via
@@ -16995,7 +18253,7 @@ func zjDecodeMembers_L_float64_ptr(l *zerojson.Lexer, v *L_float64_ptr, a *zjAre
 			}
 			*v.F = float64(l.ReadFloat64())
 		default:
-			if folded := zjFieldName_L_float64_ptr(name); folded != name {
+			if folded := zjFoldFieldName_L_float64_ptr(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -17073,6 +18331,32 @@ func zjFieldName_L_int(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_int(name)
+}
+
+func zjFoldFieldName_L_int(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -17259,7 +18543,7 @@ func zjIsDeclaredKeyL_int(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_int(name) != name
+	return zjFoldFieldName_L_int(name) != name
 }
 
 // zjDecodeFallback_L_int is the general keyed decoder: every member is read via
@@ -17299,7 +18583,7 @@ func zjDecodeMembers_L_int(l *zerojson.Lexer, v *L_int, a *zjArenaL_int) {
 		case "f":
 			v.F = int(l.ReadInt())
 		default:
-			if folded := zjFieldName_L_int(name); folded != name {
+			if folded := zjFoldFieldName_L_int(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -17377,6 +18661,32 @@ func zjFieldName_L_int32(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_int32(name)
+}
+
+func zjFoldFieldName_L_int32(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -17563,7 +18873,7 @@ func zjIsDeclaredKeyL_int32(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_int32(name) != name
+	return zjFoldFieldName_L_int32(name) != name
 }
 
 // zjDecodeFallback_L_int32 is the general keyed decoder: every member is read via
@@ -17603,7 +18913,7 @@ func zjDecodeMembers_L_int32(l *zerojson.Lexer, v *L_int32, a *zjArenaL_int32) {
 		case "f":
 			v.F = int32(l.ReadInt32())
 		default:
-			if folded := zjFieldName_L_int32(name); folded != name {
+			if folded := zjFoldFieldName_L_int32(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -17681,6 +18991,32 @@ func zjFieldName_L_int32_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_int32_oe(name)
+}
+
+func zjFoldFieldName_L_int32_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -17867,7 +19203,7 @@ func zjIsDeclaredKeyL_int32_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_int32_oe(name) != name
+	return zjFoldFieldName_L_int32_oe(name) != name
 }
 
 // zjDecodeFallback_L_int32_oe is the general keyed decoder: every member is read via
@@ -17907,7 +19243,7 @@ func zjDecodeMembers_L_int32_oe(l *zerojson.Lexer, v *L_int32_oe, a *zjArenaL_in
 		case "f":
 			v.F = int32(l.ReadInt32())
 		default:
-			if folded := zjFieldName_L_int32_oe(name); folded != name {
+			if folded := zjFoldFieldName_L_int32_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -18005,6 +19341,32 @@ func zjFieldName_L_int32_ptr(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_int32_ptr(name)
+}
+
+func zjFoldFieldName_L_int32_ptr(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -18207,7 +19569,7 @@ func zjIsDeclaredKeyL_int32_ptr(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_int32_ptr(name) != name
+	return zjFoldFieldName_L_int32_ptr(name) != name
 }
 
 // zjDecodeFallback_L_int32_ptr is the general keyed decoder: every member is read via
@@ -18259,7 +19621,7 @@ func zjDecodeMembers_L_int32_ptr(l *zerojson.Lexer, v *L_int32_ptr, a *zjArenaL_
 			}
 			*v.F = int32(l.ReadInt32())
 		default:
-			if folded := zjFieldName_L_int32_ptr(name); folded != name {
+			if folded := zjFoldFieldName_L_int32_ptr(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -18337,6 +19699,32 @@ func zjFieldName_L_int_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_int_oe(name)
+}
+
+func zjFoldFieldName_L_int_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -18523,7 +19911,7 @@ func zjIsDeclaredKeyL_int_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_int_oe(name) != name
+	return zjFoldFieldName_L_int_oe(name) != name
 }
 
 // zjDecodeFallback_L_int_oe is the general keyed decoder: every member is read via
@@ -18563,7 +19951,7 @@ func zjDecodeMembers_L_int_oe(l *zerojson.Lexer, v *L_int_oe, a *zjArenaL_int_oe
 		case "f":
 			v.F = int(l.ReadInt())
 		default:
-			if folded := zjFieldName_L_int_oe(name); folded != name {
+			if folded := zjFoldFieldName_L_int_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -18661,6 +20049,32 @@ func zjFieldName_L_int_ptr(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_int_ptr(name)
+}
+
+func zjFoldFieldName_L_int_ptr(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -18863,7 +20277,7 @@ func zjIsDeclaredKeyL_int_ptr(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_int_ptr(name) != name
+	return zjFoldFieldName_L_int_ptr(name) != name
 }
 
 // zjDecodeFallback_L_int_ptr is the general keyed decoder: every member is read via
@@ -18915,7 +20329,7 @@ func zjDecodeMembers_L_int_ptr(l *zerojson.Lexer, v *L_int_ptr, a *zjArenaL_int_
 			}
 			*v.F = int(l.ReadInt())
 		default:
-			if folded := zjFieldName_L_int_ptr(name); folded != name {
+			if folded := zjFoldFieldName_L_int_ptr(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -19000,6 +20414,32 @@ func zjFieldName_L_marshaler(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_marshaler(name)
+}
+
+func zjFoldFieldName_L_marshaler(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -19058,7 +20498,7 @@ func zjDecodeFallback_L_marshaler(l *zerojson.Lexer, v *L_marshaler, a *zjArenaL
 				}
 			}
 		default:
-			if folded := zjFieldName_L_marshaler(name); folded != name {
+			if folded := zjFoldFieldName_L_marshaler(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -19143,6 +20583,32 @@ func zjFieldName_L_marshaler_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_marshaler_oe(name)
+}
+
+func zjFoldFieldName_L_marshaler_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -19201,7 +20667,7 @@ func zjDecodeFallback_L_marshaler_oe(l *zerojson.Lexer, v *L_marshaler_oe, a *zj
 				}
 			}
 		default:
-			if folded := zjFieldName_L_marshaler_oe(name); folded != name {
+			if folded := zjFoldFieldName_L_marshaler_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -19306,6 +20772,32 @@ func zjFieldName_L_marshaler_ptr(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_marshaler_ptr(name)
+}
+
+func zjFoldFieldName_L_marshaler_ptr(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -19370,7 +20862,7 @@ func zjDecodeFallback_L_marshaler_ptr(l *zerojson.Lexer, v *L_marshaler_ptr, a *
 				}
 			}
 		default:
-			if folded := zjFieldName_L_marshaler_ptr(name); folded != name {
+			if folded := zjFoldFieldName_L_marshaler_ptr(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -19448,6 +20940,32 @@ func zjFieldName_L_quotedint(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_quotedint(name)
+}
+
+func zjFoldFieldName_L_quotedint(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -19634,7 +21152,7 @@ func zjIsDeclaredKeyL_quotedint(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_quotedint(name) != name
+	return zjFoldFieldName_L_quotedint(name) != name
 }
 
 // zjDecodeFallback_L_quotedint is the general keyed decoder: every member is read via
@@ -19674,7 +21192,7 @@ func zjDecodeMembers_L_quotedint(l *zerojson.Lexer, v *L_quotedint, a *zjArenaL_
 		case "f":
 			v.F = StrInt64(l.ReadQuotedOrBareInt64())
 		default:
-			if folded := zjFieldName_L_quotedint(name); folded != name {
+			if folded := zjFoldFieldName_L_quotedint(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -19752,6 +21270,32 @@ func zjFieldName_L_quotedint_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_quotedint_oe(name)
+}
+
+func zjFoldFieldName_L_quotedint_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -19938,7 +21482,7 @@ func zjIsDeclaredKeyL_quotedint_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_quotedint_oe(name) != name
+	return zjFoldFieldName_L_quotedint_oe(name) != name
 }
 
 // zjDecodeFallback_L_quotedint_oe is the general keyed decoder: every member is read via
@@ -19978,7 +21522,7 @@ func zjDecodeMembers_L_quotedint_oe(l *zerojson.Lexer, v *L_quotedint_oe, a *zjA
 		case "f":
 			v.F = StrInt64(l.ReadQuotedOrBareInt64())
 		default:
-			if folded := zjFieldName_L_quotedint_oe(name); folded != name {
+			if folded := zjFoldFieldName_L_quotedint_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -20076,6 +21620,32 @@ func zjFieldName_L_quotedint_ptr(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_quotedint_ptr(name)
+}
+
+func zjFoldFieldName_L_quotedint_ptr(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -20278,7 +21848,7 @@ func zjIsDeclaredKeyL_quotedint_ptr(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_quotedint_ptr(name) != name
+	return zjFoldFieldName_L_quotedint_ptr(name) != name
 }
 
 // zjDecodeFallback_L_quotedint_ptr is the general keyed decoder: every member is read via
@@ -20330,7 +21900,7 @@ func zjDecodeMembers_L_quotedint_ptr(l *zerojson.Lexer, v *L_quotedint_ptr, a *z
 			}
 			*v.F = StrInt64(l.ReadQuotedOrBareInt64())
 		default:
-			if folded := zjFieldName_L_quotedint_ptr(name); folded != name {
+			if folded := zjFoldFieldName_L_quotedint_ptr(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -20408,6 +21978,32 @@ func zjFieldName_L_string(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_string(name)
+}
+
+func zjFoldFieldName_L_string(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -20594,7 +22190,7 @@ func zjIsDeclaredKeyL_string(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_string(name) != name
+	return zjFoldFieldName_L_string(name) != name
 }
 
 // zjDecodeFallback_L_string is the general keyed decoder: every member is read via
@@ -20634,7 +22230,7 @@ func zjDecodeMembers_L_string(l *zerojson.Lexer, v *L_string, a *zjArenaL_string
 		case "f":
 			v.F = l.ReadString()
 		default:
-			if folded := zjFieldName_L_string(name); folded != name {
+			if folded := zjFoldFieldName_L_string(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -20712,6 +22308,32 @@ func zjFieldName_L_string_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_string_oe(name)
+}
+
+func zjFoldFieldName_L_string_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -20898,7 +22520,7 @@ func zjIsDeclaredKeyL_string_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_string_oe(name) != name
+	return zjFoldFieldName_L_string_oe(name) != name
 }
 
 // zjDecodeFallback_L_string_oe is the general keyed decoder: every member is read via
@@ -20938,7 +22560,7 @@ func zjDecodeMembers_L_string_oe(l *zerojson.Lexer, v *L_string_oe, a *zjArenaL_
 		case "f":
 			v.F = l.ReadString()
 		default:
-			if folded := zjFieldName_L_string_oe(name); folded != name {
+			if folded := zjFoldFieldName_L_string_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -21036,6 +22658,32 @@ func zjFieldName_L_string_ptr(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_string_ptr(name)
+}
+
+func zjFoldFieldName_L_string_ptr(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -21238,7 +22886,7 @@ func zjIsDeclaredKeyL_string_ptr(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_string_ptr(name) != name
+	return zjFoldFieldName_L_string_ptr(name) != name
 }
 
 // zjDecodeFallback_L_string_ptr is the general keyed decoder: every member is read via
@@ -21290,7 +22938,7 @@ func zjDecodeMembers_L_string_ptr(l *zerojson.Lexer, v *L_string_ptr, a *zjArena
 			}
 			*v.F = l.ReadString()
 		default:
-			if folded := zjFieldName_L_string_ptr(name); folded != name {
+			if folded := zjFoldFieldName_L_string_ptr(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -21372,6 +23020,32 @@ func zjFieldName_L_text(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_text(name)
+}
+
+func zjFoldFieldName_L_text(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -21424,7 +23098,7 @@ func zjDecodeFallback_L_text(l *zerojson.Lexer, v *L_text, a *zjArenaL_text) {
 				}
 			}
 		default:
-			if folded := zjFieldName_L_text(name); folded != name {
+			if folded := zjFoldFieldName_L_text(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -21506,6 +23180,32 @@ func zjFieldName_L_text_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_text_oe(name)
+}
+
+func zjFoldFieldName_L_text_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -21558,7 +23258,7 @@ func zjDecodeFallback_L_text_oe(l *zerojson.Lexer, v *L_text_oe, a *zjArenaL_tex
 				}
 			}
 		default:
-			if folded := zjFieldName_L_text_oe(name); folded != name {
+			if folded := zjFoldFieldName_L_text_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -21660,6 +23360,32 @@ func zjFieldName_L_text_ptr(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_text_ptr(name)
+}
+
+func zjFoldFieldName_L_text_ptr(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -21724,7 +23450,7 @@ func zjDecodeFallback_L_text_ptr(l *zerojson.Lexer, v *L_text_ptr, a *zjArenaL_t
 				}
 			}
 		default:
-			if folded := zjFieldName_L_text_ptr(name); folded != name {
+			if folded := zjFoldFieldName_L_text_ptr(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -21806,6 +23532,32 @@ func zjFieldName_L_time(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_time(name)
+}
+
+func zjFoldFieldName_L_time(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -21992,7 +23744,7 @@ func zjIsDeclaredKeyL_time(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_time(name) != name
+	return zjFoldFieldName_L_time(name) != name
 }
 
 // zjDecodeFallback_L_time is the general keyed decoder: every member is read via
@@ -22032,7 +23784,7 @@ func zjDecodeMembers_L_time(l *zerojson.Lexer, v *L_time, a *zjArenaL_time) {
 		case "f":
 			v.F = l.ReadTime()
 		default:
-			if folded := zjFieldName_L_time(name); folded != name {
+			if folded := zjFoldFieldName_L_time(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -22114,6 +23866,32 @@ func zjFieldName_L_time_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_time_oe(name)
+}
+
+func zjFoldFieldName_L_time_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -22300,7 +24078,7 @@ func zjIsDeclaredKeyL_time_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_time_oe(name) != name
+	return zjFoldFieldName_L_time_oe(name) != name
 }
 
 // zjDecodeFallback_L_time_oe is the general keyed decoder: every member is read via
@@ -22340,7 +24118,7 @@ func zjDecodeMembers_L_time_oe(l *zerojson.Lexer, v *L_time_oe, a *zjArenaL_time
 		case "f":
 			v.F = l.ReadTime()
 		default:
-			if folded := zjFieldName_L_time_oe(name); folded != name {
+			if folded := zjFoldFieldName_L_time_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -22442,6 +24220,32 @@ func zjFieldName_L_time_ptr(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_time_ptr(name)
+}
+
+func zjFoldFieldName_L_time_ptr(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -22644,7 +24448,7 @@ func zjIsDeclaredKeyL_time_ptr(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_time_ptr(name) != name
+	return zjFoldFieldName_L_time_ptr(name) != name
 }
 
 // zjDecodeFallback_L_time_ptr is the general keyed decoder: every member is read via
@@ -22696,7 +24500,7 @@ func zjDecodeMembers_L_time_ptr(l *zerojson.Lexer, v *L_time_ptr, a *zjArenaL_ti
 			}
 			*v.F = l.ReadTime()
 		default:
-			if folded := zjFieldName_L_time_ptr(name); folded != name {
+			if folded := zjFoldFieldName_L_time_ptr(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -22774,6 +24578,32 @@ func zjFieldName_L_uint16(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_uint16(name)
+}
+
+func zjFoldFieldName_L_uint16(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -22960,7 +24790,7 @@ func zjIsDeclaredKeyL_uint16(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_uint16(name) != name
+	return zjFoldFieldName_L_uint16(name) != name
 }
 
 // zjDecodeFallback_L_uint16 is the general keyed decoder: every member is read via
@@ -23000,7 +24830,7 @@ func zjDecodeMembers_L_uint16(l *zerojson.Lexer, v *L_uint16, a *zjArenaL_uint16
 		case "f":
 			v.F = uint16(l.ReadUint16())
 		default:
-			if folded := zjFieldName_L_uint16(name); folded != name {
+			if folded := zjFoldFieldName_L_uint16(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -23078,6 +24908,32 @@ func zjFieldName_L_uint16_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_uint16_oe(name)
+}
+
+func zjFoldFieldName_L_uint16_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -23264,7 +25120,7 @@ func zjIsDeclaredKeyL_uint16_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_uint16_oe(name) != name
+	return zjFoldFieldName_L_uint16_oe(name) != name
 }
 
 // zjDecodeFallback_L_uint16_oe is the general keyed decoder: every member is read via
@@ -23304,7 +25160,7 @@ func zjDecodeMembers_L_uint16_oe(l *zerojson.Lexer, v *L_uint16_oe, a *zjArenaL_
 		case "f":
 			v.F = uint16(l.ReadUint16())
 		default:
-			if folded := zjFieldName_L_uint16_oe(name); folded != name {
+			if folded := zjFoldFieldName_L_uint16_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -23402,6 +25258,32 @@ func zjFieldName_L_uint16_ptr(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_uint16_ptr(name)
+}
+
+func zjFoldFieldName_L_uint16_ptr(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -23604,7 +25486,7 @@ func zjIsDeclaredKeyL_uint16_ptr(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_uint16_ptr(name) != name
+	return zjFoldFieldName_L_uint16_ptr(name) != name
 }
 
 // zjDecodeFallback_L_uint16_ptr is the general keyed decoder: every member is read via
@@ -23656,7 +25538,7 @@ func zjDecodeMembers_L_uint16_ptr(l *zerojson.Lexer, v *L_uint16_ptr, a *zjArena
 			}
 			*v.F = uint16(l.ReadUint16())
 		default:
-			if folded := zjFieldName_L_uint16_ptr(name); folded != name {
+			if folded := zjFoldFieldName_L_uint16_ptr(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -23734,6 +25616,32 @@ func zjFieldName_L_uuid(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_uuid(name)
+}
+
+func zjFoldFieldName_L_uuid(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -23920,7 +25828,7 @@ func zjIsDeclaredKeyL_uuid(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_uuid(name) != name
+	return zjFoldFieldName_L_uuid(name) != name
 }
 
 // zjDecodeFallback_L_uuid is the general keyed decoder: every member is read via
@@ -23960,7 +25868,7 @@ func zjDecodeMembers_L_uuid(l *zerojson.Lexer, v *L_uuid, a *zjArenaL_uuid) {
 		case "f":
 			v.F = uuid.UUID(l.ReadUUIDBytes())
 		default:
-			if folded := zjFieldName_L_uuid(name); folded != name {
+			if folded := zjFoldFieldName_L_uuid(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -24038,6 +25946,32 @@ func zjFieldName_L_uuid_oe(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_uuid_oe(name)
+}
+
+func zjFoldFieldName_L_uuid_oe(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -24224,7 +26158,7 @@ func zjIsDeclaredKeyL_uuid_oe(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_uuid_oe(name) != name
+	return zjFoldFieldName_L_uuid_oe(name) != name
 }
 
 // zjDecodeFallback_L_uuid_oe is the general keyed decoder: every member is read via
@@ -24264,7 +26198,7 @@ func zjDecodeMembers_L_uuid_oe(l *zerojson.Lexer, v *L_uuid_oe, a *zjArenaL_uuid
 		case "f":
 			v.F = uuid.UUID(l.ReadUUIDBytes())
 		default:
-			if folded := zjFieldName_L_uuid_oe(name); folded != name {
+			if folded := zjFoldFieldName_L_uuid_oe(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -24362,6 +26296,32 @@ func zjFieldName_L_uuid_ptr(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_L_uuid_ptr(name)
+}
+
+func zjFoldFieldName_L_uuid_ptr(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -24564,7 +26524,7 @@ func zjIsDeclaredKeyL_uuid_ptr(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_L_uuid_ptr(name) != name
+	return zjFoldFieldName_L_uuid_ptr(name) != name
 }
 
 // zjDecodeFallback_L_uuid_ptr is the general keyed decoder: every member is read via
@@ -24616,7 +26576,7 @@ func zjDecodeMembers_L_uuid_ptr(l *zerojson.Lexer, v *L_uuid_ptr, a *zjArenaL_uu
 			}
 			*v.F = uuid.UUID(l.ReadUUIDBytes())
 		default:
-			if folded := zjFieldName_L_uuid_ptr(name); folded != name {
+			if folded := zjFoldFieldName_L_uuid_ptr(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -24698,6 +26658,32 @@ func zjFieldName_N_any(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_N_any(name)
+}
+
+func zjFoldFieldName_N_any(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -24902,7 +26888,7 @@ func zjIsDeclaredKeyN_any(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_N_any(name) != name
+	return zjFoldFieldName_N_any(name) != name
 }
 
 // zjDecodeFallback_N_any is the general keyed decoder: every member is read via
@@ -24956,7 +26942,7 @@ func zjDecodeMembers_N_any(l *zerojson.Lexer, v *N_any, a *zjArenaN_any) {
 				v.F = l.ReadInterface()
 			}
 		default:
-			if folded := zjFieldName_N_any(name); folded != name {
+			if folded := zjFoldFieldName_N_any(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -25041,6 +27027,32 @@ func zjFieldName_N_rawmsg(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_N_rawmsg(name)
+}
+
+func zjFoldFieldName_N_rawmsg(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -25099,7 +27111,7 @@ func zjDecodeFallback_N_rawmsg(l *zerojson.Lexer, v *N_rawmsg, a *zjArenaN_rawms
 				}
 			}
 		default:
-			if folded := zjFieldName_N_rawmsg(name); folded != name {
+			if folded := zjFoldFieldName_N_rawmsg(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -25182,6 +27194,32 @@ func zjFieldName_N_struct(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_N_struct(name)
+}
+
+func zjFoldFieldName_N_struct(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -25371,7 +27409,7 @@ func zjIsDeclaredKeyN_struct(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_N_struct(name) != name
+	return zjFoldFieldName_N_struct(name) != name
 }
 
 // zjDecodeFallback_N_struct is the general keyed decoder: every member is read via
@@ -25411,7 +27449,7 @@ func zjDecodeMembers_N_struct(l *zerojson.Lexer, v *N_struct, a *zjArenaN_struct
 		case "f":
 			zjDecode_Inner(l, &v.F, &a.a0)
 		default:
-			if folded := zjFieldName_N_struct(name); folded != name {
+			if folded := zjFoldFieldName_N_struct(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -25514,6 +27552,32 @@ func zjFieldName_N_struct_ptr(name string) string {
 	case "f":
 		return name
 	}
+	return zjFoldFieldName_N_struct_ptr(name)
+}
+
+func zjFoldFieldName_N_struct_ptr(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "f":
+		return "f"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "f") {
 		return "f"
 	}
@@ -25719,7 +27783,7 @@ func zjIsDeclaredKeyN_struct_ptr(name string) bool {
 	case "f":
 		return true
 	}
-	return zjFieldName_N_struct_ptr(name) != name
+	return zjFoldFieldName_N_struct_ptr(name) != name
 }
 
 // zjDecodeFallback_N_struct_ptr is the general keyed decoder: every member is read via
@@ -25771,7 +27835,7 @@ func zjDecodeMembers_N_struct_ptr(l *zerojson.Lexer, v *N_struct_ptr, a *zjArena
 			}
 			zjDecode_Inner(l, v.F, &a.a0)
 		default:
-			if folded := zjFieldName_N_struct_ptr(name); folded != name {
+			if folded := zjFoldFieldName_N_struct_ptr(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -25858,6 +27922,34 @@ func zjFieldName_T_invalid_tagname(name string) string {
 	case "ok":
 		return name
 	}
+	return zjFoldFieldName_T_invalid_tagname(name)
+}
+
+func zjFoldFieldName_T_invalid_tagname(name string) string {
+	var lower [2]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "a":
+		return "A"
+	case "ok":
+		return "ok"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "A") {
 		return "A"
 	}
@@ -26059,7 +28151,7 @@ func zjIsDeclaredKeyT_invalid_tagname(name string) bool {
 	case "A", "ok":
 		return true
 	}
-	return zjFieldName_T_invalid_tagname(name) != name
+	return zjFoldFieldName_T_invalid_tagname(name) != name
 }
 
 // zjDecodeFallback_T_invalid_tagname is the general keyed decoder: every member is read via
@@ -26101,7 +28193,7 @@ func zjDecodeMembers_T_invalid_tagname(l *zerojson.Lexer, v *T_invalid_tagname, 
 		case "ok":
 			v.B = int(l.ReadInt())
 		default:
-			if folded := zjFieldName_T_invalid_tagname(name); folded != name {
+			if folded := zjFoldFieldName_T_invalid_tagname(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -26188,6 +28280,34 @@ func zjFieldName_T_string_opt(name string) string {
 	case "a":
 		return name
 	}
+	return zjFoldFieldName_T_string_opt(name)
+}
+
+func zjFoldFieldName_T_string_opt(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "c":
+		return "c"
+	case "a":
+		return "a"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "c") {
 		return "c"
 	}
@@ -26395,7 +28515,7 @@ func zjIsDeclaredKeyT_string_opt(name string) bool {
 	case "c", "a":
 		return true
 	}
-	return zjFieldName_T_string_opt(name) != name
+	return zjFoldFieldName_T_string_opt(name) != name
 }
 
 // zjDecodeFallback_T_string_opt is the general keyed decoder: every member is read via
@@ -26443,7 +28563,7 @@ func zjDecodeMembers_T_string_opt(l *zerojson.Lexer, v *T_string_opt, a *zjArena
 				v.A = int64(l.ReadQuotedInt64())
 			}
 		default:
-			if folded := zjFieldName_T_string_opt(name); folded != name {
+			if folded := zjFoldFieldName_T_string_opt(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -26555,6 +28675,36 @@ func zjFieldName_Z_omitzero(name string) string {
 	case "n":
 		return name
 	}
+	return zjFoldFieldName_Z_omitzero(name)
+}
+
+func zjFoldFieldName_Z_omitzero(name string) string {
+	var lower [2]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "w":
+		return "w"
+	case "es":
+		return "es"
+	case "n":
+		return "n"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "w") {
 		return "w"
 	}
@@ -26837,7 +28987,7 @@ func zjIsDeclaredKeyZ_omitzero(name string) bool {
 	case "w", "es", "n":
 		return true
 	}
-	return zjFieldName_Z_omitzero(name) != name
+	return zjFoldFieldName_Z_omitzero(name) != name
 }
 
 // zjDecodeFallback_Z_omitzero is the general keyed decoder: every member is read via
@@ -26943,7 +29093,7 @@ func zjDecodeMembers_Z_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_om
 		case "n":
 			v.N = int(l.ReadInt())
 		default:
-			if folded := zjFieldName_Z_omitzero(name); folded != name {
+			if folded := zjFoldFieldName_Z_omitzero(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -27030,6 +29180,34 @@ func zjFieldName_Inner(name string) string {
 	case "b":
 		return name
 	}
+	return zjFoldFieldName_Inner(name)
+}
+
+func zjFoldFieldName_Inner(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "a":
+		return "a"
+	case "b":
+		return "b"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "a") {
 		return "a"
 	}
@@ -27231,7 +29409,7 @@ func zjIsDeclaredKeyInner(name string) bool {
 	case "a", "b":
 		return true
 	}
-	return zjFieldName_Inner(name) != name
+	return zjFoldFieldName_Inner(name) != name
 }
 
 // zjDecodeFallback_Inner is the general keyed decoder: every member is read via
@@ -27273,7 +29451,7 @@ func zjDecodeMembers_Inner(l *zerojson.Lexer, v *Inner, a *zjArenaInner) {
 		case "b":
 			v.B = l.ReadString()
 		default:
-			if folded := zjFieldName_Inner(name); folded != name {
+			if folded := zjFoldFieldName_Inner(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}

@@ -154,6 +154,42 @@ func zjFieldName_Ext(name string) string {
 	case "sub":
 		return name
 	}
+	return zjFoldFieldName_Ext(name)
+}
+
+func zjFoldFieldName_Ext(name string) string {
+	var lower [5]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "name":
+		return "name"
+	case "kind":
+		return "kind"
+	case "n":
+		return "n"
+	case "score":
+		return "score"
+	case "tags":
+		return "tags"
+	case "sub":
+		return "sub"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "name") {
 		return "name"
 	}
@@ -501,7 +537,7 @@ func zjIsDeclaredKeyExt(name string) bool {
 	case "name", "kind", "n", "score", "tags", "sub":
 		return true
 	}
-	return zjFieldName_Ext(name) != name
+	return zjFoldFieldName_Ext(name) != name
 }
 
 // zjDecodeFallback_Ext is the general keyed decoder: every member is read via
@@ -630,7 +666,7 @@ func zjDecodeMembers_Ext(l *zerojson.Lexer, v *Ext, a *zjArenaExt) {
 			}
 			zjDecode_Sub(l, v.Sub, &a.a5)
 		default:
-			if folded := zjFieldName_Ext(name); folded != name {
+			if folded := zjFoldFieldName_Ext(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -1082,6 +1118,34 @@ func zjFieldName_Sub(name string) string {
 	case "b":
 		return name
 	}
+	return zjFoldFieldName_Sub(name)
+}
+
+func zjFoldFieldName_Sub(name string) string {
+	var lower [1]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "a":
+		return "a"
+	case "b":
+		return "b"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "a") {
 		return "a"
 	}
@@ -1349,7 +1413,7 @@ func zjIsDeclaredKeySub(name string) bool {
 	case "a", "b":
 		return true
 	}
-	return zjFieldName_Sub(name) != name
+	return zjFoldFieldName_Sub(name) != name
 }
 
 // zjDecodeFallback_Sub is the general keyed decoder: every member is read via
@@ -1453,7 +1517,7 @@ func zjDecodeMembers_Sub(l *zerojson.Lexer, v *Sub, a *zjArenaSub) {
 				v.B = a.c1
 			}
 		default:
-			if folded := zjFieldName_Sub(name); folded != name {
+			if folded := zjFoldFieldName_Sub(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}

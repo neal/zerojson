@@ -283,7 +283,7 @@ func (g *generator) emitOrderedDeclaredKey(ti typeInfo) {
 	g.p("\tcase %s:", strings.Join(names, ", "))
 	g.p("\t\treturn true")
 	g.p("\t}")
-	g.p("\treturn zjFieldName_%s(name) != name", n)
+	g.p("\treturn %s(name) != name", foldFieldNameFunc(n))
 	g.p("}")
 }
 

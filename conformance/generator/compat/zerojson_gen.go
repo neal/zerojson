@@ -90,6 +90,36 @@ func zjFieldName_Point(name string) string {
 	case "name":
 		return name
 	}
+	return zjFoldFieldName_Point(name)
+}
+
+func zjFoldFieldName_Point(name string) string {
+	var lower [4]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "x":
+		return "x"
+	case "y":
+		return "y"
+	case "name":
+		return "name"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "x") {
 		return "x"
 	}
@@ -306,7 +336,7 @@ func zjIsDeclaredKeyPoint(name string) bool {
 	case "x", "y", "name":
 		return true
 	}
-	return zjFieldName_Point(name) != name
+	return zjFoldFieldName_Point(name) != name
 }
 
 // zjDecodeFallback_Point is the general keyed decoder: every member is read via
@@ -350,7 +380,7 @@ func zjDecodeMembers_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
 		case "name":
 			v.Name = l.ReadString()
 		default:
-			if folded := zjFieldName_Point(name); folded != name {
+			if folded := zjFoldFieldName_Point(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
