@@ -180,15 +180,32 @@ func zjDecodeOrdered_Sample(l *zerojson.Lexer, v *Sample, a *zjArenaSample) bool
 	}
 	expected := 0
 	for {
-		memberPos := l.Pos()
-		matched := -1
-		for k := expected; k < 1; k++ {
-			if zjTryOrderedKeySample(l, k) {
-				matched = k
-				break
-			}
+		matched := expected
+		if !zjTryOrderedKeySample(l, expected) {
+			matched = zjSeekOrderedKeySample(l, expected)
 		}
-		if matched < 0 {
+		switch {
+		case matched >= 0:
+			if !zjDecodeOrderedField_Sample(l, v, a, matched) {
+				return false
+			}
+			expected = matched + 1
+		case matched == -3:
+			// A name matching no declared field, even folded as the keyed
+			// decoder folds it, is unknown and safe to skip inline (the
+			// projection-struct fast path).
+			l.Skip()
+			if l.Err() != nil {
+				return false
+			}
+		case matched == -2:
+			// A declared name out of order, repeated, or matching only
+			// under case folding: the keyed decoder's last-wins/general
+			// handling takes over from this member.
+			zjDecodeMembers_Sample(l, v, a)
+			return l.Err() == nil
+		default:
+			memberPos := l.Pos()
 			// A whitespace-padded empty object (`{ }`) is valid but
 			// cannot literal-match the compact fast path. Bail without
 			// asking ReadKey to parse the closing brace as a string;
@@ -196,18 +213,11 @@ func zjDecodeOrdered_Sample(l *zerojson.Lexer, v *Sample, a *zjArenaSample) bool
 			if l.IsDelim('}') {
 				return false
 			}
-			// No declared field k >= expected literal-matched at this
-			// position. Read the key properly (ReadKey tolerates
-			// whitespace and unescapes, unlike the word-compare above)
-			// and check its *name*, not its byte position: a declared
-			// name here — regardless of index — means duplicate,
-			// out-of-order, non-compact syntax around an otherwise
-			// valid key, or an escaped key that decodes to a declared
-			// name. The keyed decoder's last-wins/general handling
-			// takes over from this member. Only a name matching no
-			// declared field (folded as the keyed decoder folds it) is
-			// genuinely unknown and safe to skip inline (the
-			// projection-struct fast path).
+			// Not a plain key: whitespace around it, an escape, or a
+			// control or non-ASCII byte. Read it properly and check its
+			// *name*: a declared name (duplicate, out of order, folded,
+			// or escaped) hands the member to the keyed decoder; only an
+			// unknown name is skipped inline.
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
@@ -221,11 +231,6 @@ func zjDecodeOrdered_Sample(l *zerojson.Lexer, v *Sample, a *zjArenaSample) bool
 			if l.Err() != nil {
 				return false
 			}
-		} else {
-			if !zjDecodeOrderedField_Sample(l, v, a, matched) {
-				return false
-			}
-			expected = matched + 1
 		}
 		d, p := l.DataAndPos()
 		if p >= len(d) {
@@ -355,6 +360,37 @@ func zjTryOrderedKeySample(l *zerojson.Lexer, k int) bool {
 		return true
 	}
 	return false
+}
+
+// zjSeekOrderedKeySample classifies a plain key that is not field from's literal:
+// k >= from is the field it names, consumed; -2 a declared name the
+// keyed loop must take, not consumed; -3 an unknown name, consumed;
+// -1 not a plain key, not consumed.
+func zjSeekOrderedKeySample(l *zerojson.Lexer, from int) int {
+	key, next, ok := l.PlainKey()
+	if !ok {
+		return -1
+	}
+	k := -1
+	switch string(key) {
+	case "Values":
+		k = 0
+	}
+	if k >= from {
+		l.SetPos(next)
+		return k
+	}
+	if k >= 0 {
+		return -2
+	}
+	// The names are ASCII, so a key folds only onto one of its length.
+	if len(key) <= 6 {
+		if name := string(key); zjFoldFieldName_Sample(name) != name {
+			return -2
+		}
+	}
+	l.SetPos(next)
+	return -3
 }
 
 func zjIsDeclaredKeySample(name string) bool {
@@ -717,15 +753,32 @@ func zjDecodeOrdered_Item(l *zerojson.Lexer, v *Item, a *zjArenaItem) bool {
 	}
 	expected := 0
 	for {
-		memberPos := l.Pos()
-		matched := -1
-		for k := expected; k < 3; k++ {
-			if zjTryOrderedKeyItem(l, k) {
-				matched = k
-				break
-			}
+		matched := expected
+		if !zjTryOrderedKeyItem(l, expected) {
+			matched = zjSeekOrderedKeyItem(l, expected)
 		}
-		if matched < 0 {
+		switch {
+		case matched >= 0:
+			if !zjDecodeOrderedField_Item(l, v, a, matched) {
+				return false
+			}
+			expected = matched + 1
+		case matched == -3:
+			// A name matching no declared field, even folded as the keyed
+			// decoder folds it, is unknown and safe to skip inline (the
+			// projection-struct fast path).
+			l.Skip()
+			if l.Err() != nil {
+				return false
+			}
+		case matched == -2:
+			// A declared name out of order, repeated, or matching only
+			// under case folding: the keyed decoder's last-wins/general
+			// handling takes over from this member.
+			zjDecodeMembers_Item(l, v, a)
+			return l.Err() == nil
+		default:
+			memberPos := l.Pos()
 			// A whitespace-padded empty object (`{ }`) is valid but
 			// cannot literal-match the compact fast path. Bail without
 			// asking ReadKey to parse the closing brace as a string;
@@ -733,18 +786,11 @@ func zjDecodeOrdered_Item(l *zerojson.Lexer, v *Item, a *zjArenaItem) bool {
 			if l.IsDelim('}') {
 				return false
 			}
-			// No declared field k >= expected literal-matched at this
-			// position. Read the key properly (ReadKey tolerates
-			// whitespace and unescapes, unlike the word-compare above)
-			// and check its *name*, not its byte position: a declared
-			// name here — regardless of index — means duplicate,
-			// out-of-order, non-compact syntax around an otherwise
-			// valid key, or an escaped key that decodes to a declared
-			// name. The keyed decoder's last-wins/general handling
-			// takes over from this member. Only a name matching no
-			// declared field (folded as the keyed decoder folds it) is
-			// genuinely unknown and safe to skip inline (the
-			// projection-struct fast path).
+			// Not a plain key: whitespace around it, an escape, or a
+			// control or non-ASCII byte. Read it properly and check its
+			// *name*: a declared name (duplicate, out of order, folded,
+			// or escaped) hands the member to the keyed decoder; only an
+			// unknown name is skipped inline.
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
@@ -758,11 +804,6 @@ func zjDecodeOrdered_Item(l *zerojson.Lexer, v *Item, a *zjArenaItem) bool {
 			if l.Err() != nil {
 				return false
 			}
-		} else {
-			if !zjDecodeOrderedField_Item(l, v, a, matched) {
-				return false
-			}
-			expected = matched + 1
 		}
 		d, p := l.DataAndPos()
 		if p >= len(d) {
@@ -854,6 +895,41 @@ func zjTryOrderedKeyItem(l *zerojson.Lexer, k int) bool {
 		return true
 	}
 	return false
+}
+
+// zjSeekOrderedKeyItem classifies a plain key that is not field from's literal:
+// k >= from is the field it names, consumed; -2 a declared name the
+// keyed loop must take, not consumed; -3 an unknown name, consumed;
+// -1 not a plain key, not consumed.
+func zjSeekOrderedKeyItem(l *zerojson.Lexer, from int) int {
+	key, next, ok := l.PlainKey()
+	if !ok {
+		return -1
+	}
+	k := -1
+	switch string(key) {
+	case "ID":
+		k = 0
+	case "Quantity":
+		k = 1
+	case "Price":
+		k = 2
+	}
+	if k >= from {
+		l.SetPos(next)
+		return k
+	}
+	if k >= 0 {
+		return -2
+	}
+	// The names are ASCII, so a key folds only onto one of its length.
+	if len(key) <= 8 {
+		if name := string(key); zjFoldFieldName_Item(name) != name {
+			return -2
+		}
+	}
+	l.SetPos(next)
+	return -3
 }
 
 func zjIsDeclaredKeyItem(name string) bool {
@@ -1300,15 +1376,32 @@ func zjDecodeOrdered_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) b
 	}
 	expected := 0
 	for {
-		memberPos := l.Pos()
-		matched := -1
-		for k := expected; k < 8; k++ {
-			if zjTryOrderedKeyPayload(l, k) {
-				matched = k
-				break
-			}
+		matched := expected
+		if !zjTryOrderedKeyPayload(l, expected) {
+			matched = zjSeekOrderedKeyPayload(l, expected)
 		}
-		if matched < 0 {
+		switch {
+		case matched >= 0:
+			if !zjDecodeOrderedField_Payload(l, v, a, matched) {
+				return false
+			}
+			expected = matched + 1
+		case matched == -3:
+			// A name matching no declared field, even folded as the keyed
+			// decoder folds it, is unknown and safe to skip inline (the
+			// projection-struct fast path).
+			l.Skip()
+			if l.Err() != nil {
+				return false
+			}
+		case matched == -2:
+			// A declared name out of order, repeated, or matching only
+			// under case folding: the keyed decoder's last-wins/general
+			// handling takes over from this member.
+			zjDecodeMembers_Payload(l, v, a)
+			return l.Err() == nil
+		default:
+			memberPos := l.Pos()
 			// A whitespace-padded empty object (`{ }`) is valid but
 			// cannot literal-match the compact fast path. Bail without
 			// asking ReadKey to parse the closing brace as a string;
@@ -1316,18 +1409,11 @@ func zjDecodeOrdered_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) b
 			if l.IsDelim('}') {
 				return false
 			}
-			// No declared field k >= expected literal-matched at this
-			// position. Read the key properly (ReadKey tolerates
-			// whitespace and unescapes, unlike the word-compare above)
-			// and check its *name*, not its byte position: a declared
-			// name here — regardless of index — means duplicate,
-			// out-of-order, non-compact syntax around an otherwise
-			// valid key, or an escaped key that decodes to a declared
-			// name. The keyed decoder's last-wins/general handling
-			// takes over from this member. Only a name matching no
-			// declared field (folded as the keyed decoder folds it) is
-			// genuinely unknown and safe to skip inline (the
-			// projection-struct fast path).
+			// Not a plain key: whitespace around it, an escape, or a
+			// control or non-ASCII byte. Read it properly and check its
+			// *name*: a declared name (duplicate, out of order, folded,
+			// or escaped) hands the member to the keyed decoder; only an
+			// unknown name is skipped inline.
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
@@ -1341,11 +1427,6 @@ func zjDecodeOrdered_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) b
 			if l.Err() != nil {
 				return false
 			}
-		} else {
-			if !zjDecodeOrderedField_Payload(l, v, a, matched) {
-				return false
-			}
-			expected = matched + 1
 		}
 		d, p := l.DataAndPos()
 		if p >= len(d) {
@@ -1633,6 +1714,51 @@ func zjTryOrderedKeyPayload(l *zerojson.Lexer, k int) bool {
 		return true
 	}
 	return false
+}
+
+// zjSeekOrderedKeyPayload classifies a plain key that is not field from's literal:
+// k >= from is the field it names, consumed; -2 a declared name the
+// keyed loop must take, not consumed; -3 an unknown name, consumed;
+// -1 not a plain key, not consumed.
+func zjSeekOrderedKeyPayload(l *zerojson.Lexer, from int) int {
+	key, next, ok := l.PlainKey()
+	if !ok {
+		return -1
+	}
+	k := -1
+	switch string(key) {
+	case "ID":
+		k = 0
+	case "Count":
+		k = 1
+	case "Ratio":
+		k = 2
+	case "Stamp":
+		k = 3
+	case "Names":
+		k = 4
+	case "Items":
+		k = 5
+	case "Index":
+		k = 6
+	case "Optional":
+		k = 7
+	}
+	if k >= from {
+		l.SetPos(next)
+		return k
+	}
+	if k >= 0 {
+		return -2
+	}
+	// The names are ASCII, so a key folds only onto one of its length.
+	if len(key) <= 8 {
+		if name := string(key); zjFoldFieldName_Payload(name) != name {
+			return -2
+		}
+	}
+	l.SetPos(next)
+	return -3
 }
 
 func zjIsDeclaredKeyPayload(name string) bool {

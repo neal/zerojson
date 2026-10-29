@@ -390,6 +390,7 @@ func FuzzLexerReadersNeverPanic(f *testing.F) {
 		{"ReadEnumBytes", func(l *Lexer) { l.ReadEnumBytes() }},
 		{"ReadTextBytes", func(l *Lexer) { l.ReadTextBytes() }},
 		{"ReadKey", func(l *Lexer) { l.ReadKey() }},
+		{"PlainKey", func(l *Lexer) { l.PlainKey() }},
 		{"ReadInt8", func(l *Lexer) { l.ReadInt8() }},
 		{"ReadInt16", func(l *Lexer) { l.ReadInt16() }},
 		{"ReadInt32", func(l *Lexer) { l.ReadInt32() }},

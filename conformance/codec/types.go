@@ -19,7 +19,7 @@ import (
 )
 
 // EventLeg and EventMeta are auto-discovered from Event's fields.
-//go:generate go run github.com/neal/zerojson/cmd/zerojsongen -dir . -types Event,RawHolder,OmitZeroCases,StringOptCases,AppenderCases,MapFieldsLike,EventLeg,EmbedMid,EventProjection,InteractionOmitZero,MapPointerMethods,ReuseSemantics,OrderedSideEffects,PoolAppenderHolder,BytesCases,EventList,LegPtrList,LegIndex,PointerMethodIndex,PointerQuotedIndex,RawList,RawIndex,RawHolderList,DecimalList,PointerCollections,NumberCases,NullCases,FoldNames,FoldUnicodeNames -leaf github.com/neal/zerojson/conformance/internal/testleaf.Decimal=github.com/neal/zerojson/conformance/internal/testleaf.Append,github.com/neal/zerojson/conformance/internal/testleaf.Read -pool -out zerojson_gen.go -tests zerojson_gen_fuzz_test.go
+//go:generate go run github.com/neal/zerojson/cmd/zerojsongen -dir . -types Event,RawHolder,OmitZeroCases,StringOptCases,AppenderCases,MapFieldsLike,EventLeg,EmbedMid,EventProjection,InteractionOmitZero,MapPointerMethods,ReuseSemantics,OrderedSideEffects,PoolAppenderHolder,BytesCases,EventList,LegPtrList,LegIndex,PointerMethodIndex,PointerQuotedIndex,RawList,RawIndex,RawHolderList,DecimalList,PointerCollections,NumberCases,NullCases,FoldNames,FoldUnicodeNames,OrderedLookup,IgnoredOnly -leaf github.com/neal/zerojson/conformance/internal/testleaf.Decimal=github.com/neal/zerojson/conformance/internal/testleaf.Append,github.com/neal/zerojson/conformance/internal/testleaf.Read -pool -out zerojson_gen.go -tests zerojson_gen_fuzz_test.go
 
 // EventList, LegPtrList, and LegIndex exercise the generator's named
 // slice/map ROOT support (root.go) — a top-level shape easyjson handles.
@@ -696,4 +696,26 @@ type FoldNames struct {
 type FoldUnicodeNames struct {
 	Ilk  int "json:\"\u0131lk\""
 	Cafe int "json:\"caf\u00e9\""
+}
+
+// OrderedLookup is an ordered-eligible type for the ordered decoder's key
+// lookup (zjSeekOrderedKeyOrderedLookup): names that are prefixes of one
+// another, names that differ only in case (the exact one wins, otherwise
+// the first under folding), and names on both sides of 32 bytes.
+type OrderedLookup struct {
+	N      int    `json:"n"`
+	No     int    `json:"no"`
+	Nos    int    `json:"nos"`
+	UpID   int    `json:"ID"`
+	LowID  int    `json:"id"` // "Id" folds onto ID, the earlier field
+	Dash   int    `json:"-,"`
+	Dashed int    `json:"x-y"`
+	Long   int    `json:"a_declared_name_longer_than_thirty_two"`
+	Last   string `json:"last"`
+}
+
+// IgnoredOnly has no JSON fields at all, so every key is unknown to its
+// ordered decoder.
+type IgnoredOnly struct {
+	Hidden int `json:"-"`
 }

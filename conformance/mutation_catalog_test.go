@@ -47,6 +47,71 @@ func mutationCatalog() []mutationCase {
 			detector:   codecDetector(`^TestOrderedHandoffMatchesStdlib$`), wantOutput: "zerojson err=",
 		},
 		{
+			// A plain declared key out of order hands the rest of the object
+			// to the keyed member loop too, not just a key ReadKey had to read.
+			name: "ordered_lookup_handoff_restarts_object", tier: "quick", file: "cmd/zerojsongen/ordered.go",
+			old:        "g.p(\"\\t\\t\\t%s(l, v, a)\", membersDecodeName(n))\n\tg.p(\"\\t\\t\\treturn l.Err() == nil\")\n\tg.p(\"\\t\\tdefault:\")",
+			new:        "g.p(\"\\t\\t\\treturn false\")\n\tg.p(\"\\t\\tdefault:\")",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestOrderedHandoffDecodesPrefixOnce$`), wantOutput: "want 2",
+		},
+		{
+			// The lookup must not match a field before the cursor: a repeated
+			// or out-of-order name belongs to the keyed loop.
+			name: "ordered_lookup_ignores_cursor", tier: "quick", file: "cmd/zerojsongen/ordered.go",
+			old:        "g.p(\"\\tif k >= from {\")",
+			new:        "g.p(\"\\tif k >= 0 {\")",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestSeekOrderedKeyMatchesReference$`), wantOutput: "; want -2 at",
+		},
+		{
+			// A plain key that names a field only under case folding is
+			// declared, not unknown.
+			name: "ordered_lookup_skips_folded_names", tier: "quick", file: "cmd/zerojsongen/ordered.go",
+			old:        "g.p(\"\\t\\tif name := string(key); %s(name) != name {\", foldFieldNameFunc(n))",
+			new:        "g.p(\"\\t\\tif name := string(key); false && %s(name) != name {\", foldFieldNameFunc(n))",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestOrderedHandoffMatchesStdlib$`), wantOutput: "zerojson {Origin:acme Active:false}",
+		},
+		{
+			// A declared name behind the cursor is a duplicate or out of
+			// order; skipping it as unknown loses the later value.
+			name: "ordered_lookup_skips_declared_names", tier: "quick", file: "cmd/zerojsongen/ordered.go",
+			old:        "g.p(\"\\tif k >= 0 {\")\n\tg.p(\"\\t\\treturn -2\")",
+			new:        "g.p(\"\\tif k >= 0 {\")\n\tg.p(\"\\t\\tl.SetPos(next)\")\n\tg.p(\"\\t\\treturn -3\")",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestOrderedHandoffMatchesStdlib$`), wantOutput: "zerojson {Origin:acme Active:true}, stdlib {Origin:beta Active:true}",
+		},
+		{
+			// The fold is skipped only for keys longer than every name.
+			name: "ordered_lookup_fold_guard_too_short", tier: "full", file: "cmd/zerojsongen/ordered.go",
+			old:        "g.p(\"\\tif len(key) <= %d {\", maxLen)",
+			new:        "g.p(\"\\tif len(key) < %d {\", maxLen)",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestOrderedLookupDecodeMatchesStdlib$`), wantOutput: `copy {"A_DECLARED_NAME_LONGER_THAN_THIRTY_TWO":8}`,
+		},
+		{
+			// A key followed by whitespace before its colon is not plain.
+			name: "plain_key_ignores_colon", tier: "quick", file: "ordered.go",
+			old:       "if end+1 >= len(data) || data[end] != '\"' || data[end+1] != ':' {",
+			new:       "if end+1 >= len(data) || data[end] != '\"' {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestPlainKey$`), wantOutput: `PlainKey("\"a\" :1" at 0)`,
+		},
+		{
+			// ReadKey normalizes invalid UTF-8, so a plain key is ASCII only.
+			name: "plain_key_admits_non_ascii", tier: "full", file: "ordered.go",
+			old:       "if high&0x8080808080808080 != 0 {",
+			new:       "if false && high&0x8080808080808080 != 0 {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestPlainKey$`), wantOutput: `, 8, true; want "", 0, false`,
+		},
+		{
 			// Nested structs must share the decode's cell block once it
 			// exists; otherwise every nested type pays its own allocation.
 			name: "nested_cells_not_shared", tier: "quick", file: "cmd/zerojsongen/decode.go",

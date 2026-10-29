@@ -354,6 +354,7 @@ func (g *generator) genDecode(ti typeInfo) {
 		g.emitOrderedDecode(ti)
 		g.emitOrderedField(ti)
 		g.emitOrderedTryKey(ti)
+		g.emitOrderedSeekKey(ti)
 		g.emitOrderedDeclaredKey(ti)
 	}
 

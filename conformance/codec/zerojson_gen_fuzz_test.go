@@ -1616,6 +1616,94 @@ func zjEscapedDirectLeafFoldUnicodeNames(data []byte) bool {
 	return false // no unescaping direct leaf reachable from FoldUnicodeNames
 }
 
+// zjStripStringOptPlusOrderedLookup returns data with the leading '+' removed from every
+// quoted value on one of OrderedLookup's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusOrderedLookup(data []byte) ([]byte, bool) {
+	return data, false // OrderedLookup has no `,string` fields
+}
+
+// zjStricterCausedByPlusOrderedLookup reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusOrderedLookup(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusOrderedLookup(data)
+	if !ok {
+		return false
+	}
+	var v OrderedLookup
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerOrderedLookup reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from OrderedLookup — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerOrderedLookup(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from OrderedLookup
+}
+
+// zjDecodeStricterAllowedOrderedLookup is the decode-error oracle-direction allowlist for
+// OrderedLookup: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedOrderedLookup(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusOrderedLookup(data)
+}
+
+// zjEscapedDirectLeafOrderedLookup reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from OrderedLookup with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafOrderedLookup(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from OrderedLookup
+}
+
+// zjStripStringOptPlusIgnoredOnly returns data with the leading '+' removed from every
+// quoted value on one of IgnoredOnly's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusIgnoredOnly(data []byte) ([]byte, bool) {
+	return data, false // IgnoredOnly has no `,string` fields
+}
+
+// zjStricterCausedByPlusIgnoredOnly reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusIgnoredOnly(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusIgnoredOnly(data)
+	if !ok {
+		return false
+	}
+	var v IgnoredOnly
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerIgnoredOnly reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from IgnoredOnly — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerIgnoredOnly(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from IgnoredOnly
+}
+
+// zjDecodeStricterAllowedIgnoredOnly is the decode-error oracle-direction allowlist for
+// IgnoredOnly: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedIgnoredOnly(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusIgnoredOnly(data)
+}
+
+// zjEscapedDirectLeafIgnoredOnly reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from IgnoredOnly with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafIgnoredOnly(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from IgnoredOnly
+}
+
 // zjStripStringOptPlusEventMeta returns data with the leading '+' removed from every
 // quoted value on one of EventMeta's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -6272,6 +6360,363 @@ func FuzzFoldUnicodeNamesZJSONSequence(f *testing.F) {
 			pooledInput := append([]byte(nil), data...)
 			freshInput := append([]byte(nil), data...)
 			var got, want FoldUnicodeNames
+			var gotErr, wantErr error
+			if borrow {
+				gotErr, wantErr = d.DecodeBorrow(pooledInput, &got), want.UnmarshalZJSONBorrow(freshInput)
+			} else {
+				gotErr, wantErr = d.Decode(pooledInput, &got), want.UnmarshalZJSON(freshInput)
+			}
+			if (gotErr != nil) != (wantErr != nil) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: decode error mismatch\ninput: %q\npooled: %v\nfresh: %v", op, borrow, modeMask, data, gotErr, wantErr)
+			}
+			if gotErr == nil && !reflect.DeepEqual(&got, &want) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: pooled result differs from fresh\ninput: %q\npooled: %#v\nfresh: %#v", op, borrow, modeMask, data, &got, &want)
+			}
+			if gotErr == nil && !borrow {
+				for i := range pooledInput {
+					pooledInput[i] = 0xa5
+				}
+				if !reflect.DeepEqual(&got, &want) {
+					t.Fatalf("op=%d mask=0x%x: copy-mode result aliases caller input after scribble\ninput: %q\npooled: %#v\nfresh: %#v", op, modeMask, data, &got, &want)
+				}
+			}
+		}
+	})
+}
+
+func FuzzOrderedLookupZJSON(f *testing.F) {
+	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
+	f.Add([]byte("{\"n\":1}"))
+	f.Add([]byte("{\"n\":\"1\"}"))
+	f.Add([]byte("{\"n\":1,\"n\":2}"))
+	f.Add([]byte("{\"n\":128}"))
+	f.Add([]byte("{\"n\":32768}"))
+	f.Add([]byte("{\"n\":2147483648}"))
+	f.Add([]byte("{\"n\":9223372036854775808}"))
+	f.Add([]byte("{\"n\":-129}"))
+	f.Add([]byte("{\"n\":-9223372036854775809}"))
+	f.Add([]byte("{\"no\":1}"))
+	f.Add([]byte("{\"no\":\"1\"}"))
+	f.Add([]byte("{\"no\":1,\"no\":2}"))
+	f.Add([]byte("{\"no\":128}"))
+	f.Add([]byte("{\"no\":32768}"))
+	f.Add([]byte("{\"no\":2147483648}"))
+	f.Add([]byte("{\"no\":9223372036854775808}"))
+	f.Add([]byte("{\"no\":-129}"))
+	f.Add([]byte("{\"no\":-9223372036854775809}"))
+	f.Add([]byte("{\"nos\":1}"))
+	f.Add([]byte("{\"nos\":\"1\"}"))
+	f.Add([]byte("{\"nos\":1,\"nos\":2}"))
+	f.Add([]byte("{\"nos\":128}"))
+	f.Add([]byte("{\"nos\":32768}"))
+	f.Add([]byte("{\"nos\":2147483648}"))
+	f.Add([]byte("{\"nos\":9223372036854775808}"))
+	f.Add([]byte("{\"nos\":-129}"))
+	f.Add([]byte("{\"nos\":-9223372036854775809}"))
+	f.Add([]byte("{\"ID\":1}"))
+	f.Add([]byte("{\"ID\":\"1\"}"))
+	f.Add([]byte("{\"ID\":1,\"ID\":2}"))
+	f.Add([]byte("{\"ID\":128}"))
+	f.Add([]byte("{\"ID\":32768}"))
+	f.Add([]byte("{\"ID\":2147483648}"))
+	f.Add([]byte("{\"ID\":9223372036854775808}"))
+	f.Add([]byte("{\"ID\":-129}"))
+	f.Add([]byte("{\"ID\":-9223372036854775809}"))
+	f.Add([]byte("{\"id\":1}"))
+	f.Add([]byte("{\"id\":\"1\"}"))
+	f.Add([]byte("{\"id\":1,\"id\":2}"))
+	f.Add([]byte("{\"id\":128}"))
+	f.Add([]byte("{\"id\":32768}"))
+	f.Add([]byte("{\"id\":2147483648}"))
+	f.Add([]byte("{\"id\":9223372036854775808}"))
+	f.Add([]byte("{\"id\":-129}"))
+	f.Add([]byte("{\"id\":-9223372036854775809}"))
+	f.Add([]byte("{\"-\":1}"))
+	f.Add([]byte("{\"-\":\"1\"}"))
+	f.Add([]byte("{\"-\":1,\"-\":2}"))
+	f.Add([]byte("{\"-\":128}"))
+	f.Add([]byte("{\"-\":32768}"))
+	f.Add([]byte("{\"-\":2147483648}"))
+	f.Add([]byte("{\"-\":9223372036854775808}"))
+	f.Add([]byte("{\"-\":-129}"))
+	f.Add([]byte("{\"-\":-9223372036854775809}"))
+	f.Add([]byte("{\"x-y\":1}"))
+	f.Add([]byte("{\"x-y\":\"1\"}"))
+	f.Add([]byte("{\"x-y\":1,\"x-y\":2}"))
+	f.Add([]byte("{\"x-y\":128}"))
+	f.Add([]byte("{\"x-y\":32768}"))
+	f.Add([]byte("{\"x-y\":2147483648}"))
+	f.Add([]byte("{\"x-y\":9223372036854775808}"))
+	f.Add([]byte("{\"x-y\":-129}"))
+	f.Add([]byte("{\"x-y\":-9223372036854775809}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":1}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":\"1\"}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":1,\"a_declared_name_longer_than_thirty_two\":2}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":128}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":32768}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":2147483648}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":9223372036854775808}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":-129}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":-9223372036854775809}"))
+	f.Add([]byte("{\"last\":\"x\"}"))
+	f.Add([]byte("{\"last\":1}"))
+	f.Add([]byte("{\"last\":\"x\",\"last\":\"y\"}"))
+	f.Add([]byte("{\"last\":\"\\u0078\"}"))
+	f.Add(append(append([]byte("{\"last\":\""), byte(0xff)), []byte("\"}")...))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if zjFuzzHugeExponent(data) {
+			return
+		}
+		oracleData := data
+		{
+			var stdRaw, zjRaw OrderedLookup
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
+			zjErr := zjRaw.UnmarshalZJSON(data)
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "N") || !zjRawFieldEqual(&stdRaw, &zjRaw, "No") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Nos") || !zjRawFieldEqual(&stdRaw, &zjRaw, "UpID") || !zjRawFieldEqual(&stdRaw, &zjRaw, "LowID") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Dash") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Dashed") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Long") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Last")) {
+				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
+			}
+		}
+		{
+			var zjRaw OrderedLookup
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedOrderedLookup(data) {
+				var stdRaw OrderedLookup
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
+					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
+				}
+			}
+		}
+		var seed OrderedLookup
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerOrderedLookup(data) && !zjEscapedDirectLeafOrderedLookup(data) {
+				var zj OrderedLookup
+				if zj.UnmarshalZJSON(data) == nil {
+					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
+				}
+			}
+			return
+		}
+		canon, err := json.Marshal(&seed)
+		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerOrderedLookup(canon) {
+			return
+		}
+		var viaStd OrderedLookup
+		if json.Unmarshal(canon, &viaStd) != nil {
+			return
+		}
+		var viaZJ OrderedLookup
+		if err := viaZJ.UnmarshalZJSON(canon); err != nil {
+			t.Fatalf("zerojson rejected canonical %q: %v", canon, err)
+		}
+		x, _ := json.Marshal(&viaStd)
+		y, _ := json.Marshal(&viaZJ)
+		if !bytes.Equal(x, y) {
+			t.Fatalf("decode divergence\ninput: %s\nstdlib: %s\nzerojson: %s", canon, x, y)
+		}
+		var viaFallback OrderedLookup
+		lFallback := zerojson.NewLexer(canon, false)
+		zjDecodeFallback_OrderedLookup(&lFallback, &viaFallback, &zjArenaOrderedLookup{})
+		lFallback.Finish()
+		if err := lFallback.Err(); err != nil {
+			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
+		}
+		if !reflect.DeepEqual(&viaFallback, &viaZJ) {
+			t.Fatalf("ordered-vs-fallback divergence\ninput: %s\nfallback-only: %+v\npublic (ordered+fallback): %+v", canon, &viaFallback, &viaZJ)
+		}
+		enc, err := viaZJ.AppendZJSON(nil)
+		if err != nil {
+			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
+		}
+		var reZJ OrderedLookup
+		if err := reZJ.UnmarshalZJSON(enc); err != nil {
+			t.Fatalf("zerojson could not re-decode its own output %q: %v", enc, err)
+		}
+		var reStd OrderedLookup
+		if err := json.Unmarshal(enc, &reStd); err != nil {
+			t.Fatalf("stdlib rejected zerojson output %q: %v", enc, err)
+		}
+	})
+}
+
+func FuzzOrderedLookupZJSONSequence(f *testing.F) {
+	f.Add([]byte("{}"), []byte("{}"), []byte("{\"n\":1}"), []byte("{\"no\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{}"), []byte("{"), []byte("{\"n\":1}"), uint8(0xf))
+	f.Add([]byte("{}"), []byte("{\"n\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{}"), []byte("{\"no\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"n\":1}"), []byte("{}"), []byte("{\"no\":1}"), []byte("{\"nos\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"n\":1}"), []byte("{"), []byte("{\"no\":1}"), uint8(0xf))
+	f.Add([]byte("{\"n\":1}"), []byte("{\"no\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"n\":1}"), []byte("{\"nos\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"no\":1}"), []byte("{}"), []byte("{\"nos\":1}"), []byte("{\"ID\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"no\":1}"), []byte("{"), []byte("{\"nos\":1}"), uint8(0xf))
+	f.Add([]byte("{\"no\":1}"), []byte("{\"nos\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"no\":1}"), []byte("{\"ID\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"nos\":1}"), []byte("{}"), []byte("{\"ID\":1}"), []byte("{\"id\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"nos\":1}"), []byte("{"), []byte("{\"ID\":1}"), uint8(0xf))
+	f.Add([]byte("{\"nos\":1}"), []byte("{\"ID\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"nos\":1}"), []byte("{\"id\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"ID\":1}"), []byte("{}"), []byte("{\"id\":1}"), []byte("{\"-\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"ID\":1}"), []byte("{"), []byte("{\"id\":1}"), uint8(0xf))
+	f.Add([]byte("{\"ID\":1}"), []byte("{\"id\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"ID\":1}"), []byte("{\"-\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"id\":1}"), []byte("{}"), []byte("{\"-\":1}"), []byte("{\"x-y\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"id\":1}"), []byte("{"), []byte("{\"-\":1}"), uint8(0xf))
+	f.Add([]byte("{\"id\":1}"), []byte("{\"-\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"id\":1}"), []byte("{\"x-y\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"-\":1}"), []byte("{}"), []byte("{\"x-y\":1}"), []byte("{\"a_declared_name_longer_than_thirty_two\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"-\":1}"), []byte("{"), []byte("{\"x-y\":1}"), uint8(0xf))
+	f.Add([]byte("{\"-\":1}"), []byte("{\"x-y\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"-\":1}"), []byte("{\"a_declared_name_longer_than_thirty_two\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"x-y\":1}"), []byte("{}"), []byte("{\"a_declared_name_longer_than_thirty_two\":1}"), []byte("{\"last\":\"x\"}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"x-y\":1}"), []byte("{"), []byte("{\"a_declared_name_longer_than_thirty_two\":1}"), uint8(0xf))
+	f.Add([]byte("{\"x-y\":1}"), []byte("{\"a_declared_name_longer_than_thirty_two\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"x-y\":1}"), []byte("{\"last\":\"x\"}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":1}"), []byte("{}"), []byte("{\"last\":\"x\"}"), []byte("{}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"a_declared_name_longer_than_thirty_two\":1}"), []byte("{"), []byte("{\"last\":\"x\"}"), uint8(0xf))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":1}"), []byte("{\"last\":\"x\"}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"a_declared_name_longer_than_thirty_two\":1}"), []byte("{}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"last\":\"x\"}"), []byte("{}"), []byte("{}"), []byte("{\"n\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"last\":\"x\"}"), []byte("{"), []byte("{}"), uint8(0xf))
+	f.Add([]byte("{\"last\":\"x\"}"), []byte("{}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"last\":\"x\"}"), []byte("{\"n\":1}"), []byte("{}"), uint8(0xa))
+	f.Fuzz(func(t *testing.T, first, second, third, fourth []byte, modeMask uint8) {
+		inputs := [4][]byte{first, second, third, fourth}
+		for _, data := range inputs {
+			if zjFuzzHugeExponent(data) {
+				return
+			}
+		}
+		var d OrderedLookupDecoder
+		for op, data := range inputs {
+			borrow := modeMask&(1<<uint(op)) != 0
+			pooledInput := append([]byte(nil), data...)
+			freshInput := append([]byte(nil), data...)
+			var got, want OrderedLookup
+			var gotErr, wantErr error
+			if borrow {
+				gotErr, wantErr = d.DecodeBorrow(pooledInput, &got), want.UnmarshalZJSONBorrow(freshInput)
+			} else {
+				gotErr, wantErr = d.Decode(pooledInput, &got), want.UnmarshalZJSON(freshInput)
+			}
+			if (gotErr != nil) != (wantErr != nil) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: decode error mismatch\ninput: %q\npooled: %v\nfresh: %v", op, borrow, modeMask, data, gotErr, wantErr)
+			}
+			if gotErr == nil && !reflect.DeepEqual(&got, &want) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: pooled result differs from fresh\ninput: %q\npooled: %#v\nfresh: %#v", op, borrow, modeMask, data, &got, &want)
+			}
+			if gotErr == nil && !borrow {
+				for i := range pooledInput {
+					pooledInput[i] = 0xa5
+				}
+				if !reflect.DeepEqual(&got, &want) {
+					t.Fatalf("op=%d mask=0x%x: copy-mode result aliases caller input after scribble\ninput: %q\npooled: %#v\nfresh: %#v", op, modeMask, data, &got, &want)
+				}
+			}
+		}
+	})
+}
+
+func FuzzIgnoredOnlyZJSON(f *testing.F) {
+	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if zjFuzzHugeExponent(data) {
+			return
+		}
+		oracleData := data
+		{
+			var zjRaw IgnoredOnly
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedIgnoredOnly(data) {
+				var stdRaw IgnoredOnly
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
+					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
+				}
+			}
+		}
+		var seed IgnoredOnly
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerIgnoredOnly(data) && !zjEscapedDirectLeafIgnoredOnly(data) {
+				var zj IgnoredOnly
+				if zj.UnmarshalZJSON(data) == nil {
+					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
+				}
+			}
+			return
+		}
+		canon, err := json.Marshal(&seed)
+		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerIgnoredOnly(canon) {
+			return
+		}
+		var viaStd IgnoredOnly
+		if json.Unmarshal(canon, &viaStd) != nil {
+			return
+		}
+		var viaZJ IgnoredOnly
+		if err := viaZJ.UnmarshalZJSON(canon); err != nil {
+			t.Fatalf("zerojson rejected canonical %q: %v", canon, err)
+		}
+		x, _ := json.Marshal(&viaStd)
+		y, _ := json.Marshal(&viaZJ)
+		if !bytes.Equal(x, y) {
+			t.Fatalf("decode divergence\ninput: %s\nstdlib: %s\nzerojson: %s", canon, x, y)
+		}
+		var viaFallback IgnoredOnly
+		lFallback := zerojson.NewLexer(canon, false)
+		zjDecodeFallback_IgnoredOnly(&lFallback, &viaFallback, &zjArenaIgnoredOnly{})
+		lFallback.Finish()
+		if err := lFallback.Err(); err != nil {
+			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
+		}
+		if !reflect.DeepEqual(&viaFallback, &viaZJ) {
+			t.Fatalf("ordered-vs-fallback divergence\ninput: %s\nfallback-only: %+v\npublic (ordered+fallback): %+v", canon, &viaFallback, &viaZJ)
+		}
+		enc, err := viaZJ.AppendZJSON(nil)
+		if err != nil {
+			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
+		}
+		var reZJ IgnoredOnly
+		if err := reZJ.UnmarshalZJSON(enc); err != nil {
+			t.Fatalf("zerojson could not re-decode its own output %q: %v", enc, err)
+		}
+		var reStd IgnoredOnly
+		if err := json.Unmarshal(enc, &reStd); err != nil {
+			t.Fatalf("stdlib rejected zerojson output %q: %v", enc, err)
+		}
+	})
+}
+
+func FuzzIgnoredOnlyZJSONSequence(f *testing.F) {
+	f.Add([]byte("{}"), []byte("{}"), []byte("{}"), []byte("{}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{}"), []byte("{"), []byte("{}"), uint8(0xf))
+	f.Add([]byte("{}"), []byte("{}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{}"), []byte("{}"), []byte("{}"), uint8(0xa))
+	f.Fuzz(func(t *testing.T, first, second, third, fourth []byte, modeMask uint8) {
+		inputs := [4][]byte{first, second, third, fourth}
+		for _, data := range inputs {
+			if zjFuzzHugeExponent(data) {
+				return
+			}
+		}
+		var d IgnoredOnlyDecoder
+		for op, data := range inputs {
+			borrow := modeMask&(1<<uint(op)) != 0
+			pooledInput := append([]byte(nil), data...)
+			freshInput := append([]byte(nil), data...)
+			var got, want IgnoredOnly
 			var gotErr, wantErr error
 			if borrow {
 				gotErr, wantErr = d.DecodeBorrow(pooledInput, &got), want.UnmarshalZJSONBorrow(freshInput)

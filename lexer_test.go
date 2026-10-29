@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestLexerFinishRejectsTrailingData(t *testing.T) {
@@ -532,6 +533,75 @@ func TestLexerDataAndPosition(t *testing.T) {
 	if l.Pos() != 0 {
 		t.Fatalf("Pos() = %d, want 0", l.Pos())
 	}
+}
+
+// plainKeyReference is PlainKey's contract written out byte by byte.
+func plainKeyReference(data []byte, pos int) (key []byte, next int, ok bool) {
+	if pos >= len(data) || data[pos] != '"' {
+		return nil, 0, false
+	}
+	for i := pos + 1; i < len(data); i++ {
+		switch c := data[i]; {
+		case c == '"':
+			if i+1 < len(data) && data[i+1] == ':' {
+				return data[pos+1 : i], i + 2, true
+			}
+			return nil, 0, false
+		case c < 0x20 || c == '\\' || c >= utf8.RuneSelf:
+			return nil, 0, false
+		}
+	}
+	return nil, 0, false
+}
+
+// checkPlainKey compares PlainKey at pos with plainKeyReference and, for a
+// plain key, with ReadKey, which must return the same bytes and stop at
+// next without an error.
+func checkPlainKey(t *testing.T, data []byte, pos int) {
+	t.Helper()
+	l := NewLexer(data, true)
+	l.SetPos(pos)
+	key, next, ok := l.PlainKey()
+	if l.Pos() != pos {
+		t.Fatalf("PlainKey(%q at %d) moved the position to %d", data, pos, l.Pos())
+	}
+	wantKey, wantNext, wantOK := plainKeyReference(data, pos)
+	if ok != wantOK || next != wantNext || string(key) != string(wantKey) {
+		t.Fatalf("PlainKey(%q at %d) = %q, %d, %v; want %q, %d, %v", data, pos, key, next, ok, wantKey, wantNext, wantOK)
+	}
+	if !ok {
+		return
+	}
+	read := l.ReadKey()
+	if err := l.Err(); err != nil || string(read) != string(key) || l.Pos() != next {
+		t.Fatalf("ReadKey(%q at %d) = %q at %d, err %v; PlainKey gave %q at %d", data, pos, read, l.Pos(), err, key, next)
+	}
+}
+
+var plainKeySeeds = []string{
+	`"a":1`, `"":1`, `"a" :1`, `"a"`, `"a`, `a":1`, ` "a":1`, `"a\"b":1`, `"a\u0062":1`,
+	"\"a\tb\":1", "\"caf\xc3\xa9\":1", "\"\xff\":1", "\"\x7f\":1",
+	`"a_key_longer_than_sixteen_bytes":1`,
+	"\"ab\":\"\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\"", // non-ASCII after the quote, in the same word
+	"\"a_key_longer_than_sixteen_bytes\xc3\xa9\":1",
+	`{"a":1,"bb":2}`,
+}
+
+func TestPlainKey(t *testing.T) {
+	for _, s := range plainKeySeeds {
+		for pos := range len(s) + 1 {
+			checkPlainKey(t, []byte(s), pos)
+		}
+	}
+}
+
+func FuzzPlainKey(f *testing.F) {
+	for _, s := range plainKeySeeds {
+		f.Add([]byte(s), uint8(0))
+	}
+	f.Fuzz(func(t *testing.T, data []byte, pos uint8) {
+		checkPlainKey(t, data, min(int(pos), len(data)))
+	})
 }
 
 type errString string

@@ -237,14 +237,18 @@ necessarily cheaper than decoding them.
 ## Ordered decode
 
 For eligible structs, the decoder first matches compact keys in declaration
-order using fixed-width little-endian comparisons. Missing fields and unknown
-members are supported; unknown values are grammar-checked without being
-materialized.
+order: it compares the expected field's key using fixed-width little-endian
+loads and, when that misses, looks up a plain key (compact ASCII without
+escapes) by name in one switch. Missing fields and unknown members are
+supported; unknown values are grammar-checked without being materialized.
 
-Out-of-order or duplicate keys, escaped keys, and syntax the matcher cannot
-consume cause a rewind to the keyed decoder. It re-reads the document into
-the current target; rewinding does not undo earlier writes. **A value or grammar
-error is final; it does not trigger a second parse.** The two paths share field readers
+Out-of-order or duplicate keys, escaped keys, and whitespace around a key or
+separator hand the rest of the object to the keyed decoder at that member;
+the members before it are not decoded again. Syntax the matcher cannot
+consume inside a value, such as a whitespace-padded empty nested object,
+rewinds to the keyed decoder instead. It re-reads the object into the current
+target; rewinding does not undo earlier writes. **A value or grammar error is
+final; it does not trigger a second parse.** The two paths share field readers
 and are compared by differential tests.
 
 Schemas with reachable JSON/Text/Appender decode callbacks use the keyed

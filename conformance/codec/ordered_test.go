@@ -2,8 +2,11 @@ package codec
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/neal/zerojson"
 )
@@ -191,6 +194,9 @@ var orderedHandoffSeeds = []string{
 	`{"origin":"acme","ACTIVE":true}`,            // case-folded declared key
 	`{"origin":"acme","active":true,"origin":7}`, // error in the keyed remainder
 	`{"origin":"acme","active":true,"origin":"b","active":false}`,
+	`{"active":true,"ORIGIN":"x"}`,         // case-folded declared key behind the cursor
+	`{"origin":"acme", "origin":"beta"}`,   // whitespace before a declared key: ReadKey path
+	`{"origin":"acme","\u0061ctive":true}`, // escaped declared key: ReadKey path
 }
 
 // TestOrderedHandoffMatchesStdlib checks every handoff seed against
@@ -258,15 +264,138 @@ func TestOrderedHandoffMatchesStdlib(t *testing.T) {
 // string costs one allocation, so a restart would copy "acme" twice.
 func TestOrderedHandoffDecodesPrefixOnce(t *testing.T) {
 	requireStableAllocationInstrumentation(t)
-	data := []byte(`{"origin":"acme","active":true,"origin":"beta"}`)
-	var v EventProjection
-	got := testing.AllocsPerRun(500, func() {
-		v = EventProjection{}
-		if err := v.UnmarshalZJSON(data); err != nil {
-			t.Fatal(err)
+	for _, doc := range []string{
+		`{"origin":"acme","active":true,"origin":"beta"}`,
+		`{"origin":"acme","active":true, "origin":"beta"}`, // not a plain key: ReadKey path
+	} {
+		data := []byte(doc)
+		var v EventProjection
+		got := testing.AllocsPerRun(500, func() {
+			v = EventProjection{}
+			if err := v.UnmarshalZJSON(data); err != nil {
+				t.Fatal(err)
+			}
+		})
+		if got != 2 {
+			t.Fatalf("%s: EventProjection.UnmarshalZJSON allocations=%v, want 2 (one copy per decoded origin)", doc, got)
 		}
-	})
-	if got != 2 {
-		t.Fatalf("EventProjection.UnmarshalZJSON allocations=%v, want 2 (one copy per decoded origin)", got)
 	}
+}
+
+// orderedKeyFuncs are one type's generated ordered-key helpers.
+type orderedKeyFuncs struct {
+	name     string
+	names    []string
+	try      func(*zerojson.Lexer, int) bool
+	seek     func(*zerojson.Lexer, int) int
+	declared func(string) bool
+}
+
+func orderedKeyTypes() []orderedKeyFuncs {
+	return []orderedKeyFuncs{
+		{"OrderedLookup", zjFieldNamesOrderedLookup[:], zjTryOrderedKeyOrderedLookup, zjSeekOrderedKeyOrderedLookup, zjIsDeclaredKeyOrderedLookup},
+		{"NumberCases", zjFieldNamesNumberCases[:], zjTryOrderedKeyNumberCases, zjSeekOrderedKeyNumberCases, zjIsDeclaredKeyNumberCases},
+		{"OmitZeroCases", zjFieldNamesOmitZeroCases[:], zjTryOrderedKeyOmitZeroCases, zjSeekOrderedKeyOmitZeroCases, zjIsDeclaredKeyOmitZeroCases},
+		{"EventProjection", zjFieldNamesEventProjection[:], zjTryOrderedKeyEventProjection, zjSeekOrderedKeyEventProjection, zjIsDeclaredKeyEventProjection},
+		{"IgnoredOnly", zjFieldNamesIgnoredOnly[:], zjTryOrderedKeyIgnoredOnly, zjSeekOrderedKeyIgnoredOnly, zjIsDeclaredKeyIgnoredOnly},
+	}
+}
+
+// seekReference is what zjSeekOrderedKey<T> stands in for: the literal
+// tries from from on, then ReadKey and zjIsDeclaredKey<T> for a key that
+// reads back as the bytes it is written with (no whitespace, escape, or
+// non-ASCII byte).
+func (f orderedKeyFuncs) seekReference(data []byte, pos, from int) (int, int) {
+	l := zerojson.NewLexer(data, true)
+	for k := from; k < len(f.names); k++ {
+		l.SetPos(pos)
+		if f.try(&l, k) {
+			return k, l.Pos()
+		}
+	}
+	l.SetPos(pos)
+	key := l.ReadKey()
+	n := len(key)
+	if l.Err() != nil || l.Pos() != pos+n+3 || data[pos] != '"' || string(data[pos+1:pos+1+n]) != string(key) || data[pos+1+n] != '"' {
+		return -1, pos
+	}
+	for _, c := range key {
+		if c >= utf8.RuneSelf {
+			return -1, pos
+		}
+	}
+	if f.declared(string(key)) {
+		return -2, pos
+	}
+	return -3, pos + n + 3
+}
+
+func (f orderedKeyFuncs) checkSeek(t *testing.T, data []byte, pos, from int) {
+	t.Helper()
+	l := zerojson.NewLexer(data, true)
+	l.SetPos(pos)
+	got := f.seek(&l, from)
+	want, wantPos := f.seekReference(data, pos, from)
+	if got != want || l.Pos() != wantPos || l.Err() != nil {
+		t.Fatalf("zjSeekOrderedKey%s(%q at %d, from %d) = %d at %d (err %v); want %d at %d", f.name, data, pos, from, got, l.Pos(), l.Err(), want, wantPos)
+	}
+}
+
+// orderedKeyDocs builds member prefixes around each declared name: the
+// name itself, case and length variants, and the non-plain spellings
+// (whitespace, escapes, non-ASCII) that must be left to ReadKey.
+func orderedKeyDocs(names []string) []string {
+	keys := []string{"", "unknown", strings.Repeat("u", 40)}
+	for _, n := range names {
+		keys = append(keys, n, strings.ToUpper(n), strings.ToUpper(n[:1])+n[1:], n+"x", n[:len(n)-1])
+	}
+	var docs []string
+	for _, k := range keys {
+		docs = append(docs, `"`+k+`":1`, `"`+k+`" :1`, `"`+k+`"`, ` "`+k+`":1`)
+		if k != "" {
+			docs = append(docs, fmt.Sprintf(`"\u%04x%s":1`, k[0], k[1:])) // first byte escaped
+		}
+	}
+	return append(docs, `"\u006e":1`, "\"n\xc3\xa9\":1", "\"\xe2\x84\xaa\":1", `"n\"":1`, `}`, ``, `"n`, "\"\x01\":1")
+}
+
+func TestSeekOrderedKeyMatchesReference(t *testing.T) {
+	for _, f := range orderedKeyTypes() {
+		for _, doc := range orderedKeyDocs(f.names) {
+			for from := range len(f.names) + 2 {
+				f.checkSeek(t, []byte(doc), 0, from)
+				f.checkSeek(t, []byte(","+doc), 1, from)
+			}
+		}
+	}
+}
+
+func FuzzSeekOrderedKey(f *testing.F) {
+	funcs := orderedKeyTypes()[0]
+	for _, doc := range orderedKeyDocs(funcs.names) {
+		f.Add([]byte(doc), uint8(0), uint8(0))
+	}
+	f.Fuzz(func(t *testing.T, data []byte, pos, from uint8) {
+		funcs.checkSeek(t, data, min(int(pos), len(data)), int(from)%(len(funcs.names)+2))
+	})
+}
+
+func TestOrderedLookupDecodeMatchesStdlib(t *testing.T) {
+	var d OrderedLookupDecoder
+	checkFoldDecodes[OrderedLookup](t, []string{
+		`{"n":1,"no":2,"nos":3,"ID":4,"id":5,"-":6,"x-y":7,"a_declared_name_longer_than_thirty_two":8,"last":"z"}`,
+		`{"last":"z","n":1}`, // looked up at the end, then a declared name behind it
+		`{"id":5,"ID":4}`,
+		`{"Id":9}`, `{"iD":9,"id":1}`, `{"ID":1,"Id":2}`, // "Id" folds onto ID, the first field
+		`{"NOS":3,"nos":4}`,
+		`{"nosy":1,"no":2,"n":3}`,
+		`{"x":1,"n":2,"an_unknown_key_longer_than_thirty_two_bytes":3,"last":"q"}`,
+		`{"A_DECLARED_NAME_LONGER_THAN_THIRTY_TWO":8}`,
+		`{"n" :1,"no":2}`, `{"n":1, "no":2,"n":3}`, `{"\u006eo":2,"n":1}`,
+		"{\"n\xc3\xa9\":1,\"no\":2}",
+		`{"-":1,"x-y":2,"-":3}`,
+		`{"n":1,"no":"x"}`, `{"last":"z","n":"x"}`,
+	}, d.Decode)
+	var ignored IgnoredOnlyDecoder
+	checkFoldDecodes[IgnoredOnly](t, []string{`{}`, `{"Hidden":1}`, `{"-":1,"x":[1,{"y":2}]}`, `{ "a":1}`, `{"a":1, "b":2}`, `{"a":x}`}, ignored.Decode)
 }
