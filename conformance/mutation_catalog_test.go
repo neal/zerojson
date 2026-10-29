@@ -96,6 +96,55 @@ func mutationCatalog() []mutationCase {
 			detector:   codecDetector(`^TestOrderedLookupDecodeMatchesStdlib$`), wantOutput: `copy {"A_DECLARED_NAME_LONGER_THAN_THIRTY_TWO":8}`,
 		},
 		{
+			// Near the end of input the byte loop must stop at a raw control byte too.
+			name: "valid_fast_tail_admits_control", tier: "quick", file: "valid.go",
+			old:       "for j < n && data[j] != '\"' && data[j] != '\\\\' && data[j] >= 0x20 {",
+			new:       "for j < n && data[j] != '\"' && data[j] != '\\\\' {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestValidFastMatchesExact$`), wantOutput: "validFast accepted invalid",
+		},
+		{
+			// The word mask must mark raw control bytes, not only quotes and
+			// backslashes.
+			name: "valid_fast_word_admits_control", tier: "full", file: "valid.go",
+			old:       "q := v ^ 0x0202020202020202\n\tb := v ^ 0x5c5c5c5c5c5c5c5c\n\treturn ((q-0x21*lo)&^q | (b-lo)&^b) & hi",
+			new:       "q := v ^ 0x2222222222222222\n\tb := v ^ 0x5c5c5c5c5c5c5c5c\n\treturn ((q-lo)&^q | (b-lo)&^b) & hi",
+			wantCount: 1,
+			detector:  rootDetector(`^TestValidFastMatchesExact$`), wantOutput: "validFast accepted invalid",
+		},
+		{
+			// A container closes only with its own bracket.
+			name: "valid_fast_ignores_closer_kind", tier: "quick", file: "valid.go",
+			old:       "case c == closer:",
+			new:       "case c == '}' || c == ']':",
+			wantCount: 1,
+			detector:  rootDetector(`^TestValidFastMatchesExact$`), wantOutput: "validFast accepted invalid",
+		},
+		{
+			// A comma separates members only inside a container.
+			name: "valid_fast_top_level_comma", tier: "quick", file: "valid.go",
+			old:       "case c == ',' && closer > 0:",
+			new:       "case c == ',':",
+			wantCount: 1,
+			detector:  rootDetector(`^TestValidFastMatchesExact$`), wantOutput: "validFast accepted invalid",
+		},
+		{
+			// Past its stack the fast pass must hand the document to validExact.
+			name: "valid_fast_depth_unchecked", tier: "full", file: "valid.go",
+			old:       "if depth == validFastDepth {",
+			new:       "if depth == 4*validFastDepth {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestValidFastDepthBoundary$`), wantOutput: "validFast accepted depth 257",
+		},
+		{
+			// Strings are the common case; sending them to validExact silently gives up the fast pass.
+			name: "valid_fast_strings_fall_back", tier: "quick", file: "valid.go",
+			old:       "case '\"':\n\t\tgoto str",
+			new:       "case '\"':\n\t\tif false {\n\t\t\tgoto str\n\t\t}\n\t\treturn false",
+			wantCount: 1,
+			detector:  rootDetector(`^TestValidFastMatchesExact$`), wantOutput: "validFast rejected valid",
+		},
+		{
 			// A key followed by whitespace before its colon is not plain.
 			name: "plain_key_ignores_colon", tier: "quick", file: "ordered.go",
 			old:       "if end+1 >= len(data) || data[end] != '\"' || data[end+1] != ':' {",
