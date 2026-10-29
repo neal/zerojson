@@ -151,11 +151,11 @@ func TestOrderedNullMidSequenceClearsPointer(t *testing.T) {
 	}
 }
 
-// TestOrderedNestedBailPropagates directly checks the nested-struct-bail
-// trap: EventMeta's own ordered decode must bail on an out-of-order key,
-// and that bail must propagate all the way out to Event's fallback
-// (rather than, say, leaving Event's arena or fields half-written from
-// the abandoned attempt) while still producing a fully correct result.
+// TestOrderedNestedBailPropagates directly checks the nested out-of-order
+// trap: EventMeta's own ordered decode meets an out-of-order key and hands
+// the rest of its object to its keyed member loop, and Event must still end
+// up exactly as stdlib and the fallback-only path decode it (no half-written
+// fields or arena state from the ordered prefix).
 func TestOrderedNestedBailPropagates(t *testing.T) {
 	data := []byte(`{"origin":"acme","meta":{"internal":true,"cost":"1.5","note":"n"},"active":true}`)
 	var want Event
@@ -177,5 +177,96 @@ func TestOrderedNestedBailPropagates(t *testing.T) {
 	}
 	if !reflect.DeepEqual(&viaFallback, &got) {
 		t.Fatalf("public path diverged from fallback-only\nfallback-only: %+v\npublic:        %+v", &viaFallback, &got)
+	}
+}
+
+// orderedHandoffSeeds deviate only after the ordered decoder has matched
+// some members, so the keyed member loop takes over mid-object.
+var orderedHandoffSeeds = []string{
+	`{"origin":"acme","active":true,"origin":"beta"}`, // duplicate after a full ordered prefix
+	`{"origin":"acme","unknown":[1,{"x":2}],"active":true,"origin":"beta"}`,
+	`{"active":true,"origin":"acme"}`,            // out of order at the second member
+	`{"origin":"acme" ,"active":true}`,           // whitespace before a separator
+	`{"origin":"acme","active":true }`,           // whitespace before the closing brace
+	`{"origin":"acme","ACTIVE":true}`,            // case-folded declared key
+	`{"origin":"acme","active":true,"origin":7}`, // error in the keyed remainder
+	`{"origin":"acme","active":true,"origin":"b","active":false}`,
+}
+
+// TestOrderedHandoffMatchesStdlib checks every handoff seed against
+// encoding/json and the fallback-only path, in both copy and borrow mode:
+// the ordered prefix plus the keyed remainder must equal a keyed decode of
+// the whole object, including which inputs fail.
+func TestOrderedHandoffMatchesStdlib(t *testing.T) {
+	for _, data := range orderedHandoffSeeds {
+		var want EventProjection
+		wantErr := json.Unmarshal([]byte(data), &want)
+		for _, borrow := range []bool{false, true} {
+			var got EventProjection
+			var gotErr error
+			if borrow {
+				gotErr = got.UnmarshalZJSONBorrow([]byte(data))
+			} else {
+				gotErr = got.UnmarshalZJSON([]byte(data))
+			}
+			l := zerojson.NewLexer([]byte(data), borrow)
+			var fallback EventProjection
+			zjDecodeFallback_EventProjection(&l, &fallback, &zjArenaEventProjection{})
+			l.Finish()
+			fallbackErr := l.Err()
+			if (wantErr != nil) != (gotErr != nil) || (gotErr != nil) != (fallbackErr != nil) {
+				t.Fatalf("%s borrow=%v: stdlib err=%v, zerojson err=%v, fallback-only err=%v", data, borrow, wantErr, gotErr, fallbackErr)
+			}
+			if gotErr != nil {
+				if gotErr.Error() != fallbackErr.Error() {
+					t.Errorf("%s borrow=%v: error %q, fallback-only %q", data, borrow, gotErr, fallbackErr)
+				}
+				continue
+			}
+			if got != want || got != fallback {
+				t.Errorf("%s borrow=%v: zerojson %+v, stdlib %+v, fallback-only %+v", data, borrow, got, want, fallback)
+			}
+		}
+	}
+	// Nested: EventMeta hands off inside Event's keyed decode, then Event
+	// carries on with the members after it.
+	for _, data := range []string{
+		`{"meta":{"note":"n","internal":true,"cost":"1.5"},"origin":"acme"}`,
+		`{"meta":{"note":"n","note":"m"},"meta_ptr":{"cost":"2","note":"p"},"active":true}`,
+		`{"meta":{"note":"n" ,"internal":true},"origin":"acme"}`,
+	} {
+		var want Event
+		if err := json.Unmarshal([]byte(data), &want); err != nil {
+			t.Fatal(err)
+		}
+		var got Event
+		if err := got.UnmarshalZJSON([]byte(data)); err != nil {
+			t.Fatalf("%s: %v", data, err)
+		}
+		viaFallback, err := decodeFallbackOnly([]byte(data), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(&want, &got) || !reflect.DeepEqual(&viaFallback, &got) {
+			t.Errorf("%s:\nstdlib:        %+v\nzerojson:      %+v\nfallback-only: %+v", data, &want, &got, &viaFallback)
+		}
+	}
+}
+
+// TestOrderedHandoffDecodesPrefixOnce pins that a deviation after the
+// ordered prefix does not restart the object: in copy mode each decoded
+// string costs one allocation, so a restart would copy "acme" twice.
+func TestOrderedHandoffDecodesPrefixOnce(t *testing.T) {
+	requireStableAllocationInstrumentation(t)
+	data := []byte(`{"origin":"acme","active":true,"origin":"beta"}`)
+	var v EventProjection
+	got := testing.AllocsPerRun(500, func() {
+		v = EventProjection{}
+		if err := v.UnmarshalZJSON(data); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if got != 2 {
+		t.Fatalf("EventProjection.UnmarshalZJSON allocations=%v, want 2 (one copy per decoded origin)", got)
 	}
 }

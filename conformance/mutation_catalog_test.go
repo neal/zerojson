@@ -28,6 +28,25 @@ func mutationCatalog() []mutationCase {
 			detector:  generatorDetector(`^TestGeneratedNamedMapMethodsAreReplaced$`), wantOutput: "delegates to v.Set",
 		},
 		{
+			// A member-boundary deviation hands the rest of the object to the
+			// keyed member loop; restarting re-decodes the ordered prefix.
+			name: "ordered_deviation_restarts_object", tier: "quick", file: "cmd/zerojsongen/ordered.go",
+			old:        "g.p(\"\\t\\t\\t\\tl.SetPos(memberPos)\")\n\tg.p(\"\\t\\t\\t\\t%s(l, v, a)\", membersDecodeName(n))\n\tg.p(\"\\t\\t\\t\\treturn l.Err() == nil\")",
+			new:        "g.p(\"\\t\\t\\t\\t_ = memberPos\")\n\tg.p(\"\\t\\t\\t\\treturn false\")",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestOrderedHandoffDecodesPrefixOnce$`), wantOutput: "want 2",
+		},
+		{
+			// The keyed loop must resume at the deviating member's key.
+			name: "ordered_handoff_skips_rewind", tier: "quick", file: "cmd/zerojsongen/ordered.go",
+			old:        "g.p(\"\\t\\t\\t\\tl.SetPos(memberPos)\")",
+			new:        "g.p(\"\\t\\t\\t\\t_ = memberPos\")",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestOrderedHandoffMatchesStdlib$`), wantOutput: "zerojson err=",
+		},
+		{
 			// Nested structs must share the decode's cell block once it
 			// exists; otherwise every nested type pays its own allocation.
 			name: "nested_cells_not_shared", tier: "quick", file: "cmd/zerojsongen/decode.go",

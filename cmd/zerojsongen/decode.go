@@ -364,6 +364,17 @@ func (g *generator) genDecode(ti typeInfo) {
 	g.p("\tif !l.EnterObject() {")
 	g.p("\t\treturn")
 	g.p("\t}")
+	if orderedOK {
+		// The ordered decoder hands a deviating object's remaining members
+		// to the same loop, so it lives in its own function.
+		g.p("\t%s(l, v, a)", membersDecodeName(ti.name))
+		g.p("}")
+		g.p("")
+		g.p("// %s decodes the remaining members of an object whose opening", membersDecodeName(ti.name))
+		g.p("// brace and nesting level are already consumed, positioned at a key.")
+		g.p("func %s(l *zerojson.Lexer, v *%s, a *%s) {", membersDecodeName(ti.name), ti.name, arenaName(ti.name))
+		g.p("\t_ = a")
+	}
 	g.p("\tfor {")
 	g.p("\t\tkey := l.ReadKey()")
 	g.p("\t\tif l.Err() != nil { return }")

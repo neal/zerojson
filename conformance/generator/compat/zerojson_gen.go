@@ -128,10 +128,13 @@ func zjDecode_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
 
 // zjDecodeOrdered_Point speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
-// the general keyed loop. It returns false with zero observable
-// effect (once the caller rewinds via Lexer.OrderedBail) on any
-// structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallback_Point;
+// the general keyed loop. A deviation at a member boundary (an
+// out-of-order, duplicate, or escaped key, or non-compact syntax
+// around one) hands the rest of the object to zjDecodeMembers_Point:
+// every member before it was decoded exactly as the keyed decoder
+// would, so only the remainder needs the general path. Any other
+// deviation returns false, and the caller rewinds via
+// Lexer.OrderedBail and retries the object through zjDecodeFallback_Point;
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) bool {
 	_ = a
@@ -159,6 +162,7 @@ func zjDecodeOrdered_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) bool {
 	}
 	expected := 0
 	for {
+		memberPos := l.Pos()
 		matched := -1
 		for k := expected; k < 3; k++ {
 			if zjTryOrderedKeyPoint(l, k) {
@@ -181,16 +185,19 @@ func zjDecodeOrdered_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) bool {
 			// name here — regardless of index — means duplicate,
 			// out-of-order, non-compact syntax around an otherwise
 			// valid key, or an escaped key that decodes to a declared
-			// name; any of those must bail so the fallback's
-			// last-wins/general handling applies. Only a name matching
-			// no declared field is genuinely unknown and safe to skip
-			// inline (the projection-struct fast path).
+			// name. The keyed decoder's last-wins/general handling
+			// takes over from this member. Only a name matching no
+			// declared field (folded as the keyed decoder folds it) is
+			// genuinely unknown and safe to skip inline (the
+			// projection-struct fast path).
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
 			}
 			if zjIsDeclaredKeyPoint(string(key)) {
-				return false
+				l.SetPos(memberPos)
+				zjDecodeMembers_Point(l, v, a)
+				return l.Err() == nil
 			}
 			l.Skip()
 			if l.Err() != nil {
@@ -214,7 +221,13 @@ func zjDecodeOrdered_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) bool {
 			l.Leave()
 			return true
 		default:
-			return false
+			// Whitespace before the separator: the member is complete,
+			// so the keyed decoder continues from here. NextMember
+			// leaves the nesting level on the closing brace.
+			if l.NextMember() {
+				zjDecodeMembers_Point(l, v, a)
+			}
+			return l.Err() == nil
 		}
 	}
 }
@@ -304,6 +317,13 @@ func zjDecodeFallback_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
 	if !l.EnterObject() {
 		return
 	}
+	zjDecodeMembers_Point(l, v, a)
+}
+
+// zjDecodeMembers_Point decodes the remaining members of an object whose opening
+// brace and nesting level are already consumed, positioned at a key.
+func zjDecodeMembers_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
+	_ = a
 	for {
 		key := l.ReadKey()
 		if l.Err() != nil {

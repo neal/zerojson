@@ -1350,10 +1350,13 @@ func zjDecode_RawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHolder) {
 
 // zjDecodeOrdered_RawHolder speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
-// the general keyed loop. It returns false with zero observable
-// effect (once the caller rewinds via Lexer.OrderedBail) on any
-// structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallback_RawHolder;
+// the general keyed loop. A deviation at a member boundary (an
+// out-of-order, duplicate, or escaped key, or non-compact syntax
+// around one) hands the rest of the object to zjDecodeMembers_RawHolder:
+// every member before it was decoded exactly as the keyed decoder
+// would, so only the remainder needs the general path. Any other
+// deviation returns false, and the caller rewinds via
+// Lexer.OrderedBail and retries the object through zjDecodeFallback_RawHolder;
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_RawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHolder) bool {
 	_ = a
@@ -1385,6 +1388,7 @@ func zjDecodeOrdered_RawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHol
 	}
 	expected := 0
 	for {
+		memberPos := l.Pos()
 		matched := -1
 		for k := expected; k < 3; k++ {
 			if zjTryOrderedKeyRawHolder(l, k) {
@@ -1407,16 +1411,19 @@ func zjDecodeOrdered_RawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHol
 			// name here — regardless of index — means duplicate,
 			// out-of-order, non-compact syntax around an otherwise
 			// valid key, or an escaped key that decodes to a declared
-			// name; any of those must bail so the fallback's
-			// last-wins/general handling applies. Only a name matching
-			// no declared field is genuinely unknown and safe to skip
-			// inline (the projection-struct fast path).
+			// name. The keyed decoder's last-wins/general handling
+			// takes over from this member. Only a name matching no
+			// declared field (folded as the keyed decoder folds it) is
+			// genuinely unknown and safe to skip inline (the
+			// projection-struct fast path).
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
 			}
 			if zjIsDeclaredKeyRawHolder(string(key)) {
-				return false
+				l.SetPos(memberPos)
+				zjDecodeMembers_RawHolder(l, v, a)
+				return l.Err() == nil
 			}
 			l.Skip()
 			if l.Err() != nil {
@@ -1440,7 +1447,13 @@ func zjDecodeOrdered_RawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHol
 			l.Leave()
 			return true
 		default:
-			return false
+			// Whitespace before the separator: the member is complete,
+			// so the keyed decoder continues from here. NextMember
+			// leaves the nesting level on the closing brace.
+			if l.NextMember() {
+				zjDecodeMembers_RawHolder(l, v, a)
+			}
+			return l.Err() == nil
 		}
 	}
 }
@@ -1544,6 +1557,13 @@ func zjDecodeFallback_RawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHo
 	if !l.EnterObject() {
 		return
 	}
+	zjDecodeMembers_RawHolder(l, v, a)
+}
+
+// zjDecodeMembers_RawHolder decodes the remaining members of an object whose opening
+// brace and nesting level are already consumed, positioned at a key.
+func zjDecodeMembers_RawHolder(l *zerojson.Lexer, v *RawHolder, a *zjArenaRawHolder) {
+	_ = a
 	for {
 		key := l.ReadKey()
 		if l.Err() != nil {
@@ -1873,10 +1893,13 @@ func zjDecode_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjArenaOmitZ
 
 // zjDecodeOrdered_OmitZeroCases speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
-// the general keyed loop. It returns false with zero observable
-// effect (once the caller rewinds via Lexer.OrderedBail) on any
-// structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallback_OmitZeroCases;
+// the general keyed loop. A deviation at a member boundary (an
+// out-of-order, duplicate, or escaped key, or non-compact syntax
+// around one) hands the rest of the object to zjDecodeMembers_OmitZeroCases:
+// every member before it was decoded exactly as the keyed decoder
+// would, so only the remainder needs the general path. Any other
+// deviation returns false, and the caller rewinds via
+// Lexer.OrderedBail and retries the object through zjDecodeFallback_OmitZeroCases;
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjArenaOmitZeroCases) bool {
 	_ = a
@@ -1908,6 +1931,7 @@ func zjDecodeOrdered_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjAre
 	}
 	expected := 0
 	for {
+		memberPos := l.Pos()
 		matched := -1
 		for k := expected; k < 8; k++ {
 			if zjTryOrderedKeyOmitZeroCases(l, k) {
@@ -1930,16 +1954,19 @@ func zjDecodeOrdered_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjAre
 			// name here — regardless of index — means duplicate,
 			// out-of-order, non-compact syntax around an otherwise
 			// valid key, or an escaped key that decodes to a declared
-			// name; any of those must bail so the fallback's
-			// last-wins/general handling applies. Only a name matching
-			// no declared field is genuinely unknown and safe to skip
-			// inline (the projection-struct fast path).
+			// name. The keyed decoder's last-wins/general handling
+			// takes over from this member. Only a name matching no
+			// declared field (folded as the keyed decoder folds it) is
+			// genuinely unknown and safe to skip inline (the
+			// projection-struct fast path).
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
 			}
 			if zjIsDeclaredKeyOmitZeroCases(string(key)) {
-				return false
+				l.SetPos(memberPos)
+				zjDecodeMembers_OmitZeroCases(l, v, a)
+				return l.Err() == nil
 			}
 			l.Skip()
 			if l.Err() != nil {
@@ -1963,7 +1990,13 @@ func zjDecodeOrdered_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjAre
 			l.Leave()
 			return true
 		default:
-			return false
+			// Whitespace before the separator: the member is complete,
+			// so the keyed decoder continues from here. NextMember
+			// leaves the nesting level on the closing brace.
+			if l.NextMember() {
+				zjDecodeMembers_OmitZeroCases(l, v, a)
+			}
+			return l.Err() == nil
 		}
 	}
 }
@@ -2245,6 +2278,13 @@ func zjDecodeFallback_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjAr
 	if !l.EnterObject() {
 		return
 	}
+	zjDecodeMembers_OmitZeroCases(l, v, a)
+}
+
+// zjDecodeMembers_OmitZeroCases decodes the remaining members of an object whose opening
+// brace and nesting level are already consumed, positioned at a key.
+func zjDecodeMembers_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjArenaOmitZeroCases) {
+	_ = a
 	for {
 		key := l.ReadKey()
 		if l.Err() != nil {
@@ -2586,10 +2626,13 @@ func zjDecode_StringOptCases(l *zerojson.Lexer, v *StringOptCases, a *zjArenaStr
 
 // zjDecodeOrdered_StringOptCases speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
-// the general keyed loop. It returns false with zero observable
-// effect (once the caller rewinds via Lexer.OrderedBail) on any
-// structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallback_StringOptCases;
+// the general keyed loop. A deviation at a member boundary (an
+// out-of-order, duplicate, or escaped key, or non-compact syntax
+// around one) hands the rest of the object to zjDecodeMembers_StringOptCases:
+// every member before it was decoded exactly as the keyed decoder
+// would, so only the remainder needs the general path. Any other
+// deviation returns false, and the caller rewinds via
+// Lexer.OrderedBail and retries the object through zjDecodeFallback_StringOptCases;
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_StringOptCases(l *zerojson.Lexer, v *StringOptCases, a *zjArenaStringOptCases) bool {
 	_ = a
@@ -2617,6 +2660,7 @@ func zjDecodeOrdered_StringOptCases(l *zerojson.Lexer, v *StringOptCases, a *zjA
 	}
 	expected := 0
 	for {
+		memberPos := l.Pos()
 		matched := -1
 		for k := expected; k < 2; k++ {
 			if zjTryOrderedKeyStringOptCases(l, k) {
@@ -2639,16 +2683,19 @@ func zjDecodeOrdered_StringOptCases(l *zerojson.Lexer, v *StringOptCases, a *zjA
 			// name here — regardless of index — means duplicate,
 			// out-of-order, non-compact syntax around an otherwise
 			// valid key, or an escaped key that decodes to a declared
-			// name; any of those must bail so the fallback's
-			// last-wins/general handling applies. Only a name matching
-			// no declared field is genuinely unknown and safe to skip
-			// inline (the projection-struct fast path).
+			// name. The keyed decoder's last-wins/general handling
+			// takes over from this member. Only a name matching no
+			// declared field (folded as the keyed decoder folds it) is
+			// genuinely unknown and safe to skip inline (the
+			// projection-struct fast path).
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
 			}
 			if zjIsDeclaredKeyStringOptCases(string(key)) {
-				return false
+				l.SetPos(memberPos)
+				zjDecodeMembers_StringOptCases(l, v, a)
+				return l.Err() == nil
 			}
 			l.Skip()
 			if l.Err() != nil {
@@ -2672,7 +2719,13 @@ func zjDecodeOrdered_StringOptCases(l *zerojson.Lexer, v *StringOptCases, a *zjA
 			l.Leave()
 			return true
 		default:
-			return false
+			// Whitespace before the separator: the member is complete,
+			// so the keyed decoder continues from here. NextMember
+			// leaves the nesting level on the closing brace.
+			if l.NextMember() {
+				zjDecodeMembers_StringOptCases(l, v, a)
+			}
+			return l.Err() == nil
 		}
 	}
 }
@@ -2756,6 +2809,13 @@ func zjDecodeFallback_StringOptCases(l *zerojson.Lexer, v *StringOptCases, a *zj
 	if !l.EnterObject() {
 		return
 	}
+	zjDecodeMembers_StringOptCases(l, v, a)
+}
+
+// zjDecodeMembers_StringOptCases decodes the remaining members of an object whose opening
+// brace and nesting level are already consumed, positioned at a key.
+func zjDecodeMembers_StringOptCases(l *zerojson.Lexer, v *StringOptCases, a *zjArenaStringOptCases) {
+	_ = a
 	for {
 		key := l.ReadKey()
 		if l.Err() != nil {
@@ -3439,10 +3499,13 @@ func zjDecode_EventLeg(l *zerojson.Lexer, v *EventLeg, a *zjArenaEventLeg) {
 
 // zjDecodeOrdered_EventLeg speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
-// the general keyed loop. It returns false with zero observable
-// effect (once the caller rewinds via Lexer.OrderedBail) on any
-// structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallback_EventLeg;
+// the general keyed loop. A deviation at a member boundary (an
+// out-of-order, duplicate, or escaped key, or non-compact syntax
+// around one) hands the rest of the object to zjDecodeMembers_EventLeg:
+// every member before it was decoded exactly as the keyed decoder
+// would, so only the remainder needs the general path. Any other
+// deviation returns false, and the caller rewinds via
+// Lexer.OrderedBail and retries the object through zjDecodeFallback_EventLeg;
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_EventLeg(l *zerojson.Lexer, v *EventLeg, a *zjArenaEventLeg) bool {
 	_ = a
@@ -3470,6 +3533,7 @@ func zjDecodeOrdered_EventLeg(l *zerojson.Lexer, v *EventLeg, a *zjArenaEventLeg
 	}
 	expected := 0
 	for {
+		memberPos := l.Pos()
 		matched := -1
 		for k := expected; k < 3; k++ {
 			if zjTryOrderedKeyEventLeg(l, k) {
@@ -3492,16 +3556,19 @@ func zjDecodeOrdered_EventLeg(l *zerojson.Lexer, v *EventLeg, a *zjArenaEventLeg
 			// name here — regardless of index — means duplicate,
 			// out-of-order, non-compact syntax around an otherwise
 			// valid key, or an escaped key that decodes to a declared
-			// name; any of those must bail so the fallback's
-			// last-wins/general handling applies. Only a name matching
-			// no declared field is genuinely unknown and safe to skip
-			// inline (the projection-struct fast path).
+			// name. The keyed decoder's last-wins/general handling
+			// takes over from this member. Only a name matching no
+			// declared field (folded as the keyed decoder folds it) is
+			// genuinely unknown and safe to skip inline (the
+			// projection-struct fast path).
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
 			}
 			if zjIsDeclaredKeyEventLeg(string(key)) {
-				return false
+				l.SetPos(memberPos)
+				zjDecodeMembers_EventLeg(l, v, a)
+				return l.Err() == nil
 			}
 			l.Skip()
 			if l.Err() != nil {
@@ -3525,7 +3592,13 @@ func zjDecodeOrdered_EventLeg(l *zerojson.Lexer, v *EventLeg, a *zjArenaEventLeg
 			l.Leave()
 			return true
 		default:
-			return false
+			// Whitespace before the separator: the member is complete,
+			// so the keyed decoder continues from here. NextMember
+			// leaves the nesting level on the closing brace.
+			if l.NextMember() {
+				zjDecodeMembers_EventLeg(l, v, a)
+			}
+			return l.Err() == nil
 		}
 	}
 }
@@ -3622,6 +3695,13 @@ func zjDecodeFallback_EventLeg(l *zerojson.Lexer, v *EventLeg, a *zjArenaEventLe
 	if !l.EnterObject() {
 		return
 	}
+	zjDecodeMembers_EventLeg(l, v, a)
+}
+
+// zjDecodeMembers_EventLeg decodes the remaining members of an object whose opening
+// brace and nesting level are already consumed, positioned at a key.
+func zjDecodeMembers_EventLeg(l *zerojson.Lexer, v *EventLeg, a *zjArenaEventLeg) {
+	_ = a
 	for {
 		key := l.ReadKey()
 		if l.Err() != nil {
@@ -3852,10 +3932,13 @@ func zjDecode_EmbedMid(l *zerojson.Lexer, v *EmbedMid, a *zjArenaEmbedMid) {
 
 // zjDecodeOrdered_EmbedMid speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
-// the general keyed loop. It returns false with zero observable
-// effect (once the caller rewinds via Lexer.OrderedBail) on any
-// structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallback_EmbedMid;
+// the general keyed loop. A deviation at a member boundary (an
+// out-of-order, duplicate, or escaped key, or non-compact syntax
+// around one) hands the rest of the object to zjDecodeMembers_EmbedMid:
+// every member before it was decoded exactly as the keyed decoder
+// would, so only the remainder needs the general path. Any other
+// deviation returns false, and the caller rewinds via
+// Lexer.OrderedBail and retries the object through zjDecodeFallback_EmbedMid;
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_EmbedMid(l *zerojson.Lexer, v *EmbedMid, a *zjArenaEmbedMid) bool {
 	_ = a
@@ -3883,6 +3966,7 @@ func zjDecodeOrdered_EmbedMid(l *zerojson.Lexer, v *EmbedMid, a *zjArenaEmbedMid
 	}
 	expected := 0
 	for {
+		memberPos := l.Pos()
 		matched := -1
 		for k := expected; k < 4; k++ {
 			if zjTryOrderedKeyEmbedMid(l, k) {
@@ -3905,16 +3989,19 @@ func zjDecodeOrdered_EmbedMid(l *zerojson.Lexer, v *EmbedMid, a *zjArenaEmbedMid
 			// name here — regardless of index — means duplicate,
 			// out-of-order, non-compact syntax around an otherwise
 			// valid key, or an escaped key that decodes to a declared
-			// name; any of those must bail so the fallback's
-			// last-wins/general handling applies. Only a name matching
-			// no declared field is genuinely unknown and safe to skip
-			// inline (the projection-struct fast path).
+			// name. The keyed decoder's last-wins/general handling
+			// takes over from this member. Only a name matching no
+			// declared field (folded as the keyed decoder folds it) is
+			// genuinely unknown and safe to skip inline (the
+			// projection-struct fast path).
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
 			}
 			if zjIsDeclaredKeyEmbedMid(string(key)) {
-				return false
+				l.SetPos(memberPos)
+				zjDecodeMembers_EmbedMid(l, v, a)
+				return l.Err() == nil
 			}
 			l.Skip()
 			if l.Err() != nil {
@@ -3938,7 +4025,13 @@ func zjDecodeOrdered_EmbedMid(l *zerojson.Lexer, v *EmbedMid, a *zjArenaEmbedMid
 			l.Leave()
 			return true
 		default:
-			return false
+			// Whitespace before the separator: the member is complete,
+			// so the keyed decoder continues from here. NextMember
+			// leaves the nesting level on the closing brace.
+			if l.NextMember() {
+				zjDecodeMembers_EmbedMid(l, v, a)
+			}
+			return l.Err() == nil
 		}
 	}
 }
@@ -4040,6 +4133,13 @@ func zjDecodeFallback_EmbedMid(l *zerojson.Lexer, v *EmbedMid, a *zjArenaEmbedMi
 	if !l.EnterObject() {
 		return
 	}
+	zjDecodeMembers_EmbedMid(l, v, a)
+}
+
+// zjDecodeMembers_EmbedMid decodes the remaining members of an object whose opening
+// brace and nesting level are already consumed, positioned at a key.
+func zjDecodeMembers_EmbedMid(l *zerojson.Lexer, v *EmbedMid, a *zjArenaEmbedMid) {
+	_ = a
 	for {
 		key := l.ReadKey()
 		if l.Err() != nil {
@@ -4241,10 +4341,13 @@ func zjDecode_EventProjection(l *zerojson.Lexer, v *EventProjection, a *zjArenaE
 
 // zjDecodeOrdered_EventProjection speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
-// the general keyed loop. It returns false with zero observable
-// effect (once the caller rewinds via Lexer.OrderedBail) on any
-// structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallback_EventProjection;
+// the general keyed loop. A deviation at a member boundary (an
+// out-of-order, duplicate, or escaped key, or non-compact syntax
+// around one) hands the rest of the object to zjDecodeMembers_EventProjection:
+// every member before it was decoded exactly as the keyed decoder
+// would, so only the remainder needs the general path. Any other
+// deviation returns false, and the caller rewinds via
+// Lexer.OrderedBail and retries the object through zjDecodeFallback_EventProjection;
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_EventProjection(l *zerojson.Lexer, v *EventProjection, a *zjArenaEventProjection) bool {
 	_ = a
@@ -4272,6 +4375,7 @@ func zjDecodeOrdered_EventProjection(l *zerojson.Lexer, v *EventProjection, a *z
 	}
 	expected := 0
 	for {
+		memberPos := l.Pos()
 		matched := -1
 		for k := expected; k < 2; k++ {
 			if zjTryOrderedKeyEventProjection(l, k) {
@@ -4294,16 +4398,19 @@ func zjDecodeOrdered_EventProjection(l *zerojson.Lexer, v *EventProjection, a *z
 			// name here — regardless of index — means duplicate,
 			// out-of-order, non-compact syntax around an otherwise
 			// valid key, or an escaped key that decodes to a declared
-			// name; any of those must bail so the fallback's
-			// last-wins/general handling applies. Only a name matching
-			// no declared field is genuinely unknown and safe to skip
-			// inline (the projection-struct fast path).
+			// name. The keyed decoder's last-wins/general handling
+			// takes over from this member. Only a name matching no
+			// declared field (folded as the keyed decoder folds it) is
+			// genuinely unknown and safe to skip inline (the
+			// projection-struct fast path).
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
 			}
 			if zjIsDeclaredKeyEventProjection(string(key)) {
-				return false
+				l.SetPos(memberPos)
+				zjDecodeMembers_EventProjection(l, v, a)
+				return l.Err() == nil
 			}
 			l.Skip()
 			if l.Err() != nil {
@@ -4327,7 +4434,13 @@ func zjDecodeOrdered_EventProjection(l *zerojson.Lexer, v *EventProjection, a *z
 			l.Leave()
 			return true
 		default:
-			return false
+			// Whitespace before the separator: the member is complete,
+			// so the keyed decoder continues from here. NextMember
+			// leaves the nesting level on the closing brace.
+			if l.NextMember() {
+				zjDecodeMembers_EventProjection(l, v, a)
+			}
+			return l.Err() == nil
 		}
 	}
 }
@@ -4405,6 +4518,13 @@ func zjDecodeFallback_EventProjection(l *zerojson.Lexer, v *EventProjection, a *
 	if !l.EnterObject() {
 		return
 	}
+	zjDecodeMembers_EventProjection(l, v, a)
+}
+
+// zjDecodeMembers_EventProjection decodes the remaining members of an object whose opening
+// brace and nesting level are already consumed, positioned at a key.
+func zjDecodeMembers_EventProjection(l *zerojson.Lexer, v *EventProjection, a *zjArenaEventProjection) {
+	_ = a
 	for {
 		key := l.ReadKey()
 		if l.Err() != nil {
@@ -4664,10 +4784,13 @@ func zjDecode_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZero, a *
 
 // zjDecodeOrdered_InteractionOmitZero speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
-// the general keyed loop. It returns false with zero observable
-// effect (once the caller rewinds via Lexer.OrderedBail) on any
-// structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallback_InteractionOmitZero;
+// the general keyed loop. A deviation at a member boundary (an
+// out-of-order, duplicate, or escaped key, or non-compact syntax
+// around one) hands the rest of the object to zjDecodeMembers_InteractionOmitZero:
+// every member before it was decoded exactly as the keyed decoder
+// would, so only the remainder needs the general path. Any other
+// deviation returns false, and the caller rewinds via
+// Lexer.OrderedBail and retries the object through zjDecodeFallback_InteractionOmitZero;
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZero, a *zjArenaInteractionOmitZero) bool {
 	_ = a
@@ -4699,6 +4822,7 @@ func zjDecodeOrdered_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZe
 	}
 	expected := 0
 	for {
+		memberPos := l.Pos()
 		matched := -1
 		for k := expected; k < 4; k++ {
 			if zjTryOrderedKeyInteractionOmitZero(l, k) {
@@ -4721,16 +4845,19 @@ func zjDecodeOrdered_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZe
 			// name here — regardless of index — means duplicate,
 			// out-of-order, non-compact syntax around an otherwise
 			// valid key, or an escaped key that decodes to a declared
-			// name; any of those must bail so the fallback's
-			// last-wins/general handling applies. Only a name matching
-			// no declared field is genuinely unknown and safe to skip
-			// inline (the projection-struct fast path).
+			// name. The keyed decoder's last-wins/general handling
+			// takes over from this member. Only a name matching no
+			// declared field (folded as the keyed decoder folds it) is
+			// genuinely unknown and safe to skip inline (the
+			// projection-struct fast path).
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
 			}
 			if zjIsDeclaredKeyInteractionOmitZero(string(key)) {
-				return false
+				l.SetPos(memberPos)
+				zjDecodeMembers_InteractionOmitZero(l, v, a)
+				return l.Err() == nil
 			}
 			l.Skip()
 			if l.Err() != nil {
@@ -4754,7 +4881,13 @@ func zjDecodeOrdered_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZe
 			l.Leave()
 			return true
 		default:
-			return false
+			// Whitespace before the separator: the member is complete,
+			// so the keyed decoder continues from here. NextMember
+			// leaves the nesting level on the closing brace.
+			if l.NextMember() {
+				zjDecodeMembers_InteractionOmitZero(l, v, a)
+			}
+			return l.Err() == nil
 		}
 	}
 }
@@ -4938,6 +5071,13 @@ func zjDecodeFallback_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZ
 	if !l.EnterObject() {
 		return
 	}
+	zjDecodeMembers_InteractionOmitZero(l, v, a)
+}
+
+// zjDecodeMembers_InteractionOmitZero decodes the remaining members of an object whose opening
+// brace and nesting level are already consumed, positioned at a key.
+func zjDecodeMembers_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZero, a *zjArenaInteractionOmitZero) {
+	_ = a
 	for {
 		key := l.ReadKey()
 		if l.Err() != nil {
@@ -6257,10 +6397,13 @@ func zjDecode_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaBytesCases)
 
 // zjDecodeOrdered_BytesCases speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
-// the general keyed loop. It returns false with zero observable
-// effect (once the caller rewinds via Lexer.OrderedBail) on any
-// structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallback_BytesCases;
+// the general keyed loop. A deviation at a member boundary (an
+// out-of-order, duplicate, or escaped key, or non-compact syntax
+// around one) hands the rest of the object to zjDecodeMembers_BytesCases:
+// every member before it was decoded exactly as the keyed decoder
+// would, so only the remainder needs the general path. Any other
+// deviation returns false, and the caller rewinds via
+// Lexer.OrderedBail and retries the object through zjDecodeFallback_BytesCases;
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaBytesCases) bool {
 	_ = a
@@ -6292,6 +6435,7 @@ func zjDecodeOrdered_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaByte
 	}
 	expected := 0
 	for {
+		memberPos := l.Pos()
 		matched := -1
 		for k := expected; k < 4; k++ {
 			if zjTryOrderedKeyBytesCases(l, k) {
@@ -6314,16 +6458,19 @@ func zjDecodeOrdered_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaByte
 			// name here — regardless of index — means duplicate,
 			// out-of-order, non-compact syntax around an otherwise
 			// valid key, or an escaped key that decodes to a declared
-			// name; any of those must bail so the fallback's
-			// last-wins/general handling applies. Only a name matching
-			// no declared field is genuinely unknown and safe to skip
-			// inline (the projection-struct fast path).
+			// name. The keyed decoder's last-wins/general handling
+			// takes over from this member. Only a name matching no
+			// declared field (folded as the keyed decoder folds it) is
+			// genuinely unknown and safe to skip inline (the
+			// projection-struct fast path).
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
 			}
 			if zjIsDeclaredKeyBytesCases(string(key)) {
-				return false
+				l.SetPos(memberPos)
+				zjDecodeMembers_BytesCases(l, v, a)
+				return l.Err() == nil
 			}
 			l.Skip()
 			if l.Err() != nil {
@@ -6347,7 +6494,13 @@ func zjDecodeOrdered_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaByte
 			l.Leave()
 			return true
 		default:
-			return false
+			// Whitespace before the separator: the member is complete,
+			// so the keyed decoder continues from here. NextMember
+			// leaves the nesting level on the closing brace.
+			if l.NextMember() {
+				zjDecodeMembers_BytesCases(l, v, a)
+			}
+			return l.Err() == nil
 		}
 	}
 }
@@ -6579,6 +6732,13 @@ func zjDecodeFallback_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaByt
 	if !l.EnterObject() {
 		return
 	}
+	zjDecodeMembers_BytesCases(l, v, a)
+}
+
+// zjDecodeMembers_BytesCases decodes the remaining members of an object whose opening
+// brace and nesting level are already consumed, positioned at a key.
+func zjDecodeMembers_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaBytesCases) {
+	_ = a
 	for {
 		key := l.ReadKey()
 		if l.Err() != nil {
@@ -8327,10 +8487,13 @@ func zjDecode_PointerCollections(l *zerojson.Lexer, v *PointerCollections, a *zj
 
 // zjDecodeOrdered_PointerCollections speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
-// the general keyed loop. It returns false with zero observable
-// effect (once the caller rewinds via Lexer.OrderedBail) on any
-// structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallback_PointerCollections;
+// the general keyed loop. A deviation at a member boundary (an
+// out-of-order, duplicate, or escaped key, or non-compact syntax
+// around one) hands the rest of the object to zjDecodeMembers_PointerCollections:
+// every member before it was decoded exactly as the keyed decoder
+// would, so only the remainder needs the general path. Any other
+// deviation returns false, and the caller rewinds via
+// Lexer.OrderedBail and retries the object through zjDecodeFallback_PointerCollections;
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_PointerCollections(l *zerojson.Lexer, v *PointerCollections, a *zjArenaPointerCollections) bool {
 	_ = a
@@ -8362,6 +8525,7 @@ func zjDecodeOrdered_PointerCollections(l *zerojson.Lexer, v *PointerCollections
 	}
 	expected := 0
 	for {
+		memberPos := l.Pos()
 		matched := -1
 		for k := expected; k < 4; k++ {
 			if zjTryOrderedKeyPointerCollections(l, k) {
@@ -8384,16 +8548,19 @@ func zjDecodeOrdered_PointerCollections(l *zerojson.Lexer, v *PointerCollections
 			// name here — regardless of index — means duplicate,
 			// out-of-order, non-compact syntax around an otherwise
 			// valid key, or an escaped key that decodes to a declared
-			// name; any of those must bail so the fallback's
-			// last-wins/general handling applies. Only a name matching
-			// no declared field is genuinely unknown and safe to skip
-			// inline (the projection-struct fast path).
+			// name. The keyed decoder's last-wins/general handling
+			// takes over from this member. Only a name matching no
+			// declared field (folded as the keyed decoder folds it) is
+			// genuinely unknown and safe to skip inline (the
+			// projection-struct fast path).
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
 			}
 			if zjIsDeclaredKeyPointerCollections(string(key)) {
-				return false
+				l.SetPos(memberPos)
+				zjDecodeMembers_PointerCollections(l, v, a)
+				return l.Err() == nil
 			}
 			l.Skip()
 			if l.Err() != nil {
@@ -8417,7 +8584,13 @@ func zjDecodeOrdered_PointerCollections(l *zerojson.Lexer, v *PointerCollections
 			l.Leave()
 			return true
 		default:
-			return false
+			// Whitespace before the separator: the member is complete,
+			// so the keyed decoder continues from here. NextMember
+			// leaves the nesting level on the closing brace.
+			if l.NextMember() {
+				zjDecodeMembers_PointerCollections(l, v, a)
+			}
+			return l.Err() == nil
 		}
 	}
 }
@@ -8694,6 +8867,13 @@ func zjDecodeFallback_PointerCollections(l *zerojson.Lexer, v *PointerCollection
 	if !l.EnterObject() {
 		return
 	}
+	zjDecodeMembers_PointerCollections(l, v, a)
+}
+
+// zjDecodeMembers_PointerCollections decodes the remaining members of an object whose opening
+// brace and nesting level are already consumed, positioned at a key.
+func zjDecodeMembers_PointerCollections(l *zerojson.Lexer, v *PointerCollections, a *zjArenaPointerCollections) {
+	_ = a
 	for {
 		key := l.ReadKey()
 		if l.Err() != nil {
@@ -9204,10 +9384,13 @@ func zjDecode_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNumberCas
 
 // zjDecodeOrdered_NumberCases speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
-// the general keyed loop. It returns false with zero observable
-// effect (once the caller rewinds via Lexer.OrderedBail) on any
-// structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallback_NumberCases;
+// the general keyed loop. A deviation at a member boundary (an
+// out-of-order, duplicate, or escaped key, or non-compact syntax
+// around one) hands the rest of the object to zjDecodeMembers_NumberCases:
+// every member before it was decoded exactly as the keyed decoder
+// would, so only the remainder needs the general path. Any other
+// deviation returns false, and the caller rewinds via
+// Lexer.OrderedBail and retries the object through zjDecodeFallback_NumberCases;
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNumberCases) bool {
 	_ = a
@@ -9239,6 +9422,7 @@ func zjDecodeOrdered_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNu
 	}
 	expected := 0
 	for {
+		memberPos := l.Pos()
 		matched := -1
 		for k := expected; k < 7; k++ {
 			if zjTryOrderedKeyNumberCases(l, k) {
@@ -9261,16 +9445,19 @@ func zjDecodeOrdered_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNu
 			// name here — regardless of index — means duplicate,
 			// out-of-order, non-compact syntax around an otherwise
 			// valid key, or an escaped key that decodes to a declared
-			// name; any of those must bail so the fallback's
-			// last-wins/general handling applies. Only a name matching
-			// no declared field is genuinely unknown and safe to skip
-			// inline (the projection-struct fast path).
+			// name. The keyed decoder's last-wins/general handling
+			// takes over from this member. Only a name matching no
+			// declared field (folded as the keyed decoder folds it) is
+			// genuinely unknown and safe to skip inline (the
+			// projection-struct fast path).
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
 			}
 			if zjIsDeclaredKeyNumberCases(string(key)) {
-				return false
+				l.SetPos(memberPos)
+				zjDecodeMembers_NumberCases(l, v, a)
+				return l.Err() == nil
 			}
 			l.Skip()
 			if l.Err() != nil {
@@ -9294,7 +9481,13 @@ func zjDecodeOrdered_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNu
 			l.Leave()
 			return true
 		default:
-			return false
+			// Whitespace before the separator: the member is complete,
+			// so the keyed decoder continues from here. NextMember
+			// leaves the nesting level on the closing brace.
+			if l.NextMember() {
+				zjDecodeMembers_NumberCases(l, v, a)
+			}
+			return l.Err() == nil
 		}
 	}
 }
@@ -9546,6 +9739,13 @@ func zjDecodeFallback_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaN
 	if !l.EnterObject() {
 		return
 	}
+	zjDecodeMembers_NumberCases(l, v, a)
+}
+
+// zjDecodeMembers_NumberCases decodes the remaining members of an object whose opening
+// brace and nesting level are already consumed, positioned at a key.
+func zjDecodeMembers_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNumberCases) {
+	_ = a
 	for {
 		key := l.ReadKey()
 		if l.Err() != nil {
@@ -10228,10 +10428,13 @@ func zjDecode_EventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventMeta) {
 
 // zjDecodeOrdered_EventMeta speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
-// the general keyed loop. It returns false with zero observable
-// effect (once the caller rewinds via Lexer.OrderedBail) on any
-// structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallback_EventMeta;
+// the general keyed loop. A deviation at a member boundary (an
+// out-of-order, duplicate, or escaped key, or non-compact syntax
+// around one) hands the rest of the object to zjDecodeMembers_EventMeta:
+// every member before it was decoded exactly as the keyed decoder
+// would, so only the remainder needs the general path. Any other
+// deviation returns false, and the caller rewinds via
+// Lexer.OrderedBail and retries the object through zjDecodeFallback_EventMeta;
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_EventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventMeta) bool {
 	_ = a
@@ -10263,6 +10466,7 @@ func zjDecodeOrdered_EventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventM
 	}
 	expected := 0
 	for {
+		memberPos := l.Pos()
 		matched := -1
 		for k := expected; k < 3; k++ {
 			if zjTryOrderedKeyEventMeta(l, k) {
@@ -10285,16 +10489,19 @@ func zjDecodeOrdered_EventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventM
 			// name here — regardless of index — means duplicate,
 			// out-of-order, non-compact syntax around an otherwise
 			// valid key, or an escaped key that decodes to a declared
-			// name; any of those must bail so the fallback's
-			// last-wins/general handling applies. Only a name matching
-			// no declared field is genuinely unknown and safe to skip
-			// inline (the projection-struct fast path).
+			// name. The keyed decoder's last-wins/general handling
+			// takes over from this member. Only a name matching no
+			// declared field (folded as the keyed decoder folds it) is
+			// genuinely unknown and safe to skip inline (the
+			// projection-struct fast path).
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
 			}
 			if zjIsDeclaredKeyEventMeta(string(key)) {
-				return false
+				l.SetPos(memberPos)
+				zjDecodeMembers_EventMeta(l, v, a)
+				return l.Err() == nil
 			}
 			l.Skip()
 			if l.Err() != nil {
@@ -10318,7 +10525,13 @@ func zjDecodeOrdered_EventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventM
 			l.Leave()
 			return true
 		default:
-			return false
+			// Whitespace before the separator: the member is complete,
+			// so the keyed decoder continues from here. NextMember
+			// leaves the nesting level on the closing brace.
+			if l.NextMember() {
+				zjDecodeMembers_EventMeta(l, v, a)
+			}
+			return l.Err() == nil
 		}
 	}
 }
@@ -10430,6 +10643,13 @@ func zjDecodeFallback_EventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEvent
 	if !l.EnterObject() {
 		return
 	}
+	zjDecodeMembers_EventMeta(l, v, a)
+}
+
+// zjDecodeMembers_EventMeta decodes the remaining members of an object whose opening
+// brace and nesting level are already consumed, positioned at a key.
+func zjDecodeMembers_EventMeta(l *zerojson.Lexer, v *EventMeta, a *zjArenaEventMeta) {
+	_ = a
 	for {
 		key := l.ReadKey()
 		if l.Err() != nil {
@@ -10600,10 +10820,13 @@ func zjDecode_ReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReuseInner)
 
 // zjDecodeOrdered_ReuseInner speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
-// the general keyed loop. It returns false with zero observable
-// effect (once the caller rewinds via Lexer.OrderedBail) on any
-// structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallback_ReuseInner;
+// the general keyed loop. A deviation at a member boundary (an
+// out-of-order, duplicate, or escaped key, or non-compact syntax
+// around one) hands the rest of the object to zjDecodeMembers_ReuseInner:
+// every member before it was decoded exactly as the keyed decoder
+// would, so only the remainder needs the general path. Any other
+// deviation returns false, and the caller rewinds via
+// Lexer.OrderedBail and retries the object through zjDecodeFallback_ReuseInner;
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_ReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReuseInner) bool {
 	_ = a
@@ -10631,6 +10854,7 @@ func zjDecodeOrdered_ReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReus
 	}
 	expected := 0
 	for {
+		memberPos := l.Pos()
 		matched := -1
 		for k := expected; k < 2; k++ {
 			if zjTryOrderedKeyReuseInner(l, k) {
@@ -10653,16 +10877,19 @@ func zjDecodeOrdered_ReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReus
 			// name here — regardless of index — means duplicate,
 			// out-of-order, non-compact syntax around an otherwise
 			// valid key, or an escaped key that decodes to a declared
-			// name; any of those must bail so the fallback's
-			// last-wins/general handling applies. Only a name matching
-			// no declared field is genuinely unknown and safe to skip
-			// inline (the projection-struct fast path).
+			// name. The keyed decoder's last-wins/general handling
+			// takes over from this member. Only a name matching no
+			// declared field (folded as the keyed decoder folds it) is
+			// genuinely unknown and safe to skip inline (the
+			// projection-struct fast path).
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
 			}
 			if zjIsDeclaredKeyReuseInner(string(key)) {
-				return false
+				l.SetPos(memberPos)
+				zjDecodeMembers_ReuseInner(l, v, a)
+				return l.Err() == nil
 			}
 			l.Skip()
 			if l.Err() != nil {
@@ -10686,7 +10913,13 @@ func zjDecodeOrdered_ReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReus
 			l.Leave()
 			return true
 		default:
-			return false
+			// Whitespace before the separator: the member is complete,
+			// so the keyed decoder continues from here. NextMember
+			// leaves the nesting level on the closing brace.
+			if l.NextMember() {
+				zjDecodeMembers_ReuseInner(l, v, a)
+			}
+			return l.Err() == nil
 		}
 	}
 }
@@ -10764,6 +10997,13 @@ func zjDecodeFallback_ReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReu
 	if !l.EnterObject() {
 		return
 	}
+	zjDecodeMembers_ReuseInner(l, v, a)
+}
+
+// zjDecodeMembers_ReuseInner decodes the remaining members of an object whose opening
+// brace and nesting level are already consumed, positioned at a key.
+func zjDecodeMembers_ReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReuseInner) {
+	_ = a
 	for {
 		key := l.ReadKey()
 		if l.Err() != nil {

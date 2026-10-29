@@ -53,8 +53,8 @@ func TestMapKeyInterningOptIn(t *testing.T) {
 	// Associate each behavior with its type. Global occurrence counts would
 	// miss an inverted condition because one copied and one interned path would
 	// still exist.
-	taggedMap := generatedFunction(t, code, "zjDecodeFallback_Tagged")
-	untaggedMap := generatedFunction(t, code, "zjDecodeFallback_Untagged")
+	taggedMap := keyedLoop(t, code, "Tagged")
+	untaggedMap := keyedLoop(t, code, "Untagged")
 	if !strings.Contains(taggedMap, "zerojson.Intern(l.ReadKey())") {
 		t.Error("tagged map key is not interned")
 	}
@@ -70,8 +70,8 @@ func TestMapKeyInterningOptIn(t *testing.T) {
 
 	// Known enum values always use declared constants. Unknown values are
 	// arbitrary input and are copied unless the field explicitly opts in.
-	taggedEnum := generatedFunction(t, code, "zjDecodeFallback_TaggedEnum")
-	untaggedEnum := generatedFunction(t, code, "zjDecodeFallback_UntaggedEnum")
+	taggedEnum := keyedLoop(t, code, "TaggedEnum")
+	untaggedEnum := keyedLoop(t, code, "UntaggedEnum")
 	if !strings.Contains(taggedEnum, "Mode(zerojson.Intern(b))") {
 		t.Error("tagged enum unknown-value fallback is not interned")
 	}
@@ -84,6 +84,17 @@ func TestMapKeyInterningOptIn(t *testing.T) {
 	if strings.Contains(untaggedEnum, "Mode(zerojson.Intern(b))") {
 		t.Error("untagged enum unknown-value fallback is interned by default")
 	}
+}
+
+// keyedLoop returns the generated function holding typ's keyed member loop:
+// zjDecodeMembers_<T> when the type has an ordered decoder that can hand off
+// to it, otherwise zjDecodeFallback_<T> itself.
+func keyedLoop(t *testing.T, code, typ string) string {
+	t.Helper()
+	if strings.Contains(code, "func zjDecodeMembers_"+typ+"(") {
+		return generatedFunction(t, code, "zjDecodeMembers_"+typ)
+	}
+	return generatedFunction(t, code, "zjDecodeFallback_"+typ)
 }
 
 func generatedFunction(t *testing.T, code, name string) string {

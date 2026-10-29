@@ -130,7 +130,7 @@ var generatedIdents = map[string]bool{
 	"mk": true, "mv": true, "i": true, "l": true, "a": true, "data": true,
 	"pos": true, "key": true, "e": true, "ea": true, "idx": true, "zjZero": true,
 	"expected": true, "matched": true, "d": true, "p": true, "k": true,
-	"start": true, "b": true, "w": true, "name": true, "isTopLevel": true,
+	"start": true, "memberPos": true, "b": true, "w": true, "name": true, "isTopLevel": true,
 	"json": true, "jwriter": true,
 	"jlexer": true, "bytes": true, "reflect": true, "testing": true,
 	"fmt": true, "strings": true, "f": true, "t": true, "seed": true,
