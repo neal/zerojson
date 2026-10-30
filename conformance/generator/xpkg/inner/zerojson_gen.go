@@ -936,7 +936,6 @@ func (d *ExtsDecoder) DecodeBorrow(data []byte, v *Exts) error {
 
 // zjArenaExtIndex holds working storage for one ExtIndex decode.
 type zjArenaExtIndex struct {
-	mRoot ExtIndex
 }
 
 // AppendZJSON appends the JSON encoding of v to dst: a nil ExtIndex as null,
@@ -1005,29 +1004,7 @@ func zjDecode_ExtIndex(l *zerojson.Lexer, v *ExtIndex, a *zjArenaExtIndex) {
 		*v = nil
 		return
 	}
-	if *v != nil {
-		a.mRoot = *v
-	} else {
-		a.mRoot = make(ExtIndex)
-	}
-	if l.EnterObject() {
-		for {
-			mk := string(string(l.ReadKey()))
-			var mv Ext
-			if !l.IsNull() {
-				var ea zjArenaExt
-				zjDecode_Ext(l, &mv, &ea)
-			}
-			if l.Err() != nil {
-				return
-			}
-			a.mRoot[mk] = mv
-			if !l.NextMember() {
-				break
-			}
-		}
-	}
-	*v = a.mRoot
+	*v = zjReadMap_ExtIndex(l, *v)
 }
 
 // ExtIndexDecoder decodes ExtIndex values with fresh storage on every call.
@@ -1615,4 +1592,29 @@ func zjDecodeMembers_Sub(l *zerojson.Lexer, v *Sub, a *zjArenaSub) {
 			break
 		}
 	}
+}
+
+// zjReadMap_ExtIndex decodes a JSON object into m, or into a new map when m is nil.
+func zjReadMap_ExtIndex(l *zerojson.Lexer, m ExtIndex) ExtIndex {
+	if m == nil {
+		m = make(ExtIndex)
+	}
+	if l.EnterObject() {
+		for {
+			mk := string(string(l.ReadKey()))
+			var mv Ext
+			if !l.IsNull() {
+				var ea zjArenaExt
+				zjDecode_Ext(l, &mv, &ea)
+			}
+			if l.Err() != nil {
+				break
+			}
+			m[mk] = mv
+			if !l.NextMember() {
+				break
+			}
+		}
+	}
+	return m
 }

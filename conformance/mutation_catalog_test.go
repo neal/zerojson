@@ -290,7 +290,7 @@ func mutationCatalog() []mutationCase {
 		},
 		{
 			name: "publication_map", tier: "full", file: "cmd/zerojsongen/decode.go",
-			old: `g.p("%s\t\t%s = make(%s)", ind, cell, f.typeStr)`, new: `g.p("%s\t\tif %s == nil { %s = make(%s) } else { clear(%s) }", ind, cell, cell, f.typeStr, cell)`, wantCount: 1,
+			old: `g.p("%s\t%s = %s(l, nil)", ind, cell, read)`, new: `g.p("%s\tif %s != nil { clear(%s); %s = %s(l, %s) } else { %s = %s(l, nil) }", ind, cell, cell, cell, read, cell, cell, read)`, wantCount: 1,
 			detector: generatorDetector(`^TestGeneratorBehaviorMatrix/publication_map_ordered$`), wantOutput: "publication pooled=",
 		},
 		{
@@ -316,9 +316,9 @@ func mutationCatalog() []mutationCase {
 		},
 		{
 			name: "state_campaign_observes_retained_maps", tier: "full", file: "cmd/zerojsongen/decode.go",
-			old: `g.p("%s\t\t%s = make(%s)", ind, cell, f.typeStr)`,
+			old: `g.p("%s\t%s = %s(l, nil)", ind, cell, read)`,
 			// Recycle detached storage to model clearing an observable map.
-			new:        `g.p("%s\t\tif %s == nil { %s = make(%s) } else { clear(%s) }", ind, cell, cell, f.typeStr, cell)`,
+			new:        `g.p("%s\tif %s != nil { clear(%s); %s = %s(l, %s) } else { %s = %s(l, nil) }", ind, cell, cell, cell, read, cell, cell, read)`,
 			occurrence: 0, wantCount: 1,
 			detector: generatorDetector(`^TestGeneratedSchemaCampaign$`), wantOutput: "state/retained-pointee mismatch",
 		},
@@ -393,23 +393,99 @@ func mutationCatalog() []mutationCase {
 			name:       "read_interface_keys_are_interned",
 			tier:       "quick",
 			file:       "interface.go",
-			old:        "m[string(l.ReadKey())] = l.ReadInterface()",
-			new:        "m[Intern(l.ReadKey())] = l.ReadInterface()",
+			old:        "k := string(l.ReadKey())",
+			new:        "k := Intern(l.ReadKey())",
 			occurrence: 0,
-			wantCount:  1,
+			wantCount:  2,
 			detector:   rootDetector(`^TestReadInterfaceDoesNotInternObjectKeys$`),
-			wantOutput: "retained an arbitrary object key",
+			wantOutput: "retained an arbitrary object key (member 0)",
+		},
+		{
+			name:       "read_interface_spill_keys_are_interned",
+			tier:       "quick",
+			file:       "interface.go",
+			old:        "k := string(l.ReadKey())",
+			new:        "k := Intern(l.ReadKey())",
+			occurrence: 1,
+			wantCount:  2,
+			detector:   rootDetector(`^TestReadInterfaceDoesNotInternObjectKeys$`),
+			wantOutput: "retained an arbitrary object key (member 9)",
+		},
+		{
+			// An error past the stack slots must not publish the members
+			// buffered so far as a partial object.
+			name: "read_interface_spill_error_returns_partial_object", tier: "quick", file: "interface.go",
+			old:       "\t\tif l.err != nil {\n\t\t\treturn nil\n\t\t}\n\t\tif m != nil {",
+			new:       "\t\tif l.err != nil {\n\t\t\tbreak\n\t\t}\n\t\tif m != nil {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestReadInterfaceObjectErrorIsNil$`), wantOutput: "want nil and an error",
+		},
+		{
+			// The spill buffer must hand over to direct insertion when full.
+			name: "read_interface_spill_overruns_buffer", tier: "quick", file: "interface.go",
+			old:       "} else if n < len(kv) {",
+			new:       "} else if n <= len(kv) {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestReadInterfaceObjectSizes$`), wantOutput: "index out of range",
+		},
+		{
+			// Members buffered before the hand-over to direct insertion
+			// must reach the map.
+			name: "read_interface_spill_drops_buffered_members", tier: "quick", file: "interface.go",
+			old:       "m = make(map[string]any, 2*len(kv))\n\t\t\tfor _, e := range kv[:n] {",
+			new:       "m = make(map[string]any, 2*len(kv))\n\t\t\tfor _, e := range kv[:0] {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestReadInterfaceObjectSizes$`), wantOutput: "n=40 dup=0: err=<nil>",
 		},
 		{
 			name:       "map_intern_opt_in_condition_is_inverted",
 			tier:       "quick",
-			file:       "cmd/zerojsongen/decode.go",
-			old:        "if f.intern {\n\t\t\tg.p(\"%s\\tmk := %s(zerojson.Intern(l.ReadKey()))\", ind, f.keyTypeStr)",
-			new:        "if !f.intern {\n\t\t\tg.p(\"%s\\tmk := %s(zerojson.Intern(l.ReadKey()))\", ind, f.keyTypeStr)",
+			file:       "cmd/zerojsongen/maps.go",
+			old:        "if intern {\n\t\tg.p(\"%smk := %s(zerojson.Intern(l.ReadKey()))\", ind, keyTypeStr)",
+			new:        "if !intern {\n\t\tg.p(\"%smk := %s(zerojson.Intern(l.ReadKey()))\", ind, keyTypeStr)",
 			occurrence: 0,
 			wantCount:  1,
 			detector:   generatorDetector(`^TestMapKeyInterningOptIn$`),
 			wantOutput: "tagged map key is not interned",
+		},
+		{
+			// The member that overflows the stack slots is handed to the
+			// spill helper and must be kept.
+			name: "map_spill_drops_handed_member", tier: "quick", file: "cmd/zerojsongen/maps.go",
+			old:        "g.p(\"\\tkv[n] = %s{mk, mv}\", entry)\n\tg.p(\"\\tn++\")",
+			new:        "g.p(\"\\t_, _ = mk, mv\")",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestMapSizesMatchStdlib$`), wantOutput: "mismatch for",
+		},
+		{
+			// An existing map is added to; buffering is only for new maps.
+			name: "map_existing_target_is_buffered", tier: "quick", file: "cmd/zerojsongen/maps.go",
+			old:        "g.p(\"\\t\\t\\tif m != nil {\")",
+			new:        "g.p(\"\\t\\t\\tif false {\")",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestMapSizesMatchStdlib$`), wantOutput: "mismatch for",
+		},
+		{
+			// Members buffered before the spill helper switches to direct
+			// insertion must reach the map.
+			name: "map_spill_drops_buffered_members", tier: "quick", file: "cmd/zerojsongen/maps.go",
+			old:        "g.p(\"\\t\\t\\tfor _, e := range kv[:n] { m[e.k] = e.v }\")",
+			new:        "g.p(\"\\t\\t\\tfor _, e := range kv[:0] { m[e.k] = e.v }\")",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestMapSizesMatchStdlib$`), wantOutput: "mismatch for",
+		},
+		{
+			// A buffered map must be made at its final size, not grown.
+			name: "map_spill_drops_size_hint", tier: "quick", file: "cmd/zerojsongen/maps.go",
+			old:        "g.p(\"\\t\\tm = make(%s, n)\", typeStr)",
+			new:        "g.p(\"\\t\\tm = make(%s)\", typeStr)",
+			occurrence: 1,
+			wantCount:  2,
+			regenerate: true,
+			detector:   codecDetector(`^TestMapDecodeMakesMapOnce$`), wantOutput: "decode allocations=",
 		},
 		{
 			name:       "enum_intern_opt_in_condition_is_inverted",

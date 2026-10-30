@@ -672,6 +672,7 @@ func (g *generator) classify(fi *fieldInfo, t types.Type, ctx string) {
 		fi.kind = kMap
 		fi.keyTypeStr = g.typeExpr(m.Key())
 		fi.valInfo = vi
+		fi.mapEntrySize = mapEntrySize(m.Key(), m.Elem())
 		return
 	}
 

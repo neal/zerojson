@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -53,8 +54,8 @@ func TestMapKeyInterningOptIn(t *testing.T) {
 	// Associate each behavior with its type. Global occurrence counts would
 	// miss an inverted condition because one copied and one interned path would
 	// still exist.
-	taggedMap := keyedLoop(t, code, "Tagged")
-	untaggedMap := keyedLoop(t, code, "Untagged")
+	taggedMap := mapDecoders(t, code, "Tagged")
+	untaggedMap := mapDecoders(t, code, "Untagged")
 	if !strings.Contains(taggedMap, "zerojson.Intern(l.ReadKey())") {
 		t.Error("tagged map key is not interned")
 	}
@@ -95,6 +96,21 @@ func keyedLoop(t *testing.T, code, typ string) string {
 		return generatedFunction(t, code, "zjDecodeMembers_"+typ)
 	}
 	return generatedFunction(t, code, "zjDecodeFallback_"+typ)
+}
+
+// mapDecoders returns the zjReadMap helper typ's keyed loop calls, with
+// its spill helper when it has one: map keys are read in both.
+func mapDecoders(t *testing.T, code, typ string) string {
+	t.Helper()
+	call := regexp.MustCompile(`zjReadMap_(\w+)\(`).FindStringSubmatch(keyedLoop(t, code, typ))
+	if call == nil {
+		t.Fatalf("%s decodes no map through a zjReadMap helper", typ)
+	}
+	src := generatedFunction(t, code, "zjReadMap_"+call[1])
+	if strings.Contains(code, "func zjSpillMap_"+call[1]+"(") {
+		src += generatedFunction(t, code, "zjSpillMap_"+call[1])
+	}
+	return src
 }
 
 func generatedFunction(t *testing.T, code, name string) string {

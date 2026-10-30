@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -166,6 +167,94 @@ func TestAppendInterfaceCallsMethodsOnce(t *testing.T) {
 		_, _ = AppendInterface(nil, c.v(&n))
 		if n != 1 {
 			t.Errorf("%s: method called %d times, want 1", c.name, n)
+		}
+	}
+}
+
+// objectDoc renders an object of n members cycling through every
+// ReadInterface shape, with nested (flat) objects of assorted sizes when
+// nest is set. A non-negative dup repeats that member's key last with a new
+// value, which must win.
+func objectDoc(n, dup int, nest bool) []byte {
+	var b strings.Builder
+	b.WriteByte('{')
+	member := func(i, key int) {
+		if b.Len() > 1 {
+			b.WriteByte(',')
+		}
+		b.WriteString(`"k` + strconv.Itoa(key) + `":`)
+		switch i % 5 {
+		case 0:
+			b.WriteString(`"s` + strconv.Itoa(i) + `"`)
+		case 1:
+			b.WriteString(strconv.Itoa(i) + ".5")
+		case 2:
+			b.WriteString("null")
+		case 3:
+			if nest {
+				b.Write(objectDoc(i%(2*objectSpillSlots+3), -1, false))
+			} else {
+				b.WriteString("false")
+			}
+		default:
+			b.WriteString(`[true,` + strconv.Itoa(i) + `]`)
+		}
+	}
+	for i := range n {
+		member(i, i)
+	}
+	if dup >= 0 && dup < n {
+		member(n, dup)
+	}
+	b.WriteByte('}')
+	return []byte(b.String())
+}
+
+// TestReadInterfaceObjectSizes decodes objects across readObject's
+// boundaries — objectSlots members on the stack, then the spill buffer, then
+// direct insertion — and compares each with encoding/json.
+func TestReadInterfaceObjectSizes(t *testing.T) {
+	direct := 2 * objectSpillSlots
+	sizes := []int{1, objectSlots - 1, objectSlots, objectSlots + 1, objectSpillSlots - 1, objectSpillSlots,
+		objectSpillSlots + 1, direct - 1, direct, direct + 1, 3 * direct}
+	for _, n := range sizes {
+		for _, dup := range []int{-1, 0, objectSlots, objectSpillSlots, n - 1} {
+			data := objectDoc(n, dup, true)
+			var want any
+			if err := json.Unmarshal(data, &want); err != nil {
+				t.Fatal(err)
+			}
+			l := NewLexer(data, false)
+			got := l.ReadInterface()
+			l.Finish()
+			if err := l.Err(); err != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("n=%d dup=%d: err=%v\ngot  %v\nwant %v", n, dup, err, got, want)
+			}
+		}
+	}
+}
+
+// TestReadInterfaceObjectErrorIsNil puts an out-of-range number at each
+// buffering stage of an object: the result must be an untyped nil, not a
+// partial map.
+func TestReadInterfaceObjectErrorIsNil(t *testing.T) {
+	for _, at := range []int{0, objectSlots - 1, objectSlots, objectSpillSlots - 1, objectSpillSlots, 2 * objectSpillSlots} {
+		var b strings.Builder
+		b.WriteByte('{')
+		for i := range at + 3 {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			value := strconv.Itoa(i)
+			if i == at {
+				value = "1e999"
+			}
+			b.WriteString(`"k` + strconv.Itoa(i) + `":` + value)
+		}
+		b.WriteByte('}')
+		l := NewLexer([]byte(b.String()), false)
+		if got := l.ReadInterface(); got != nil || l.Err() == nil {
+			t.Errorf("error at member %d: got %#v, err %v; want nil and an error", at, got, l.Err())
 		}
 	}
 }

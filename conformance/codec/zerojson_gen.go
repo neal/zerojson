@@ -1126,28 +1126,10 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 				}
 			}
 		case "amounts":
-			{
-				if v.Amounts != nil {
-					a.m27 = v.Amounts
-				} else {
-					a.m27 = make(map[string]testleaf.Decimal)
-				}
-			}
-			if l.EnterObject() {
-				for {
-					mk := string(zerojson.Intern(l.ReadKey()))
-					var mv testleaf.Decimal
-					if !l.IsNull() {
-						testleaf.Read(l, &mv)
-					}
-					if l.Err() != nil {
-						break
-					}
-					a.m27[mk] = mv
-					if !l.NextMember() {
-						break
-					}
-				}
+			if v.Amounts != nil {
+				a.m27 = zjReadMap_map_string_testleaf_Decimal_intern(l, v.Amounts)
+			} else {
+				a.m27 = zjReadMap_map_string_testleaf_Decimal_intern(l, nil)
 			}
 			v.Amounts = a.m27
 		case "extra":
@@ -1161,28 +1143,10 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 				v.Extra = l.ReadInterface()
 			}
 		case "bag":
-			{
-				if v.Bag != nil {
-					a.m29 = v.Bag
-				} else {
-					a.m29 = make(map[string]any)
-				}
-			}
-			if l.EnterObject() {
-				for {
-					mk := string(string(l.ReadKey()))
-					var mv any
-					if !l.IsNull() {
-						mv = l.ReadInterface()
-					}
-					if l.Err() != nil {
-						break
-					}
-					a.m29[mk] = mv
-					if !l.NextMember() {
-						break
-					}
-				}
+			if v.Bag != nil {
+				a.m29 = zjReadMap_map_string_any(l, v.Bag)
+			} else {
+				a.m29 = zjReadMap_map_string_any(l, nil)
 			}
 			v.Bag = a.m29
 		case "any_list":
@@ -6410,28 +6374,10 @@ func zjDecodeFallback_ReuseSemantics(l *zerojson.Lexer, v *ReuseSemantics, a *zj
 	zjDispatch:
 		switch name {
 		case "values":
-			{
-				if v.Values != nil {
-					a.m0 = v.Values
-				} else {
-					a.m0 = make(map[string]int)
-				}
-			}
-			if l.EnterObject() {
-				for {
-					mk := string(string(l.ReadKey()))
-					var mv int
-					if !l.IsNull() {
-						mv = int(l.ReadInt())
-					}
-					if l.Err() != nil {
-						break
-					}
-					a.m0[mk] = mv
-					if !l.NextMember() {
-						break
-					}
-				}
+			if v.Values != nil {
+				a.m0 = zjReadMap_map_string_int(l, v.Values)
+			} else {
+				a.m0 = zjReadMap_map_string_int(l, nil)
 			}
 			v.Values = a.m0
 		case "inner":
@@ -7460,28 +7406,10 @@ func zjDecodeOrderedField_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjAren
 			v.Lists = a.c2
 		}
 	case 3:
-		{
-			if v.Index != nil {
-				a.m3 = v.Index
-			} else {
-				a.m3 = make(map[string][]byte)
-			}
-		}
-		if l.EnterObject() {
-			for {
-				mk := string(string(l.ReadKey()))
-				var mv []byte
-				if !l.IsNull() {
-					mv = []byte(l.ReadBytesBase64())
-				}
-				if l.Err() != nil {
-					break
-				}
-				a.m3[mk] = mv
-				if !l.NextMember() {
-					break
-				}
-			}
+		if v.Index != nil {
+			a.m3 = zjReadMap_map_string___byte(l, v.Index)
+		} else {
+			a.m3 = zjReadMap_map_string___byte(l, nil)
 		}
 		v.Index = a.m3
 	}
@@ -7741,28 +7669,10 @@ func zjDecodeMembers_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaByte
 				v.Lists = a.c2
 			}
 		case "index":
-			{
-				if v.Index != nil {
-					a.m3 = v.Index
-				} else {
-					a.m3 = make(map[string][]byte)
-				}
-			}
-			if l.EnterObject() {
-				for {
-					mk := string(string(l.ReadKey()))
-					var mv []byte
-					if !l.IsNull() {
-						mv = []byte(l.ReadBytesBase64())
-					}
-					if l.Err() != nil {
-						break
-					}
-					a.m3[mk] = mv
-					if !l.NextMember() {
-						break
-					}
-				}
+			if v.Index != nil {
+				a.m3 = zjReadMap_map_string___byte(l, v.Index)
+			} else {
+				a.m3 = zjReadMap_map_string___byte(l, nil)
 			}
 			v.Index = a.m3
 		default:
@@ -8133,7 +8043,6 @@ func (d *LegPtrListDecoder) DecodeBorrow(data []byte, v *LegPtrList) error {
 
 // zjArenaLegIndex holds working storage for one LegIndex decode.
 type zjArenaLegIndex struct {
-	mRoot LegIndex
 }
 
 // AppendZJSON appends the JSON encoding of v to dst: a nil LegIndex as null,
@@ -8202,29 +8111,7 @@ func zjDecode_LegIndex(l *zerojson.Lexer, v *LegIndex, a *zjArenaLegIndex) {
 		*v = nil
 		return
 	}
-	if *v != nil {
-		a.mRoot = *v
-	} else {
-		a.mRoot = make(LegIndex)
-	}
-	if l.EnterObject() {
-		for {
-			mk := string(string(l.ReadKey()))
-			var mv EventLeg
-			if !l.IsNull() {
-				var ea zjArenaEventLeg
-				zjDecode_EventLeg(l, &mv, &ea)
-			}
-			if l.Err() != nil {
-				return
-			}
-			a.mRoot[mk] = mv
-			if !l.NextMember() {
-				break
-			}
-		}
-	}
-	*v = a.mRoot
+	*v = zjReadMap_LegIndex(l, *v)
 }
 
 // LegIndexDecoder decodes LegIndex values with fresh storage on every call.
@@ -8280,7 +8167,6 @@ func (d *LegIndexDecoder) DecodeBorrow(data []byte, v *LegIndex) error {
 
 // zjArenaPointerMethodIndex holds working storage for one PointerMethodIndex decode.
 type zjArenaPointerMethodIndex struct {
-	mRoot PointerMethodIndex
 }
 
 // AppendZJSON appends the JSON encoding of v to dst: a nil PointerMethodIndex as null,
@@ -8406,7 +8292,6 @@ func (d *PointerMethodIndexDecoder) DecodeBorrow(data []byte, v *PointerMethodIn
 
 // zjArenaPointerQuotedIndex holds working storage for one PointerQuotedIndex decode.
 type zjArenaPointerQuotedIndex struct {
-	mRoot PointerQuotedIndex
 }
 
 // AppendZJSON appends the JSON encoding of v to dst: a nil PointerQuotedIndex as null,
@@ -8691,7 +8576,6 @@ func (d *RawListDecoder) DecodeBorrow(data []byte, v *RawList) error {
 
 // zjArenaRawIndex holds working storage for one RawIndex decode.
 type zjArenaRawIndex struct {
-	mRoot RawIndex
 }
 
 // AppendZJSON appends the JSON encoding of v to dst: a nil RawIndex as null,
@@ -8760,30 +8644,7 @@ func zjDecode_RawIndex(l *zerojson.Lexer, v *RawIndex, a *zjArenaRawIndex) {
 		*v = nil
 		return
 	}
-	if *v != nil {
-		a.mRoot = *v
-	} else {
-		a.mRoot = make(RawIndex)
-	}
-	if l.EnterObject() {
-		for {
-			mk := string(string(l.ReadKey()))
-			var mv zerojson.Raw
-			if l.IsNull() {
-				zerojson.ReadRawNull(l, &mv)
-			} else {
-				zerojson.ReadRaw(l, &mv)
-			}
-			if l.Err() != nil {
-				return
-			}
-			a.mRoot[mk] = mv
-			if !l.NextMember() {
-				break
-			}
-		}
-	}
-	*v = a.mRoot
+	*v = zjReadMap_RawIndex(l, *v)
 }
 
 // RawIndexDecoder decodes RawIndex values with fresh storage on every call.
@@ -9589,28 +9450,10 @@ func zjDecodeOrderedField_PointerCollections(l *zerojson.Lexer, v *PointerCollec
 			*v.Names = a.c0
 		}
 	case 1:
-		{
-			if v.Index != nil && (*v.Index) != nil {
-				a.m1 = (*v.Index)
-			} else {
-				a.m1 = make(map[string]int)
-			}
-		}
-		if l.EnterObject() {
-			for {
-				mk := string(string(l.ReadKey()))
-				var mv int
-				if !l.IsNull() {
-					mv = int(l.ReadInt())
-				}
-				if l.Err() != nil {
-					break
-				}
-				a.m1[mk] = mv
-				if !l.NextMember() {
-					break
-				}
-			}
+		if v.Index != nil && (*v.Index) != nil {
+			a.m1 = zjReadMap_map_string_int(l, (*v.Index))
+		} else {
+			a.m1 = zjReadMap_map_string_int(l, nil)
 		}
 		if v.Index == nil {
 			if a.published1 {
@@ -9661,28 +9504,10 @@ func zjDecodeOrderedField_PointerCollections(l *zerojson.Lexer, v *PointerCollec
 		}
 		*v.Legs = a.c2
 	case 3:
-		{
-			if v.Tags != nil && (*v.Tags) != nil {
-				a.m3 = (*v.Tags)
-			} else {
-				a.m3 = make(map[string]string)
-			}
-		}
-		if l.EnterObject() {
-			for {
-				mk := string(string(l.ReadKey()))
-				var mv string
-				if !l.IsNull() {
-					mv = l.ReadString()
-				}
-				if l.Err() != nil {
-					break
-				}
-				a.m3[mk] = mv
-				if !l.NextMember() {
-					break
-				}
-			}
+		if v.Tags != nil && (*v.Tags) != nil {
+			a.m3 = zjReadMap_map_string_string(l, (*v.Tags))
+		} else {
+			a.m3 = zjReadMap_map_string_string(l, nil)
 		}
 		if v.Tags == nil {
 			if a.published3 {
@@ -9915,28 +9740,10 @@ func zjDecodeMembers_PointerCollections(l *zerojson.Lexer, v *PointerCollections
 				*v.Names = a.c0
 			}
 		case "index":
-			{
-				if v.Index != nil && (*v.Index) != nil {
-					a.m1 = (*v.Index)
-				} else {
-					a.m1 = make(map[string]int)
-				}
-			}
-			if l.EnterObject() {
-				for {
-					mk := string(string(l.ReadKey()))
-					var mv int
-					if !l.IsNull() {
-						mv = int(l.ReadInt())
-					}
-					if l.Err() != nil {
-						break
-					}
-					a.m1[mk] = mv
-					if !l.NextMember() {
-						break
-					}
-				}
+			if v.Index != nil && (*v.Index) != nil {
+				a.m1 = zjReadMap_map_string_int(l, (*v.Index))
+			} else {
+				a.m1 = zjReadMap_map_string_int(l, nil)
 			}
 			if v.Index == nil {
 				if a.published1 {
@@ -9987,28 +9794,10 @@ func zjDecodeMembers_PointerCollections(l *zerojson.Lexer, v *PointerCollections
 			}
 			*v.Legs = a.c2
 		case "tags":
-			{
-				if v.Tags != nil && (*v.Tags) != nil {
-					a.m3 = (*v.Tags)
-				} else {
-					a.m3 = make(map[string]string)
-				}
-			}
-			if l.EnterObject() {
-				for {
-					mk := string(string(l.ReadKey()))
-					var mv string
-					if !l.IsNull() {
-						mv = l.ReadString()
-					}
-					if l.Err() != nil {
-						break
-					}
-					a.m3[mk] = mv
-					if !l.NextMember() {
-						break
-					}
-				}
+			if v.Tags != nil && (*v.Tags) != nil {
+				a.m3 = zjReadMap_map_string_string(l, (*v.Tags))
+			} else {
+				a.m3 = zjReadMap_map_string_string(l, nil)
 			}
 			if v.Tags == nil {
 				if a.published3 {
@@ -10572,28 +10361,10 @@ func zjDecodeOrderedField_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjAr
 			v.NS = a.c3
 		}
 	case 4:
-		{
-			if v.NM != nil {
-				a.m4 = v.NM
-			} else {
-				a.m4 = make(map[string]json_.Number)
-			}
-		}
-		if l.EnterObject() {
-			for {
-				mk := string(string(l.ReadKey()))
-				var mv json_.Number
-				if !l.IsNull() {
-					mv = json_.Number(l.ReadJSONNumber())
-				}
-				if l.Err() != nil {
-					break
-				}
-				a.m4[mk] = mv
-				if !l.NextMember() {
-					break
-				}
-			}
+		if v.NM != nil {
+			a.m4 = zjReadMap_map_string_json__Number(l, v.NM)
+		} else {
+			a.m4 = zjReadMap_map_string_json__Number(l, nil)
 		}
 		v.NM = a.m4
 	case 5:
@@ -10879,28 +10650,10 @@ func zjDecodeMembers_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNu
 				v.NS = a.c3
 			}
 		case "nm":
-			{
-				if v.NM != nil {
-					a.m4 = v.NM
-				} else {
-					a.m4 = make(map[string]json_.Number)
-				}
-			}
-			if l.EnterObject() {
-				for {
-					mk := string(string(l.ReadKey()))
-					var mv json_.Number
-					if !l.IsNull() {
-						mv = json_.Number(l.ReadJSONNumber())
-					}
-					if l.Err() != nil {
-						break
-					}
-					a.m4[mk] = mv
-					if !l.NextMember() {
-						break
-					}
-				}
+			if v.NM != nil {
+				a.m4 = zjReadMap_map_string_json__Number(l, v.NM)
+			} else {
+				a.m4 = zjReadMap_map_string_json__Number(l, nil)
 			}
 			v.NM = a.m4
 		case "cnt_s":
@@ -13764,4 +13517,682 @@ func zjDecodeMembers_ReuseInner(l *zerojson.Lexer, v *ReuseInner, a *zjArenaReus
 			break
 		}
 	}
+}
+
+// zjMapEntry_LegIndex is one member of a map still being buffered.
+type zjMapEntry_LegIndex struct {
+	k string
+	v EventLeg
+}
+
+// zjReadMap_LegIndex decodes a JSON object into m, or into a new map when m is nil.
+// A new map is made at its final size: up to 8 members wait on the
+// stack, and one more moves them to zjSpillMap_LegIndex.
+func zjReadMap_LegIndex(l *zerojson.Lexer, m LegIndex) LegIndex {
+	var kv [8]zjMapEntry_LegIndex
+	n := 0
+	if l.EnterObject() {
+		for {
+			mk := string(string(l.ReadKey()))
+			var mv EventLeg
+			if !l.IsNull() {
+				var ea zjArenaEventLeg
+				zjDecode_EventLeg(l, &mv, &ea)
+			}
+			if l.Err() != nil {
+				break
+			}
+			if m != nil {
+				m[mk] = mv
+			} else if n < len(kv) {
+				kv[n] = zjMapEntry_LegIndex{mk, mv}
+				n++
+			} else {
+				return zjSpillMap_LegIndex(l, &kv, mk, mv)
+			}
+			if !l.NextMember() {
+				break
+			}
+		}
+	}
+	if m == nil {
+		m = make(LegIndex, n)
+		for _, e := range kv[:n] {
+			m[e.k] = e.v
+		}
+	}
+	return m
+}
+
+// zjSpillMap_LegIndex continues zjReadMap_LegIndex past 8 members, given them and the
+// member just read. Past its own buffer it makes the map with room for
+// twice as many members and inserts the rest directly.
+func zjSpillMap_LegIndex(l *zerojson.Lexer, first *[8]zjMapEntry_LegIndex, mk string, mv EventLeg) LegIndex {
+	var kv [20]zjMapEntry_LegIndex
+	n := copy(kv[:], first[:])
+	kv[n] = zjMapEntry_LegIndex{mk, mv}
+	n++
+	var m LegIndex
+	for l.NextMember() {
+		mk := string(string(l.ReadKey()))
+		var mv EventLeg
+		if !l.IsNull() {
+			var ea zjArenaEventLeg
+			zjDecode_EventLeg(l, &mv, &ea)
+		}
+		if l.Err() != nil {
+			break
+		}
+		if m != nil {
+			m[mk] = mv
+		} else if n < len(kv) {
+			kv[n] = zjMapEntry_LegIndex{mk, mv}
+			n++
+		} else {
+			m = make(LegIndex, 2*len(kv))
+			for _, e := range kv[:n] {
+				m[e.k] = e.v
+			}
+			m[mk] = mv
+		}
+	}
+	if m == nil {
+		m = make(LegIndex, n)
+		for _, e := range kv[:n] {
+			m[e.k] = e.v
+		}
+	}
+	return m
+}
+
+// zjMapEntry_RawIndex is one member of a map still being buffered.
+type zjMapEntry_RawIndex struct {
+	k string
+	v zerojson.Raw
+}
+
+// zjReadMap_RawIndex decodes a JSON object into m, or into a new map when m is nil.
+// A new map is made at its final size: up to 8 members wait on the
+// stack, and one more moves them to zjSpillMap_RawIndex.
+func zjReadMap_RawIndex(l *zerojson.Lexer, m RawIndex) RawIndex {
+	var kv [8]zjMapEntry_RawIndex
+	n := 0
+	if l.EnterObject() {
+		for {
+			mk := string(string(l.ReadKey()))
+			var mv zerojson.Raw
+			if l.IsNull() {
+				zerojson.ReadRawNull(l, &mv)
+			} else {
+				zerojson.ReadRaw(l, &mv)
+			}
+			if l.Err() != nil {
+				break
+			}
+			if m != nil {
+				m[mk] = mv
+			} else if n < len(kv) {
+				kv[n] = zjMapEntry_RawIndex{mk, mv}
+				n++
+			} else {
+				return zjSpillMap_RawIndex(l, &kv, mk, mv)
+			}
+			if !l.NextMember() {
+				break
+			}
+		}
+	}
+	if m == nil {
+		m = make(RawIndex, n)
+		for _, e := range kv[:n] {
+			m[e.k] = e.v
+		}
+	}
+	return m
+}
+
+// zjSpillMap_RawIndex continues zjReadMap_RawIndex past 8 members, given them and the
+// member just read. Past its own buffer it makes the map with room for
+// twice as many members and inserts the rest directly.
+func zjSpillMap_RawIndex(l *zerojson.Lexer, first *[8]zjMapEntry_RawIndex, mk string, mv zerojson.Raw) RawIndex {
+	var kv [32]zjMapEntry_RawIndex
+	n := copy(kv[:], first[:])
+	kv[n] = zjMapEntry_RawIndex{mk, mv}
+	n++
+	var m RawIndex
+	for l.NextMember() {
+		mk := string(string(l.ReadKey()))
+		var mv zerojson.Raw
+		if l.IsNull() {
+			zerojson.ReadRawNull(l, &mv)
+		} else {
+			zerojson.ReadRaw(l, &mv)
+		}
+		if l.Err() != nil {
+			break
+		}
+		if m != nil {
+			m[mk] = mv
+		} else if n < len(kv) {
+			kv[n] = zjMapEntry_RawIndex{mk, mv}
+			n++
+		} else {
+			m = make(RawIndex, 2*len(kv))
+			for _, e := range kv[:n] {
+				m[e.k] = e.v
+			}
+			m[mk] = mv
+		}
+	}
+	if m == nil {
+		m = make(RawIndex, n)
+		for _, e := range kv[:n] {
+			m[e.k] = e.v
+		}
+	}
+	return m
+}
+
+// zjMapEntry_map_string___byte is one member of a map still being buffered.
+type zjMapEntry_map_string___byte struct {
+	k string
+	v []byte
+}
+
+// zjReadMap_map_string___byte decodes a JSON object into m, or into a new map when m is nil.
+// A new map is made at its final size: up to 8 members wait on the
+// stack, and one more moves them to zjSpillMap_map_string___byte.
+func zjReadMap_map_string___byte(l *zerojson.Lexer, m map[string][]byte) map[string][]byte {
+	var kv [8]zjMapEntry_map_string___byte
+	n := 0
+	if l.EnterObject() {
+		for {
+			mk := string(string(l.ReadKey()))
+			var mv []byte
+			if !l.IsNull() {
+				mv = []byte(l.ReadBytesBase64())
+			}
+			if l.Err() != nil {
+				break
+			}
+			if m != nil {
+				m[mk] = mv
+			} else if n < len(kv) {
+				kv[n] = zjMapEntry_map_string___byte{mk, mv}
+				n++
+			} else {
+				return zjSpillMap_map_string___byte(l, &kv, mk, mv)
+			}
+			if !l.NextMember() {
+				break
+			}
+		}
+	}
+	if m == nil {
+		m = make(map[string][]byte, n)
+		for _, e := range kv[:n] {
+			m[e.k] = e.v
+		}
+	}
+	return m
+}
+
+// zjSpillMap_map_string___byte continues zjReadMap_map_string___byte past 8 members, given them and the
+// member just read. Past its own buffer it makes the map with room for
+// twice as many members and inserts the rest directly.
+func zjSpillMap_map_string___byte(l *zerojson.Lexer, first *[8]zjMapEntry_map_string___byte, mk string, mv []byte) map[string][]byte {
+	var kv [32]zjMapEntry_map_string___byte
+	n := copy(kv[:], first[:])
+	kv[n] = zjMapEntry_map_string___byte{mk, mv}
+	n++
+	var m map[string][]byte
+	for l.NextMember() {
+		mk := string(string(l.ReadKey()))
+		var mv []byte
+		if !l.IsNull() {
+			mv = []byte(l.ReadBytesBase64())
+		}
+		if l.Err() != nil {
+			break
+		}
+		if m != nil {
+			m[mk] = mv
+		} else if n < len(kv) {
+			kv[n] = zjMapEntry_map_string___byte{mk, mv}
+			n++
+		} else {
+			m = make(map[string][]byte, 2*len(kv))
+			for _, e := range kv[:n] {
+				m[e.k] = e.v
+			}
+			m[mk] = mv
+		}
+	}
+	if m == nil {
+		m = make(map[string][]byte, n)
+		for _, e := range kv[:n] {
+			m[e.k] = e.v
+		}
+	}
+	return m
+}
+
+// zjMapEntry_map_string_any is one member of a map still being buffered.
+type zjMapEntry_map_string_any struct {
+	k string
+	v any
+}
+
+// zjReadMap_map_string_any decodes a JSON object into m, or into a new map when m is nil.
+// A new map is made at its final size: up to 8 members wait on the
+// stack, and one more moves them to zjSpillMap_map_string_any.
+func zjReadMap_map_string_any(l *zerojson.Lexer, m map[string]any) map[string]any {
+	var kv [8]zjMapEntry_map_string_any
+	n := 0
+	if l.EnterObject() {
+		for {
+			mk := string(string(l.ReadKey()))
+			var mv any
+			if !l.IsNull() {
+				mv = l.ReadInterface()
+			}
+			if l.Err() != nil {
+				break
+			}
+			if m != nil {
+				m[mk] = mv
+			} else if n < len(kv) {
+				kv[n] = zjMapEntry_map_string_any{mk, mv}
+				n++
+			} else {
+				return zjSpillMap_map_string_any(l, &kv, mk, mv)
+			}
+			if !l.NextMember() {
+				break
+			}
+		}
+	}
+	if m == nil {
+		m = make(map[string]any, n)
+		for _, e := range kv[:n] {
+			m[e.k] = e.v
+		}
+	}
+	return m
+}
+
+// zjSpillMap_map_string_any continues zjReadMap_map_string_any past 8 members, given them and the
+// member just read. Past its own buffer it makes the map with room for
+// twice as many members and inserts the rest directly.
+func zjSpillMap_map_string_any(l *zerojson.Lexer, first *[8]zjMapEntry_map_string_any, mk string, mv any) map[string]any {
+	var kv [40]zjMapEntry_map_string_any
+	n := copy(kv[:], first[:])
+	kv[n] = zjMapEntry_map_string_any{mk, mv}
+	n++
+	var m map[string]any
+	for l.NextMember() {
+		mk := string(string(l.ReadKey()))
+		var mv any
+		if !l.IsNull() {
+			mv = l.ReadInterface()
+		}
+		if l.Err() != nil {
+			break
+		}
+		if m != nil {
+			m[mk] = mv
+		} else if n < len(kv) {
+			kv[n] = zjMapEntry_map_string_any{mk, mv}
+			n++
+		} else {
+			m = make(map[string]any, 2*len(kv))
+			for _, e := range kv[:n] {
+				m[e.k] = e.v
+			}
+			m[mk] = mv
+		}
+	}
+	if m == nil {
+		m = make(map[string]any, n)
+		for _, e := range kv[:n] {
+			m[e.k] = e.v
+		}
+	}
+	return m
+}
+
+// zjMapEntry_map_string_int is one member of a map still being buffered.
+type zjMapEntry_map_string_int struct {
+	k string
+	v int
+}
+
+// zjReadMap_map_string_int decodes a JSON object into m, or into a new map when m is nil.
+// A new map is made at its final size: up to 8 members wait on the
+// stack, and one more moves them to zjSpillMap_map_string_int.
+func zjReadMap_map_string_int(l *zerojson.Lexer, m map[string]int) map[string]int {
+	var kv [8]zjMapEntry_map_string_int
+	n := 0
+	if l.EnterObject() {
+		for {
+			mk := string(string(l.ReadKey()))
+			var mv int
+			if !l.IsNull() {
+				mv = int(l.ReadInt())
+			}
+			if l.Err() != nil {
+				break
+			}
+			if m != nil {
+				m[mk] = mv
+			} else if n < len(kv) {
+				kv[n] = zjMapEntry_map_string_int{mk, mv}
+				n++
+			} else {
+				return zjSpillMap_map_string_int(l, &kv, mk, mv)
+			}
+			if !l.NextMember() {
+				break
+			}
+		}
+	}
+	if m == nil {
+		m = make(map[string]int, n)
+		for _, e := range kv[:n] {
+			m[e.k] = e.v
+		}
+	}
+	return m
+}
+
+// zjSpillMap_map_string_int continues zjReadMap_map_string_int past 8 members, given them and the
+// member just read. Past its own buffer it makes the map with room for
+// twice as many members and inserts the rest directly.
+func zjSpillMap_map_string_int(l *zerojson.Lexer, first *[8]zjMapEntry_map_string_int, mk string, mv int) map[string]int {
+	var kv [40]zjMapEntry_map_string_int
+	n := copy(kv[:], first[:])
+	kv[n] = zjMapEntry_map_string_int{mk, mv}
+	n++
+	var m map[string]int
+	for l.NextMember() {
+		mk := string(string(l.ReadKey()))
+		var mv int
+		if !l.IsNull() {
+			mv = int(l.ReadInt())
+		}
+		if l.Err() != nil {
+			break
+		}
+		if m != nil {
+			m[mk] = mv
+		} else if n < len(kv) {
+			kv[n] = zjMapEntry_map_string_int{mk, mv}
+			n++
+		} else {
+			m = make(map[string]int, 2*len(kv))
+			for _, e := range kv[:n] {
+				m[e.k] = e.v
+			}
+			m[mk] = mv
+		}
+	}
+	if m == nil {
+		m = make(map[string]int, n)
+		for _, e := range kv[:n] {
+			m[e.k] = e.v
+		}
+	}
+	return m
+}
+
+// zjMapEntry_map_string_json__Number is one member of a map still being buffered.
+type zjMapEntry_map_string_json__Number struct {
+	k string
+	v json_.Number
+}
+
+// zjReadMap_map_string_json__Number decodes a JSON object into m, or into a new map when m is nil.
+// A new map is made at its final size: up to 8 members wait on the
+// stack, and one more moves them to zjSpillMap_map_string_json__Number.
+func zjReadMap_map_string_json__Number(l *zerojson.Lexer, m map[string]json_.Number) map[string]json_.Number {
+	var kv [8]zjMapEntry_map_string_json__Number
+	n := 0
+	if l.EnterObject() {
+		for {
+			mk := string(string(l.ReadKey()))
+			var mv json_.Number
+			if !l.IsNull() {
+				mv = json_.Number(l.ReadJSONNumber())
+			}
+			if l.Err() != nil {
+				break
+			}
+			if m != nil {
+				m[mk] = mv
+			} else if n < len(kv) {
+				kv[n] = zjMapEntry_map_string_json__Number{mk, mv}
+				n++
+			} else {
+				return zjSpillMap_map_string_json__Number(l, &kv, mk, mv)
+			}
+			if !l.NextMember() {
+				break
+			}
+		}
+	}
+	if m == nil {
+		m = make(map[string]json_.Number, n)
+		for _, e := range kv[:n] {
+			m[e.k] = e.v
+		}
+	}
+	return m
+}
+
+// zjSpillMap_map_string_json__Number continues zjReadMap_map_string_json__Number past 8 members, given them and the
+// member just read. Past its own buffer it makes the map with room for
+// twice as many members and inserts the rest directly.
+func zjSpillMap_map_string_json__Number(l *zerojson.Lexer, first *[8]zjMapEntry_map_string_json__Number, mk string, mv json_.Number) map[string]json_.Number {
+	var kv [40]zjMapEntry_map_string_json__Number
+	n := copy(kv[:], first[:])
+	kv[n] = zjMapEntry_map_string_json__Number{mk, mv}
+	n++
+	var m map[string]json_.Number
+	for l.NextMember() {
+		mk := string(string(l.ReadKey()))
+		var mv json_.Number
+		if !l.IsNull() {
+			mv = json_.Number(l.ReadJSONNumber())
+		}
+		if l.Err() != nil {
+			break
+		}
+		if m != nil {
+			m[mk] = mv
+		} else if n < len(kv) {
+			kv[n] = zjMapEntry_map_string_json__Number{mk, mv}
+			n++
+		} else {
+			m = make(map[string]json_.Number, 2*len(kv))
+			for _, e := range kv[:n] {
+				m[e.k] = e.v
+			}
+			m[mk] = mv
+		}
+	}
+	if m == nil {
+		m = make(map[string]json_.Number, n)
+		for _, e := range kv[:n] {
+			m[e.k] = e.v
+		}
+	}
+	return m
+}
+
+// zjMapEntry_map_string_string is one member of a map still being buffered.
+type zjMapEntry_map_string_string struct {
+	k string
+	v string
+}
+
+// zjReadMap_map_string_string decodes a JSON object into m, or into a new map when m is nil.
+// A new map is made at its final size: up to 8 members wait on the
+// stack, and one more moves them to zjSpillMap_map_string_string.
+func zjReadMap_map_string_string(l *zerojson.Lexer, m map[string]string) map[string]string {
+	var kv [8]zjMapEntry_map_string_string
+	n := 0
+	if l.EnterObject() {
+		for {
+			mk := string(string(l.ReadKey()))
+			var mv string
+			if !l.IsNull() {
+				mv = l.ReadString()
+			}
+			if l.Err() != nil {
+				break
+			}
+			if m != nil {
+				m[mk] = mv
+			} else if n < len(kv) {
+				kv[n] = zjMapEntry_map_string_string{mk, mv}
+				n++
+			} else {
+				return zjSpillMap_map_string_string(l, &kv, mk, mv)
+			}
+			if !l.NextMember() {
+				break
+			}
+		}
+	}
+	if m == nil {
+		m = make(map[string]string, n)
+		for _, e := range kv[:n] {
+			m[e.k] = e.v
+		}
+	}
+	return m
+}
+
+// zjSpillMap_map_string_string continues zjReadMap_map_string_string past 8 members, given them and the
+// member just read. Past its own buffer it makes the map with room for
+// twice as many members and inserts the rest directly.
+func zjSpillMap_map_string_string(l *zerojson.Lexer, first *[8]zjMapEntry_map_string_string, mk string, mv string) map[string]string {
+	var kv [40]zjMapEntry_map_string_string
+	n := copy(kv[:], first[:])
+	kv[n] = zjMapEntry_map_string_string{mk, mv}
+	n++
+	var m map[string]string
+	for l.NextMember() {
+		mk := string(string(l.ReadKey()))
+		var mv string
+		if !l.IsNull() {
+			mv = l.ReadString()
+		}
+		if l.Err() != nil {
+			break
+		}
+		if m != nil {
+			m[mk] = mv
+		} else if n < len(kv) {
+			kv[n] = zjMapEntry_map_string_string{mk, mv}
+			n++
+		} else {
+			m = make(map[string]string, 2*len(kv))
+			for _, e := range kv[:n] {
+				m[e.k] = e.v
+			}
+			m[mk] = mv
+		}
+	}
+	if m == nil {
+		m = make(map[string]string, n)
+		for _, e := range kv[:n] {
+			m[e.k] = e.v
+		}
+	}
+	return m
+}
+
+// zjMapEntry_map_string_testleaf_Decimal_intern is one member of a map still being buffered.
+type zjMapEntry_map_string_testleaf_Decimal_intern struct {
+	k string
+	v testleaf.Decimal
+}
+
+// zjReadMap_map_string_testleaf_Decimal_intern decodes a JSON object into m, or into a new map when m is nil.
+// A new map is made at its final size: up to 8 members wait on the
+// stack, and one more moves them to zjSpillMap_map_string_testleaf_Decimal_intern.
+func zjReadMap_map_string_testleaf_Decimal_intern(l *zerojson.Lexer, m map[string]testleaf.Decimal) map[string]testleaf.Decimal {
+	var kv [8]zjMapEntry_map_string_testleaf_Decimal_intern
+	n := 0
+	if l.EnterObject() {
+		for {
+			mk := string(zerojson.Intern(l.ReadKey()))
+			var mv testleaf.Decimal
+			if !l.IsNull() {
+				testleaf.Read(l, &mv)
+			}
+			if l.Err() != nil {
+				break
+			}
+			if m != nil {
+				m[mk] = mv
+			} else if n < len(kv) {
+				kv[n] = zjMapEntry_map_string_testleaf_Decimal_intern{mk, mv}
+				n++
+			} else {
+				return zjSpillMap_map_string_testleaf_Decimal_intern(l, &kv, mk, mv)
+			}
+			if !l.NextMember() {
+				break
+			}
+		}
+	}
+	if m == nil {
+		m = make(map[string]testleaf.Decimal, n)
+		for _, e := range kv[:n] {
+			m[e.k] = e.v
+		}
+	}
+	return m
+}
+
+// zjSpillMap_map_string_testleaf_Decimal_intern continues zjReadMap_map_string_testleaf_Decimal_intern past 8 members, given them and the
+// member just read. Past its own buffer it makes the map with room for
+// twice as many members and inserts the rest directly.
+func zjSpillMap_map_string_testleaf_Decimal_intern(l *zerojson.Lexer, first *[8]zjMapEntry_map_string_testleaf_Decimal_intern, mk string, mv testleaf.Decimal) map[string]testleaf.Decimal {
+	var kv [40]zjMapEntry_map_string_testleaf_Decimal_intern
+	n := copy(kv[:], first[:])
+	kv[n] = zjMapEntry_map_string_testleaf_Decimal_intern{mk, mv}
+	n++
+	var m map[string]testleaf.Decimal
+	for l.NextMember() {
+		mk := string(zerojson.Intern(l.ReadKey()))
+		var mv testleaf.Decimal
+		if !l.IsNull() {
+			testleaf.Read(l, &mv)
+		}
+		if l.Err() != nil {
+			break
+		}
+		if m != nil {
+			m[mk] = mv
+		} else if n < len(kv) {
+			kv[n] = zjMapEntry_map_string_testleaf_Decimal_intern{mk, mv}
+			n++
+		} else {
+			m = make(map[string]testleaf.Decimal, 2*len(kv))
+			for _, e := range kv[:n] {
+				m[e.k] = e.v
+			}
+			m[mk] = mv
+		}
+	}
+	if m == nil {
+		m = make(map[string]testleaf.Decimal, n)
+		for _, e := range kv[:n] {
+			m[e.k] = e.v
+		}
+	}
+	return m
 }

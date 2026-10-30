@@ -431,28 +431,10 @@ func zjDecodeFallback_Outer(l *zerojson.Lexer, v *Outer, a *zjArenaOuter) {
 			}
 			v.SP = a.c4
 		case "m":
-			{
-				if v.M != nil {
-					a.m5 = v.M
-				} else {
-					a.m5 = make(map[string]inner.Ext)
-				}
-			}
-			if l.EnterObject() {
-				for {
-					mk := string(string(l.ReadKey()))
-					var mv inner.Ext
-					if !l.IsNull() {
-						mv.ReadZJSON(l)
-					}
-					if l.Err() != nil {
-						break
-					}
-					a.m5[mk] = mv
-					if !l.NextMember() {
-						break
-					}
-				}
+			if v.M != nil {
+				a.m5 = zjReadMap_map_string_inner_Ext(l, v.M)
+			} else {
+				a.m5 = zjReadMap_map_string_inner_Ext(l, nil)
 			}
 			v.M = a.m5
 		case "roots":
@@ -783,4 +765,28 @@ func (d *ChainDecoder) DecodeBorrow(data []byte, v *Chain) error {
 	zjDecode_Chain(&l, v, &a)
 	l.Finish()
 	return l.Err()
+}
+
+// zjReadMap_map_string_inner_Ext decodes a JSON object into m, or into a new map when m is nil.
+func zjReadMap_map_string_inner_Ext(l *zerojson.Lexer, m map[string]inner.Ext) map[string]inner.Ext {
+	if m == nil {
+		m = make(map[string]inner.Ext)
+	}
+	if l.EnterObject() {
+		for {
+			mk := string(string(l.ReadKey()))
+			var mv inner.Ext
+			if !l.IsNull() {
+				mv.ReadZJSON(l)
+			}
+			if l.Err() != nil {
+				break
+			}
+			m[mk] = mv
+			if !l.NextMember() {
+				break
+			}
+		}
+	}
+	return m
 }

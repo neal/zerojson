@@ -1013,69 +1013,21 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		}
 	case kMap:
 		cell := "a.m" + f.cellName
-		// Seed the cell from an existing NON-NIL map behind target (for a
+		// Seed the helper with an existing NON-NIL map behind target (for a
 		// pointer field: the pointer must be non-nil AND point at a
-		// non-nil map — a pointer to a nil map must not be adopted as the
-		// cell, or the first assignment would panic).
+		// non-nil map — a pointer to a nil map must not be adopted, or the
+		// first assignment would panic).
 		seedCond := target + " != nil"
 		if f.ptr {
 			seedCond += " && " + derefTarget + " != nil"
 		}
 		// A sibling pointer or callback may have replaced the target's map
 		// header since this field last appeared. Re-adopt it on every member.
-		g.p("%s{", ind)
-		g.p("%s\tif %s {", ind, seedCond)
-		g.p("%s\t\t%s = %s", ind, cell, derefTarget)
-		g.p("%s\t} else {", ind)
-		g.p("%s\t\t%s = make(%s)", ind, cell, f.typeStr)
-		g.p("%s\t}", ind)
-		g.p("%s}", ind)
-		g.p("%sif l.EnterObject() {", ind)
-		g.p("%sfor {", ind)
-		if f.intern {
-			g.p("%s\tmk := %s(zerojson.Intern(l.ReadKey()))", ind, f.keyTypeStr)
-		} else {
-			// string() copies the key: ReadKey aliases the input buffer and a
-			// map key outlives the decode. Interning (which also copies) is
-			// opt-in via zerojson:"intern" — map keys are attacker-controlled
-			// and unbounded in cardinality, so it is not done by default.
-			g.p("%s\tmk := %s(string(l.ReadKey()))", ind, f.keyTypeStr)
-		}
-		g.p("%s\tvar mv %s", ind, f.valInfo.typeStr)
-		g.emitElemNullOpen(f.valInfo, "mv", ind+"\t")
-		switch f.valInfo.kind {
-		case kCustomLeaf:
-			g.leafRead(f.valInfo.leaf, "&mv", ind+"\t\t")
-		case kEmptyStruct:
-			// struct{} set-map value: require an object (any contents,
-			// ignored) — a number/array/string is rejected, matching
-			// encoding/json and easyjson. null already handled by IsNull.
-			g.p("%s\t\tl.SkipObject()", ind)
-		case kStruct:
-			g.p("%s\t\tvar ea %s", ind, arenaName(f.valInfo.elem))
-			g.p("%s\t\t%s(l, &mv, &ea)", ind, decodeName(f.valInfo.elem))
-		case kMarshaler:
-			g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := mv.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
-		case kTextMarshaler:
-			g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := mv.UnmarshalText(txt); err != nil { l.AddError(err) } }", ind)
-		case kAppender:
-			g.p("%s\t\tmv.ReadZJSON(l)", ind)
-		case kQuotedInt:
-			if !f.valInfo.marshalOnValue {
-				g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := mv.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
-			} else {
-				g.p("%s\t\tmv = %s", ind, g.leafReadExpr(f.valInfo))
-			}
-		case kInterface:
-			g.p("%s\t\tmv = l.ReadInterface()", ind)
-		default:
-			g.p("%s\t\tmv = %s", ind, g.leafReadExpr(f.valInfo))
-		}
-		g.p("%s\t}", ind)
-		g.p("%s\tif l.Err() != nil { %s }", ind, retStmt)
-		g.p("%s\t%s[mk] = mv", ind, cell)
-		g.p("%s\tif !l.NextMember() { break }", ind)
-		g.p("%s}", ind)
+		read := g.mapReadCall(f.typeStr, f.keyTypeStr, f.valInfo, f.intern, f.mapEntrySize)
+		g.p("%sif %s {", ind, seedCond)
+		g.p("%s\t%s = %s(l, %s)", ind, cell, read, derefTarget)
+		g.p("%s} else {", ind)
+		g.p("%s\t%s = %s(l, nil)", ind, cell, read)
 		g.p("%s}", ind)
 		finishCollection(cell)
 	}

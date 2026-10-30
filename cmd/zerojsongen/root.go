@@ -24,9 +24,8 @@ func (g *generator) genRootArena(ti typeInfo) {
 	g.p("")
 	g.p("// %s holds working storage for one %s decode.", arenaName(n), n)
 	g.p("type %s struct {", arenaName(n))
-	if ti.rootField.kind == kMap {
-		g.p("\tmRoot %s", n)
-	} else {
+	// A map root decodes straight into *v through its zjReadMap helper.
+	if ti.rootField.kind != kMap {
 		g.p("\tcRoot %s", n)
 	}
 	g.p("}")
@@ -336,58 +335,12 @@ func (g *generator) emitRootLeafSliceBody(rf *fieldInfo, cell, ind string) {
 func (g *generator) emitRootMapDecode(ti typeInfo) {
 	n := ti.name
 	rf := ti.rootField
-	vi := rf.valInfo
 	ind := "\t"
-	cell := "a.mRoot"
 	g.p("%sif l.IsNull() {", ind)
 	g.p("%s\t*v = nil", ind)
 	g.p("%s\treturn", ind)
 	g.p("%s}", ind)
-	g.p("%sif *v != nil {", ind)
-	g.p("%s\t%s = *v", ind, cell)
-	g.p("%s} else {", ind)
-	g.p("%s\t%s = make(%s)", ind, cell, n)
-	g.p("%s}", ind)
-	g.p("%sif l.EnterObject() {", ind)
-	g.p("%sfor {", ind)
 	// A named map root has no struct-tag site to request key interning, so
 	// keys are copied (string() — ReadKey aliases the buffer), never interned.
-	g.p("%s\tmk := %s(string(l.ReadKey()))", ind, rf.keyTypeStr)
-	g.p("%s\tvar mv %s", ind, vi.typeStr)
-	g.emitElemNullOpen(vi, "mv", ind+"\t")
-	switch vi.kind {
-	case kCustomLeaf:
-		g.leafRead(vi.leaf, "&mv", ind+"\t\t")
-	case kEmptyStruct:
-		// struct{} set-map value: require an object (any contents, ignored),
-		// rejecting number/array/string — matching encoding/json and
-		// easyjson. null already handled by IsNull.
-		g.p("%s\t\tl.SkipObject()", ind)
-	case kStruct:
-		g.p("%s\t\tvar ea %s", ind, arenaName(vi.elem))
-		g.p("%s\t\t%s(l, &mv, &ea)", ind, decodeName(vi.elem))
-	case kMarshaler:
-		g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := mv.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
-	case kTextMarshaler:
-		g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := mv.UnmarshalText(txt); err != nil { l.AddError(err) } }", ind)
-	case kAppender:
-		g.p("%s\t\tmv.ReadZJSON(l)", ind)
-	case kQuotedInt:
-		if !vi.marshalOnValue {
-			g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := mv.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
-		} else {
-			g.p("%s\t\tmv = %s", ind, g.leafReadExpr(vi))
-		}
-	case kInterface:
-		g.p("%s\t\tmv = l.ReadInterface()", ind)
-	default:
-		g.p("%s\t\tmv = %s", ind, g.leafReadExpr(vi))
-	}
-	g.p("%s\t}", ind)
-	g.p("%s\tif l.Err() != nil { return }", ind)
-	g.p("%s\t%s[mk] = mv", ind, cell)
-	g.p("%s\tif !l.NextMember() { break }", ind)
-	g.p("%s}", ind)
-	g.p("%s}", ind)
-	g.p("%s*v = %s", ind, cell)
+	g.p("%s*v = %s(l, *v)", ind, g.mapReadCall(n, rf.keyTypeStr, rf.valInfo, false, rf.mapEntrySize))
 }

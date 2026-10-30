@@ -127,7 +127,7 @@ func aliasFor(path, name string) string {
 // runtimeAlias, which importAlias therefore never hands to anything else.
 var generatedIdents = map[string]bool{
 	"v": true, "dst": true, "n": true, "err": true, "raw": true, "first": true,
-	"mk": true, "mv": true, "i": true, "l": true, "a": true, "data": true,
+	"mk": true, "mv": true, "m": true, "kv": true, "i": true, "l": true, "a": true, "data": true,
 	"pos": true, "key": true, "e": true, "ea": true, "idx": true, "zjZero": true,
 	"expected": true, "matched": true, "d": true, "p": true, "k": true,
 	"start": true, "memberPos": true, "next": true, "ok": true, "from": true, "lower": true, "c": true, "b": true, "w": true, "name": true, "isTopLevel": true,
@@ -202,6 +202,7 @@ type fieldInfo struct {
 	elemPtr          bool       // kSlice: elements are pointers
 	keyTypeStr       string     // kMap: key type expression
 	valInfo          *fieldInfo // kMap: value classification
+	mapEntrySize     int64      // kMap: bytes per buffered key/value pair (see maps.go)
 	leaf             *leafSpec  // kCustomLeaf: append/read funcs
 	intRead          string     // kInt/kUint/kQuotedInt: width-aware read call (e.g. "l.ReadInt32()")
 	// scalarEmpty records a named type's underlying scalar category ("num",
@@ -265,6 +266,7 @@ type generator struct {
 	aliasOwner             map[string]string      // qualifier -> import path that claimed it (importAlias)
 	leafPkgNames           map[string]string      // -leaf codec package path -> declared package name
 	enumHelpers            map[string]*enumHelper // emitted zjReadEnum helpers, keyed by type expression
+	mapHelpers             map[string]*mapHelper  // emitted zjReadMap helpers, keyed by code
 	buf                    strings.Builder
 
 	compat         bool // emit json.Marshaler/Unmarshaler wrappers
@@ -347,7 +349,7 @@ func main() {
 	}
 
 	g := &generator{pkg: pkg, outPath: *out, replaceableMethodFiles: map[string]bool{}, explicit: map[string]bool{}, genSet: map[string]bool{}, leaves: leaves, imports: map[string]string{},
-		aliasOwner: map[string]string{}, leafPkgNames: resolveLeafPkgNames(*dir, leaves), enumHelpers: map[string]*enumHelper{},
+		aliasOwner: map[string]string{}, leafPkgNames: resolveLeafPkgNames(*dir, leaves), enumHelpers: map[string]*enumHelper{}, mapHelpers: map[string]*mapHelper{},
 		compat: *compat || *compatEasyjson, compatEasyjson: *compatEasyjson, pool: *pool, ordered: !*noOrdered}
 	g.testNames = loadTestNames(*dir, pkg.Name)
 	if pos, ok := g.testNames[runtimeAlias]; ok {
@@ -588,6 +590,7 @@ func (g *generator) generate() string {
 			g.genPool(ti)
 		}
 	}
+	g.emitMapHelpers()
 	g.emitEnumHelpers()
 	body := g.buf.String()
 	used := usedQualifiers(body)
