@@ -247,3 +247,27 @@ func TestAppendStringMatchesJwriterVectors(t *testing.T) {
 		}
 	}
 }
+
+// TestSizeHint pins how SizeHint follows encoding sizes: room for the last
+// size plus a quarter after growth, no change for a size it already
+// absorbs, a shrink once an encoding uses less than half, and a cap.
+func TestSizeHint(t *testing.T) {
+	var h SizeHint
+	if b := h.Buffer(); b != nil {
+		t.Fatalf("zero SizeHint buffer = %v, want nil", b)
+	}
+	for _, step := range []struct{ observe, want int }{
+		{100, 125},                     // first size
+		{110, 125},                     // absorbed by the slack
+		{130, 162},                     // outgrew it
+		{70, 162},                      // still uses half
+		{60, 75},                       // shrank below half
+		{1 << 20, maxSizeHint},         // capped
+		{maxSizeHint + 1, maxSizeHint}, // stays capped
+	} {
+		h.Observe(step.observe)
+		if b := h.Buffer(); len(b) != 0 || cap(b) != step.want {
+			t.Fatalf("after Observe(%d): buffer len %d cap %d, want 0 and %d", step.observe, len(b), cap(b), step.want)
+		}
+	}
+}

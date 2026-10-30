@@ -9,6 +9,8 @@ import (
 	"math/bits"
 	"reflect"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -345,13 +347,48 @@ func AppendStringBytes(dst, b []byte) []byte {
 	return AppendString(dst, bytesToString(b))
 }
 
+// SizeHint sizes the buffer an encoding starts with from the encodings
+// before it, so a steady stream of similar values encodes in one allocation
+// instead of growing a buffer from empty. Generated MarshalJSON and
+// MarshalEasyJSON wrappers keep one per type. The zero value is ready to
+// use, and a SizeHint is safe for concurrent use.
+type SizeHint struct {
+	n atomic.Int64
+}
+
+// maxSizeHint caps the room a SizeHint asks for, so one huge encoding does
+// not make later ones allocate as much.
+const maxSizeHint = 64 << 10
+
+// Buffer returns an empty buffer with room for the encoding the hint
+// expects, or nil before the first Observe.
+func (h *SizeHint) Buffer() []byte {
+	if n := h.n.Load(); n > 0 {
+		return make([]byte, 0, n)
+	}
+	return nil
+}
+
+// Observe records the length of an encoding. The hint moves to that length
+// plus a quarter, to absorb small variation, when the encoding outgrew the
+// hint or used less than half of it, and is otherwise left alone so steady
+// traffic does not write to it.
+func (h *SizeHint) Observe(n int) {
+	cur := h.n.Load()
+	want := min(int64(n)+int64(n)/4, maxSizeHint)
+	if int64(n) > cur && want > cur || want < cur/2 {
+		h.n.Store(want)
+	}
+}
+
 // AppendInterface appends an arbitrary value exactly as json.Marshal encodes
 // it, matching easyjson's handling of interface{} fields (which fall back to
 // encoding/json). Nested maps therefore have sorted keys, unlike the
 // range-order maps zerojson emits for statically-typed map fields.
 //
-// Common values skip json.Marshal's reflection: nil, bools, strings that
-// need no escaping, and json.Marshaler/encoding.TextMarshaler values whose
+// Common values skip json.Marshal's reflection: nil, bools, numbers,
+// strings that need no escaping, the same kinds under a named type without
+// encoding methods, and json.Marshaler/encoding.TextMarshaler values whose
 // output encoding/json would copy unchanged. Each method is called once.
 // Output that encoding/json would compact, escape, or reject is handed back
 // to json.Marshal through a stand-in that replays the method's result, so
@@ -368,6 +405,12 @@ func AppendInterface(dst []byte, v any) ([]byte, error) {
 			dst = append(dst, x...)
 			return append(dst, '"'), nil
 		}
+	case float64:
+		return appendJSONFloat(dst, v, x, 64)
+	case int:
+		return strconv.AppendInt(dst, int64(x), 10), nil
+	case int64:
+		return strconv.AppendInt(dst, x, 10), nil
 	case time.Time:
 		// encoding/json/v2 formats times itself rather than calling
 		// MarshalJSON; AppendTime matches both, and the rare unencodable
@@ -405,7 +448,79 @@ func AppendInterface(dst []byte, v any) ([]byte, error) {
 		}
 		return appendReplayed(dst, v, replayTextMarshaler{b, err})
 	}
+	return appendKind(dst, v)
+}
+
+// appendKind encodes a bool, number, or string of any other type as
+// encoding/json does, when encoding/json would format it by kind alone:
+// the cases above have ruled out the value's own encoding methods, and
+// plainKind rules out those on *T. Everything else is left to json.Marshal.
+func appendKind(dst []byte, v any) ([]byte, error) {
+	rv := reflect.ValueOf(v)
+	switch k := rv.Kind(); {
+	case k == reflect.Invalid, k > reflect.Float64 && k != reflect.String, !plainKind(rv.Type()):
+		return appendStdlib(dst, v)
+	case k == reflect.Bool:
+		return AppendBool(dst, rv.Bool()), nil
+	case k <= reflect.Int64:
+		return strconv.AppendInt(dst, rv.Int(), 10), nil
+	case k <= reflect.Uintptr:
+		return strconv.AppendUint(dst, rv.Uint(), 10), nil
+	case k == reflect.Float32:
+		return appendJSONFloat(dst, v, rv.Float(), 32)
+	case k == reflect.Float64:
+		return appendJSONFloat(dst, v, rv.Float(), 64)
+	}
+	if s := rv.String(); verbatimString(s) {
+		dst = append(dst, '"')
+		dst = append(dst, s...)
+		return append(dst, '"'), nil
+	}
 	return appendStdlib(dst, v)
+}
+
+// plainKinds caches plainKind by type.
+var plainKinds sync.Map // reflect.Type -> bool
+
+// plainKind reports whether encoding/json formats a bool, number, or
+// string of type t by its kind alone: t is not json.Number (which has no
+// encoding method before encoding/json is built on encoding/json/v2), and
+// neither t nor *t has a method either encoding/json would call instead.
+func plainKind(t reflect.Type) bool {
+	if plain, ok := plainKinds.Load(t); ok {
+		return plain.(bool)
+	}
+	plain := t != reflect.TypeFor[json.Number]()
+	pt := reflect.PointerTo(t)
+	for _, name := range [...]string{"MarshalJSON", "MarshalJSONTo", "MarshalText", "AppendText"} {
+		if _, ok := pt.MethodByName(name); ok {
+			plain = false
+		}
+	}
+	plainKinds.Store(t, plain)
+	return plain
+}
+
+// appendJSONFloat appends f as encoding/json formats a float of the given
+// bit size: the shortest digits that round-trip, in exponent form only
+// below 1e-6 or from 1e21, with a one-digit negative exponent unpadded.
+// NaN and the infinities are left to json.Marshal(v) for its error.
+func appendJSONFloat(dst []byte, v any, f float64, bits int) ([]byte, error) {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return appendStdlib(dst, v)
+	}
+	format := byte('f')
+	if abs := math.Abs(f); abs != 0 && (bits == 64 && (abs < 1e-6 || abs >= 1e21) ||
+		bits == 32 && (float32(abs) < 1e-6 || float32(abs) >= 1e21)) {
+		format = 'e'
+	}
+	dst = strconv.AppendFloat(dst, f, format, -1, bits)
+	if n := len(dst); format == 'e' && dst[n-4] == 'e' && dst[n-3] == '-' && dst[n-2] == '0' {
+		// e-07 becomes e-7.
+		dst[n-2] = dst[n-1]
+		dst = dst[:n-1]
+	}
+	return dst, nil
 }
 
 func appendStdlib(dst []byte, v any) ([]byte, error) {

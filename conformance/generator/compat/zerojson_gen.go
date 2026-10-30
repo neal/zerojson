@@ -436,15 +436,23 @@ func zjDecodeMembers_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
 	}
 }
 
+// zjSizeHint_Point sizes the buffers Point's encoding wrappers start from.
+var zjSizeHint_Point zerojson.SizeHint
+
 // MarshalJSON implements json.Marshaler via zerojson.
-func (v Point) MarshalJSON() ([]byte, error) { return v.AppendZJSON(nil) }
+func (v Point) MarshalJSON() ([]byte, error) {
+	b, err := v.AppendZJSON(zjSizeHint_Point.Buffer())
+	zjSizeHint_Point.Observe(len(b))
+	return b, err
+}
 
 // UnmarshalJSON implements json.Unmarshaler via zerojson.
 func (v *Point) UnmarshalJSON(data []byte) error { return v.UnmarshalZJSON(data) }
 
 // MarshalEasyJSON implements easyjson.Marshaler via zerojson.
 func (v Point) MarshalEasyJSON(w *jwriter_.Writer) {
-	b, err := v.AppendZJSON(nil)
+	b, err := v.AppendZJSON(zjSizeHint_Point.Buffer())
+	zjSizeHint_Point.Observe(len(b))
 	if err != nil {
 		w.Error = err
 		return

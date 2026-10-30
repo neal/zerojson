@@ -189,6 +189,41 @@ func mutationCatalog() []mutationCase {
 			detector:  rootDetector(`^TestAppendInterfaceCallsMethodsOnce$`), wantOutput: "method called 2 times",
 		},
 		{
+			// A float in exponent form drops the exponent's padding zero, as
+			// encoding/json does (1e-07 is spelled 1e-7).
+			name: "append_interface_float_keeps_exponent_padding", tier: "quick", file: "writer.go",
+			old:       "format == 'e' && dst[n-4] == 'e'",
+			new:       "false && dst[n-4] == 'e'",
+			wantCount: 1,
+			detector:  rootDetector(`^TestAppendInterfaceMatchesMarshal$`), wantOutput: "AppendInterface:",
+		},
+		{
+			// encoding/json built on encoding/json/v2 calls AppendText, so a
+			// type with one must not be formatted by kind.
+			name: "append_interface_ignores_append_text", tier: "quick", file: "writer.go",
+			old:       `"MarshalText", "AppendText"}`,
+			new:       `"MarshalText"}`,
+			wantCount: 1,
+			detector:  rootDetector(`^TestAppendInterfaceMatchesMarshal$`), wantOutput: "append text",
+		},
+		{
+			// A hint leaves room for slightly larger encodings than the last.
+			name: "size_hint_drops_slack", tier: "quick", file: "writer.go",
+			old:       "want := min(int64(n)+int64(n)/4, maxSizeHint)",
+			new:       "want := min(int64(n), maxSizeHint)",
+			wantCount: 1,
+			detector:  rootDetector(`^TestSizeHint$`), wantOutput: "want 0 and 125",
+		},
+		{
+			// MarshalJSON must start from the hinted size, not grow from empty.
+			name: "size_hint_never_learns", tier: "quick", file: "writer.go",
+			old:        "\t\th.n.Store(want)",
+			new:        "\t\t_ = want",
+			wantCount:  1,
+			detector:   commandSpec{dir: "conformance", args: []string{"go", "test", "./generator/compat", "-run", `^TestMarshalJSONAllocatesOnce$`, "-count=1"}},
+			wantOutput: "MarshalJSON allocations =",
+		},
+		{
 			// A replayed Marshaler error must name v's type, not the stand-in.
 			name: "append_interface_error_names_stand_in", tier: "full", file: "writer.go",
 			old:       "retyped.Type = vt",

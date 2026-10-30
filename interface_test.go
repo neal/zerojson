@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"math/rand/v2"
 	"reflect"
 	"strconv"
 	"strings"
@@ -79,6 +80,25 @@ func (ifaceBoth) MarshalText() ([]byte, error) { return []byte("text"), nil }
 
 type ifaceNamedString string
 
+// Named kinds without encoding methods take AppendInterface's kind path;
+// the pointer-method and AppendText types must not.
+type (
+	ifaceNamedBool    bool
+	ifaceNamedInt     int16
+	ifaceNamedUint    uint32
+	ifaceNamedFloat   float32
+	ifaceNamedNumber  json.Number
+	ifacePtrJSONInt   int
+	ifacePtrTextFloat float64
+	ifaceAppendText   int
+)
+
+func (*ifacePtrJSONInt) MarshalJSON() ([]byte, error)   { return []byte(`"ptr json"`), nil }
+func (*ifacePtrTextFloat) MarshalText() ([]byte, error) { return []byte("ptr text"), nil }
+func (ifaceAppendText) AppendText(b []byte) ([]byte, error) {
+	return append(b, "append text"...), nil
+}
+
 func appendInterfaceCorpus() []any {
 	const bs = `\`
 	lineSep, eAcute, bad := "\xe2\x80\xa8", "\xc3\xa9", "\xff"
@@ -117,7 +137,37 @@ func appendInterfaceCorpus() []any {
 		func() *time.Time { t := time.Date(2026, 10, 28, 0, 0, 0, 5, time.UTC); return &t }(),
 		func() *time.Time { t := time.Date(-1, 1, 1, 0, 0, 0, 0, time.UTC); return &t }(),
 		make(chan int), func() {},
+		int8(-128), int16(-32768), int32(-1), int64(math.MinInt64), uint(7), uint16(65535), uint32(1),
+		uint64(math.MaxUint64), uintptr(42), float32(1e21), float32(1e-7), float32(-0.0), math.Copysign(0, -1),
+		time.Duration(1500), ifaceNamedBool(true), ifaceNamedInt(-3), ifaceNamedUint(3), ifaceNamedFloat(0.1),
+		ifaceNamedFloat(float32(math.Inf(-1))), ifaceNamedNumber("12"), ifacePtrJSONInt(1), ifacePtrTextFloat(2.5),
+		ifaceAppendText(3), map[string]any{"n": ifaceNamedInt(1), "f": 2.5, "i": int64(-9)},
 	)
+}
+
+// TestAppendInterfaceFloatsMatchMarshal pins appendJSONFloat to
+// json.Marshal across magnitudes, both bit sizes, and the exponent-form
+// thresholds, for plain and named float types.
+func TestAppendInterfaceFloatsMatchMarshal(t *testing.T) {
+	r := rand.New(rand.NewPCG(5, 6))
+	fs := []float64{0, math.Copysign(0, -1), 1e-6, 1e21, math.SmallestNonzeroFloat64, math.MaxFloat64,
+		math.Nextafter(1e-6, 0), math.Nextafter(1e21, 0), 1e-7, 123456789e-15, 0.1, 100, 1e20, 5e-324}
+	for range 100000 {
+		fs = append(fs, math.Float64frombits(r.Uint64()), r.NormFloat64()*math.Pow(10, float64(r.IntN(60)-30)))
+	}
+	check := func(v any) {
+		t.Helper()
+		want, wantErr := json.Marshal(v)
+		got, gotErr := AppendInterface(nil, v)
+		if (wantErr == nil) != (gotErr == nil) || string(got) != string(want) {
+			t.Fatalf("%T(%v): json.Marshal %q, %v; AppendInterface %q, %v", v, v, want, wantErr, got, gotErr)
+		}
+	}
+	for _, f := range fs {
+		check(f)
+		check(float32(f))
+		check(ifaceNamedFloat(f))
+	}
 }
 
 // TestAppendInterfaceMatchesMarshal pins AppendInterface to json.Marshal on

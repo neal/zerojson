@@ -49,6 +49,12 @@ func (l *Lexer) Err() error {
 	if l.err == nil {
 		return nil
 	}
+	return l.annotatedErr()
+}
+
+// annotatedErr is Err's error path, kept out of line so Err inlines into
+// the per-field checks of generated decoders.
+func (l *Lexer) annotatedErr() error {
 	if len(l.path) == 0 {
 		return l.err
 	}
@@ -179,9 +185,8 @@ const (
 // the first byte.
 func (l *Lexer) IsNull() bool {
 	l.skipWS()
-	if l.pos >= len(l.data) || l.data[l.pos] != 'n' {
-		return false
-	}
+	// One word compare tests for 'n' and the rest of the literal at once,
+	// which keeps IsNull within the inlining budget.
 	if l.pos+4 <= len(l.data) && binary.LittleEndian.Uint32(l.data[l.pos:]) == wordNull {
 		l.pos += 4
 		return true
