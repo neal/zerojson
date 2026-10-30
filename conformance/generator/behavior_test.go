@@ -732,5 +732,71 @@ type ItemRefs []*Item
   }
  }
 `,
+	}, {
+		// null clears an Appender-only element whose type is a slice or
+		// map, as encoding/json clears one it decodes structurally, while
+		// a reused slot keeps everything else.
+		name: "appender_slice_null_clears_nullable", types: "Holder,Bags,TagsList",
+		declarations: strings.ReplaceAll(`
+type Bag []int
+type bagPlain []int
+func (b Bag) AppendZJSON(dst []byte) ([]byte, error) {
+	out, err := json.Marshal(bagPlain(b))
+	if err != nil { return dst, err }
+	return append(dst, out...), nil
+}
+func (b *Bag) ReadZJSON(l *zerojson.Lexer) {
+	if raw := l.RawValue(); l.Err() == nil {
+		if err := json.Unmarshal(raw, (*bagPlain)(b)); err != nil { l.AddError(err) }
+	}
+}
+type Tags map[string]int
+type tagsPlain map[string]int
+func (m Tags) AppendZJSON(dst []byte) ([]byte, error) {
+	out, err := json.Marshal(tagsPlain(m))
+	if err != nil { return dst, err }
+	return append(dst, out...), nil
+}
+func (m *Tags) ReadZJSON(l *zerojson.Lexer) {
+	if raw := l.RawValue(); l.Err() == nil {
+		if err := json.Unmarshal(raw, (*tagsPlain)(m)); err != nil { l.AddError(err) }
+	}
+}
+type Holder struct {
+	Bags []Bag  ~json:"bags"~
+	Tags []Tags ~json:"tags"~
+}
+type Bags []Bag
+type TagsList []Tags
+`, "~", "`"),
+		testBody: `
+ seed := func(h *Holder) { h.Bags = []Bag{{42}, {7}}; h.Tags = []Tags{{"a": 1}, {"b": 2}} }
+ for _, doc := range []string{
+  "{\"bags\":[null],\"tags\":[null]}",
+  "{\"bags\":[[1],null],\"tags\":[{\"c\":3},null]}",
+  "{\"bags\":[null,[5]],\"tags\":[null,{\"d\":4}]}",
+ } {
+  for _, borrow := range []bool{false, true} {
+   var want, got Holder
+   seed(&want); seed(&got)
+   if err := json.Unmarshal([]byte(doc), &want); err != nil { t.Fatal(err) }
+   decode := got.UnmarshalZJSON
+   if borrow { decode = got.UnmarshalZJSONBorrow }
+   if err := decode([]byte(doc)); err != nil { t.Fatal(err) }
+   if !reflect.DeepEqual(&want, &got) { t.Fatalf("appender null element borrow=%v %s\nwant %+v\ngot  %+v", borrow, doc, want, got) }
+  }
+ }
+ for _, doc := range []string{"[null]", "[[1],null]"} {
+  wantBags, gotBags := Bags{{42}, {7}}, Bags{{42}, {7}}
+  if err := json.Unmarshal([]byte(doc), &wantBags); err != nil { t.Fatal(err) }
+  if err := gotBags.UnmarshalZJSON([]byte(doc)); err != nil { t.Fatal(err) }
+  if !reflect.DeepEqual(wantBags, gotBags) { t.Fatalf("appender null root element %s\nwant %+v\ngot  %+v", doc, wantBags, gotBags) }
+  wantTags, gotTags := TagsList{{"a": 1}, {"b": 2}}, TagsList{{"a": 1}, {"b": 2}}
+  if err := json.Unmarshal([]byte(doc), &wantTags); err == nil {
+   if err := gotTags.UnmarshalZJSON([]byte(doc)); err != nil { t.Fatal(err) }
+   if !reflect.DeepEqual(wantTags, gotTags) { t.Fatalf("appender null root map element %s\nwant %+v\ngot  %+v", doc, wantTags, gotTags) }
+  }
+ }
+`,
 	}}
 }

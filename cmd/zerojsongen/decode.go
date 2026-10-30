@@ -1081,8 +1081,12 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 }
 
 // emitElemNullOpen opens the per-element value read: for a null-delivered
-// leaf kind it emits `if l.IsNull() { <deliver> } else {`, otherwise the
-// plain `if !l.IsNull() {`; the caller closes the block either way.
+// leaf kind it emits `if l.IsNull() { <deliver> } else {`, for a nullable
+// one `if l.IsNull() { target = nil } else {`, otherwise the plain
+// `if !l.IsNull() {`; the caller closes the block either way. A reused
+// slice slot can hold an earlier element, so null clears a reference-typed
+// one (including an Appender-only slice or map) as encoding/json does, and
+// leaves anything else as it is.
 func (g *generator) emitElemNullOpen(vi *fieldInfo, target, ind string) {
 	if vi != nil && vi.kind != kEmptyStruct && vi.kind != kStruct {
 		f := *vi
@@ -1090,6 +1094,12 @@ func (g *generator) emitElemNullOpen(vi *fieldInfo, target, ind string) {
 		if isNullDelivered(f) {
 			g.p("%sif l.IsNull() {", ind)
 			g.emitNullDelivery(f, target, ind+"\t")
+			g.p("%s} else {", ind)
+			return
+		}
+		if isNullableField(f) {
+			g.p("%sif l.IsNull() {", ind)
+			g.p("%s\t%s = nil", ind, target)
 			g.p("%s} else {", ind)
 			return
 		}

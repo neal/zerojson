@@ -529,6 +529,15 @@ func mutationCatalog() []mutationCase {
 			detector:  generatorDetector(`^TestGeneratorBehaviorMatrix/appender_slice_element_reuse$`), wantOutput: "appender slice reuse",
 		},
 		{
+			// null clears an Appender-only slice or map element that a
+			// reused slot still holds.
+			name: "appender_null_element_is_kept", tier: "quick", file: "cmd/zerojsongen/decode.go",
+			old:       "\t\tif isNullableField(f) {\n\t\t\tg.p(\"%sif l.IsNull() {\", ind)",
+			new:       "\t\tif false && isNullableField(f) {\n\t\t\tg.p(\"%sif l.IsNull() {\", ind)",
+			wantCount: 1,
+			detector:  generatorDetector(`^TestGeneratorBehaviorMatrix/appender_slice_null_clears_nullable$`), wantOutput: "appender null element",
+		},
+		{
 			// A pointer slot within the capacity keeps its pointer.
 			name: "appender_pointer_slot_is_replaced", tier: "quick", file: "cmd/zerojsongen/decode.go",
 			old:       `g.p("%sif len(%s) < cap(%s) { e = %s[:len(%s)+1][len(%s)] }", ind, cell, cell, cell, cell, cell)`,

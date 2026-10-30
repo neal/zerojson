@@ -1580,7 +1580,9 @@ func zjDecodeOrderedField_C_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nes
 						a.c0[len(a.c0)-1] = zjZero
 					}
 					idx := len(a.c0) - 1
-					if !l.IsNull() {
+					if l.IsNull() {
+						a.c0[idx] = nil
+					} else {
 						a.c0[idx] = []byte(l.ReadBytesBase64())
 					}
 					if l.Err() != nil {
@@ -1732,7 +1734,9 @@ func zjDecodeMembers_C_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_s
 							a.c0[len(a.c0)-1] = zjZero
 						}
 						idx := len(a.c0) - 1
-						if !l.IsNull() {
+						if l.IsNull() {
+							a.c0[idx] = nil
+						} else {
 							a.c0[idx] = []byte(l.ReadBytesBase64())
 						}
 						if l.Err() != nil {
@@ -2048,7 +2052,9 @@ func zjDecodeOrderedField_C_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_
 						a.c0[len(a.c0)-1] = zjZero
 					}
 					idx := len(a.c0) - 1
-					if !l.IsNull() {
+					if l.IsNull() {
+						a.c0[idx] = nil
+					} else {
 						a.c0[idx] = []byte(l.ReadBytesBase64())
 					}
 					if l.Err() != nil {
@@ -2200,7 +2206,9 @@ func zjDecodeMembers_C_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_neste
 							a.c0[len(a.c0)-1] = zjZero
 						}
 						idx := len(a.c0) - 1
-						if !l.IsNull() {
+						if l.IsNull() {
+							a.c0[idx] = nil
+						} else {
 							a.c0[idx] = []byte(l.ReadBytesBase64())
 						}
 						if l.Err() != nil {
@@ -31853,7 +31861,9 @@ func zjReadMap_map_string___byte(l *zerojson.Lexer, m map[string][]byte) map[str
 		for {
 			mk := string(string(l.ReadKey()))
 			var mv []byte
-			if !l.IsNull() {
+			if l.IsNull() {
+				mv = nil
+			} else {
 				mv = []byte(l.ReadBytesBase64())
 			}
 			if l.Err() != nil {
@@ -31893,7 +31903,9 @@ func zjSpillMap_map_string___byte(l *zerojson.Lexer, first *[8]zjMapEntry_map_st
 	for l.NextMember() {
 		mk := string(string(l.ReadKey()))
 		var mv []byte
-		if !l.IsNull() {
+		if l.IsNull() {
+			mv = nil
+		} else {
 			mv = []byte(l.ReadBytesBase64())
 		}
 		if l.Err() != nil {
