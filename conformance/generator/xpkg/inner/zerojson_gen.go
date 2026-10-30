@@ -132,6 +132,18 @@ func (v *Ext) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// UnmarshalZJSONTrusted is UnmarshalZJSON without the up-front check that
+// data is valid JSON, for data already known to be valid, such as
+// AppendZJSON output read back from storage that detects corruption.
+// Invalid JSON may decode without an error.
+func (v *Ext) UnmarshalZJSONTrusted(data []byte) error {
+	l := zerojson.NewLexer(data, false)
+	a := &zjArenaExt{}
+	zjDecode_Ext(&l, v, a)
+	l.Finish()
+	return l.Err()
+}
+
 // ReadZJSON implements zerojson.Reader: it decodes the next JSON value
 // from l into v, so Ext can be a field of a zerojson-generated type in
 // another package. Errors are reported through l, per the Reader contract.
@@ -829,6 +841,18 @@ func (v *Exts) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// UnmarshalZJSONTrusted is UnmarshalZJSON without the up-front check that
+// data is valid JSON, for data already known to be valid, such as
+// AppendZJSON output read back from storage that detects corruption.
+// Invalid JSON may decode without an error.
+func (v *Exts) UnmarshalZJSONTrusted(data []byte) error {
+	l := zerojson.NewLexer(data, false)
+	a := &zjArenaExts{}
+	zjDecode_Exts(&l, v, a)
+	l.Finish()
+	return l.Err()
+}
+
 // ReadZJSON implements zerojson.Reader: it decodes the next JSON value
 // from l into v, so Exts can be a field of a zerojson-generated type in
 // another package. Errors are reported through l, per the Reader contract.
@@ -987,6 +1011,18 @@ func (v *ExtIndex) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// UnmarshalZJSONTrusted is UnmarshalZJSON without the up-front check that
+// data is valid JSON, for data already known to be valid, such as
+// AppendZJSON output read back from storage that detects corruption.
+// Invalid JSON may decode without an error.
+func (v *ExtIndex) UnmarshalZJSONTrusted(data []byte) error {
+	l := zerojson.NewLexer(data, false)
+	a := &zjArenaExtIndex{}
+	zjDecode_ExtIndex(&l, v, a)
+	l.Finish()
+	return l.Err()
+}
+
 // ReadZJSON implements zerojson.Reader: it decodes the next JSON value
 // from l into v, so ExtIndex can be a field of a zerojson-generated type in
 // another package. Errors are reported through l, per the Reader contract.
@@ -1121,6 +1157,18 @@ func (v *Sub) unmarshalZJSON(data []byte, borrow bool) error {
 		return err
 	}
 	l := zerojson.NewLexer(data, borrow)
+	a := &zjArenaSub{}
+	zjDecode_Sub(&l, v, a)
+	l.Finish()
+	return l.Err()
+}
+
+// UnmarshalZJSONTrusted is UnmarshalZJSON without the up-front check that
+// data is valid JSON, for data already known to be valid, such as
+// AppendZJSON output read back from storage that detects corruption.
+// Invalid JSON may decode without an error.
+func (v *Sub) UnmarshalZJSONTrusted(data []byte) error {
+	l := zerojson.NewLexer(data, false)
 	a := &zjArenaSub{}
 	zjDecode_Sub(&l, v, a)
 	l.Finish()

@@ -84,6 +84,7 @@ Choose the mode that fits your ownership requirements:
 | `UnmarshalZJSON` | Strings and Raw values are copied | Ordinary target reuse |
 | `UnmarshalZJSONBorrow` | Strings and Raw values may alias input | Ordinary target reuse |
 | `Decode` / `DecodeBorrow` (`-pool`) | Copy / borrow, respectively | Target reset; fresh storage per call |
+| `UnmarshalZJSONTrusted` (`-trusted`) | Strings and Raw values are copied | As `UnmarshalZJSON`, without the up-front validity check |
 
 **Borrowed input must remain unchanged while any result refers to it.**
 A decoder is single-goroutine; later calls do not invalidate earlier results.

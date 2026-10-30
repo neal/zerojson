@@ -345,6 +345,26 @@ func zjEscapedDirectLeafExt(data []byte) bool {
 	return false // no unescaping direct leaf reachable from Ext
 }
 
+func zjCheckTrustedExt(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted Ext
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked Ext
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusExts returns data with the leading '+' removed from every
 // quoted value on one of Exts's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -387,6 +407,26 @@ func zjDecodeStricterAllowedExts(data []byte) bool {
 func zjEscapedDirectLeafExts(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from Exts
+}
+
+func zjCheckTrustedExts(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted Exts
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked Exts
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusExtIndex returns data with the leading '+' removed from every
@@ -433,6 +473,26 @@ func zjEscapedDirectLeafExtIndex(data []byte) bool {
 	return false // no unescaping direct leaf reachable from ExtIndex
 }
 
+func zjCheckTrustedExtIndex(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted ExtIndex
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked ExtIndex
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusSub returns data with the leading '+' removed from every
 // quoted value on one of Sub's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -475,6 +535,26 @@ func zjDecodeStricterAllowedSub(data []byte) bool {
 func zjEscapedDirectLeafSub(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from Sub
+}
+
+func zjCheckTrustedSub(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted Sub
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked Sub
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 func zjFuzzHugeExponent(data []byte) bool {
@@ -531,6 +611,7 @@ func FuzzExtZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedExt(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw Ext
@@ -683,6 +764,7 @@ func FuzzExtsZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedExts(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw Exts
@@ -809,6 +891,7 @@ func FuzzExtIndexZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedExtIndex(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw ExtIndex
@@ -941,6 +1024,7 @@ func FuzzSubZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedSub(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw Sub

@@ -357,6 +357,26 @@ func zjEscapedDirectLeafEvent(data []byte) bool {
 		zjMemberHasEscape(data, "id", 1)
 }
 
+func zjCheckTrustedEvent(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted Event
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked Event
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusRawHolder returns data with the leading '+' removed from every
 // quoted value on one of RawHolder's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -399,6 +419,26 @@ func zjDecodeStricterAllowedRawHolder(data []byte) bool {
 func zjEscapedDirectLeafRawHolder(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from RawHolder
+}
+
+func zjCheckTrustedRawHolder(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted RawHolder
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked RawHolder
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusOmitZeroCases returns data with the leading '+' removed from every
@@ -445,6 +485,26 @@ func zjEscapedDirectLeafOmitZeroCases(data []byte) bool {
 		zjMemberHasEscape(data, "when", 1) ||
 		zjMemberHasEscape(data, "amount", 1) ||
 		zjMemberHasEscape(data, "id", 1)
+}
+
+func zjCheckTrustedOmitZeroCases(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted OmitZeroCases
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked OmitZeroCases
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusStringOptCases returns data with the leading '+' removed from every
@@ -497,6 +557,26 @@ func zjEscapedDirectLeafStringOptCases(data []byte) bool {
 	return false // no unescaping direct leaf reachable from StringOptCases
 }
 
+func zjCheckTrustedStringOptCases(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted StringOptCases
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked StringOptCases
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusAppenderCases returns data with the leading '+' removed from every
 // quoted value on one of AppenderCases's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -539,6 +619,26 @@ func zjDecodeStricterAllowedAppenderCases(data []byte) bool {
 func zjEscapedDirectLeafAppenderCases(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from AppenderCases
+}
+
+func zjCheckTrustedAppenderCases(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted AppenderCases
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked AppenderCases
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusMapFieldsLike returns data with the leading '+' removed from every
@@ -585,6 +685,26 @@ func zjEscapedDirectLeafMapFieldsLike(data []byte) bool {
 	return false // no unescaping direct leaf reachable from MapFieldsLike
 }
 
+func zjCheckTrustedMapFieldsLike(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted MapFieldsLike
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked MapFieldsLike
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusEventLeg returns data with the leading '+' removed from every
 // quoted value on one of EventLeg's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -627,6 +747,26 @@ func zjDecodeStricterAllowedEventLeg(data []byte) bool {
 func zjEscapedDirectLeafEventLeg(data []byte) bool {
 	return false ||
 		zjMemberHasEscape(data, "ratio", 1)
+}
+
+func zjCheckTrustedEventLeg(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted EventLeg
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked EventLeg
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusEmbedMid returns data with the leading '+' removed from every
@@ -673,6 +813,26 @@ func zjEscapedDirectLeafEmbedMid(data []byte) bool {
 	return false // no unescaping direct leaf reachable from EmbedMid
 }
 
+func zjCheckTrustedEmbedMid(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted EmbedMid
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked EmbedMid
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusEventProjection returns data with the leading '+' removed from every
 // quoted value on one of EventProjection's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -715,6 +875,26 @@ func zjDecodeStricterAllowedEventProjection(data []byte) bool {
 func zjEscapedDirectLeafEventProjection(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from EventProjection
+}
+
+func zjCheckTrustedEventProjection(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted EventProjection
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked EventProjection
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusInteractionOmitZero returns data with the leading '+' removed from every
@@ -762,6 +942,26 @@ func zjEscapedDirectLeafInteractionOmitZero(data []byte) bool {
 		zjMemberHasEscape(data, "both", 1)
 }
 
+func zjCheckTrustedInteractionOmitZero(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted InteractionOmitZero
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked InteractionOmitZero
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusMapPointerMethods returns data with the leading '+' removed from every
 // quoted value on one of MapPointerMethods's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -804,6 +1004,26 @@ func zjDecodeStricterAllowedMapPointerMethods(data []byte) bool {
 func zjEscapedDirectLeafMapPointerMethods(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from MapPointerMethods
+}
+
+func zjCheckTrustedMapPointerMethods(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted MapPointerMethods
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked MapPointerMethods
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusReuseSemantics returns data with the leading '+' removed from every
@@ -850,6 +1070,26 @@ func zjEscapedDirectLeafReuseSemantics(data []byte) bool {
 	return false // no unescaping direct leaf reachable from ReuseSemantics
 }
 
+func zjCheckTrustedReuseSemantics(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted ReuseSemantics
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked ReuseSemantics
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusOrderedSideEffects returns data with the leading '+' removed from every
 // quoted value on one of OrderedSideEffects's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -892,6 +1132,26 @@ func zjDecodeStricterAllowedOrderedSideEffects(data []byte) bool {
 func zjEscapedDirectLeafOrderedSideEffects(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from OrderedSideEffects
+}
+
+func zjCheckTrustedOrderedSideEffects(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted OrderedSideEffects
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked OrderedSideEffects
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusPoolAppenderHolder returns data with the leading '+' removed from every
@@ -938,6 +1198,26 @@ func zjEscapedDirectLeafPoolAppenderHolder(data []byte) bool {
 	return false // no unescaping direct leaf reachable from PoolAppenderHolder
 }
 
+func zjCheckTrustedPoolAppenderHolder(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted PoolAppenderHolder
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked PoolAppenderHolder
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusBytesCases returns data with the leading '+' removed from every
 // quoted value on one of BytesCases's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -980,6 +1260,26 @@ func zjDecodeStricterAllowedBytesCases(data []byte) bool {
 func zjEscapedDirectLeafBytesCases(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from BytesCases
+}
+
+func zjCheckTrustedBytesCases(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted BytesCases
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked BytesCases
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusEventList returns data with the leading '+' removed from every
@@ -1038,6 +1338,26 @@ func zjEscapedDirectLeafEventList(data []byte) bool {
 		zjMemberHasEscape(data, "id", 2)
 }
 
+func zjCheckTrustedEventList(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted EventList
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked EventList
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusLegPtrList returns data with the leading '+' removed from every
 // quoted value on one of LegPtrList's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1080,6 +1400,26 @@ func zjDecodeStricterAllowedLegPtrList(data []byte) bool {
 func zjEscapedDirectLeafLegPtrList(data []byte) bool {
 	return false ||
 		zjMemberHasEscape(data, "ratio", 2)
+}
+
+func zjCheckTrustedLegPtrList(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted LegPtrList
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked LegPtrList
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusLegIndex returns data with the leading '+' removed from every
@@ -1126,6 +1466,26 @@ func zjEscapedDirectLeafLegIndex(data []byte) bool {
 		zjMemberHasEscape(data, "ratio", 2)
 }
 
+func zjCheckTrustedLegIndex(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted LegIndex
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked LegIndex
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusPointerMethodIndex returns data with the leading '+' removed from every
 // quoted value on one of PointerMethodIndex's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1168,6 +1528,26 @@ func zjDecodeStricterAllowedPointerMethodIndex(data []byte) bool {
 func zjEscapedDirectLeafPointerMethodIndex(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from PointerMethodIndex
+}
+
+func zjCheckTrustedPointerMethodIndex(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted PointerMethodIndex
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked PointerMethodIndex
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusPointerQuotedIndex returns data with the leading '+' removed from every
@@ -1214,6 +1594,26 @@ func zjEscapedDirectLeafPointerQuotedIndex(data []byte) bool {
 	return false // no unescaping direct leaf reachable from PointerQuotedIndex
 }
 
+func zjCheckTrustedPointerQuotedIndex(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted PointerQuotedIndex
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked PointerQuotedIndex
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusRawList returns data with the leading '+' removed from every
 // quoted value on one of RawList's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1256,6 +1656,26 @@ func zjDecodeStricterAllowedRawList(data []byte) bool {
 func zjEscapedDirectLeafRawList(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from RawList
+}
+
+func zjCheckTrustedRawList(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted RawList
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked RawList
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusRawIndex returns data with the leading '+' removed from every
@@ -1302,6 +1722,26 @@ func zjEscapedDirectLeafRawIndex(data []byte) bool {
 	return false // no unescaping direct leaf reachable from RawIndex
 }
 
+func zjCheckTrustedRawIndex(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted RawIndex
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked RawIndex
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusRawHolderList returns data with the leading '+' removed from every
 // quoted value on one of RawHolderList's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1344,6 +1784,26 @@ func zjDecodeStricterAllowedRawHolderList(data []byte) bool {
 func zjEscapedDirectLeafRawHolderList(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from RawHolderList
+}
+
+func zjCheckTrustedRawHolderList(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted RawHolderList
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked RawHolderList
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusDecimalList returns data with the leading '+' removed from every
@@ -1390,6 +1850,26 @@ func zjEscapedDirectLeafDecimalList(data []byte) bool {
 		zjMemberHasEscape(data, "DecimalList", 0)
 }
 
+func zjCheckTrustedDecimalList(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted DecimalList
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked DecimalList
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusPointerCollections returns data with the leading '+' removed from every
 // quoted value on one of PointerCollections's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1432,6 +1912,26 @@ func zjDecodeStricterAllowedPointerCollections(data []byte) bool {
 func zjEscapedDirectLeafPointerCollections(data []byte) bool {
 	return false ||
 		zjMemberHasEscape(data, "ratio", 3)
+}
+
+func zjCheckTrustedPointerCollections(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted PointerCollections
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked PointerCollections
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusNumberCases returns data with the leading '+' removed from every
@@ -1484,6 +1984,26 @@ func zjEscapedDirectLeafNumberCases(data []byte) bool {
 	return false // no unescaping direct leaf reachable from NumberCases
 }
 
+func zjCheckTrustedNumberCases(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted NumberCases
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked NumberCases
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusNullCases returns data with the leading '+' removed from every
 // quoted value on one of NullCases's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1526,6 +2046,26 @@ func zjDecodeStricterAllowedNullCases(data []byte) bool {
 func zjEscapedDirectLeafNullCases(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from NullCases
+}
+
+func zjCheckTrustedNullCases(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted NullCases
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked NullCases
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusFoldNames returns data with the leading '+' removed from every
@@ -1572,6 +2112,26 @@ func zjEscapedDirectLeafFoldNames(data []byte) bool {
 	return false // no unescaping direct leaf reachable from FoldNames
 }
 
+func zjCheckTrustedFoldNames(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted FoldNames
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked FoldNames
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusFoldUnicodeNames returns data with the leading '+' removed from every
 // quoted value on one of FoldUnicodeNames's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1614,6 +2174,26 @@ func zjDecodeStricterAllowedFoldUnicodeNames(data []byte) bool {
 func zjEscapedDirectLeafFoldUnicodeNames(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from FoldUnicodeNames
+}
+
+func zjCheckTrustedFoldUnicodeNames(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted FoldUnicodeNames
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked FoldUnicodeNames
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusOrderedLookup returns data with the leading '+' removed from every
@@ -1660,6 +2240,26 @@ func zjEscapedDirectLeafOrderedLookup(data []byte) bool {
 	return false // no unescaping direct leaf reachable from OrderedLookup
 }
 
+func zjCheckTrustedOrderedLookup(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted OrderedLookup
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked OrderedLookup
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusIgnoredOnly returns data with the leading '+' removed from every
 // quoted value on one of IgnoredOnly's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1702,6 +2302,26 @@ func zjDecodeStricterAllowedIgnoredOnly(data []byte) bool {
 func zjEscapedDirectLeafIgnoredOnly(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from IgnoredOnly
+}
+
+func zjCheckTrustedIgnoredOnly(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted IgnoredOnly
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked IgnoredOnly
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusEventMeta returns data with the leading '+' removed from every
@@ -1748,6 +2368,26 @@ func zjEscapedDirectLeafEventMeta(data []byte) bool {
 		zjMemberHasEscape(data, "cost", 1)
 }
 
+func zjCheckTrustedEventMeta(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted EventMeta
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked EventMeta
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusReuseInner returns data with the leading '+' removed from every
 // quoted value on one of ReuseInner's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1790,6 +2430,26 @@ func zjDecodeStricterAllowedReuseInner(data []byte) bool {
 func zjEscapedDirectLeafReuseInner(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from ReuseInner
+}
+
+func zjCheckTrustedReuseInner(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted ReuseInner
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked ReuseInner
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 func zjFuzzHugeExponent(data []byte) bool {
@@ -1953,6 +2613,7 @@ func FuzzEventZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedEvent(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw Event
@@ -2228,6 +2889,7 @@ func FuzzRawHolderZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedRawHolder(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw RawHolder
@@ -2437,6 +3099,7 @@ func FuzzOmitZeroCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedOmitZeroCases(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw OmitZeroCases
@@ -2605,6 +3268,7 @@ func FuzzStringOptCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedStringOptCases(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw StringOptCases
@@ -2743,6 +3407,7 @@ func FuzzAppenderCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedAppenderCases(t, data)
 		oracleData := data
 		{
 			var zjRaw AppenderCases
@@ -2878,6 +3543,7 @@ func FuzzMapFieldsLikeZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedMapFieldsLike(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw MapFieldsLike
@@ -3028,6 +3694,7 @@ func FuzzEventLegZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedEventLeg(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw EventLeg
@@ -3190,6 +3857,7 @@ func FuzzEmbedMidZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedEmbedMid(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw EmbedMid
@@ -3340,6 +4008,7 @@ func FuzzEventProjectionZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedEventProjection(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw EventProjection
@@ -3492,6 +4161,7 @@ func FuzzInteractionOmitZeroZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedInteractionOmitZero(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw InteractionOmitZero
@@ -3640,6 +4310,7 @@ func FuzzMapPointerMethodsZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedMapPointerMethods(t, data)
 		oracleData := data
 		{
 			var zjRaw MapPointerMethods
@@ -3772,6 +4443,7 @@ func FuzzReuseSemanticsZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedReuseSemantics(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw ReuseSemantics
@@ -3922,6 +4594,7 @@ func FuzzOrderedSideEffectsZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedOrderedSideEffects(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw OrderedSideEffects
@@ -4062,6 +4735,7 @@ func FuzzPoolAppenderHolderZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedPoolAppenderHolder(t, data)
 		oracleData := data
 		{
 			var zjRaw PoolAppenderHolder
@@ -4198,6 +4872,7 @@ func FuzzBytesCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedBytesCases(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw BytesCases
@@ -4358,6 +5033,7 @@ func FuzzEventListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedEventList(t, data)
 		oracleData := data
 		{
 			var zjRaw EventList
@@ -4476,6 +5152,7 @@ func FuzzLegPtrListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedLegPtrList(t, data)
 		oracleData := data
 		{
 			var zjRaw LegPtrList
@@ -4594,6 +5271,7 @@ func FuzzLegIndexZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedLegIndex(t, data)
 		oracleData := data
 		{
 			var zjRaw LegIndex
@@ -4712,6 +5390,7 @@ func FuzzPointerMethodIndexZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedPointerMethodIndex(t, data)
 		oracleData := data
 		{
 			var zjRaw PointerMethodIndex
@@ -4830,6 +5509,7 @@ func FuzzPointerQuotedIndexZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedPointerQuotedIndex(t, data)
 		oracleData := data
 		{
 			var zjRaw PointerQuotedIndex
@@ -4949,6 +5629,7 @@ func FuzzRawListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedRawList(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw RawList
@@ -5106,6 +5787,7 @@ func FuzzRawIndexZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedRawIndex(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw RawIndex
@@ -5262,6 +5944,7 @@ func FuzzRawHolderListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedRawHolderList(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw RawHolderList
@@ -5414,6 +6097,7 @@ func FuzzDecimalListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedDecimalList(t, data)
 		oracleData := data
 		{
 			var zjRaw DecimalList
@@ -5541,6 +6225,7 @@ func FuzzPointerCollectionsZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedPointerCollections(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw PointerCollections
@@ -5703,6 +6388,7 @@ func FuzzNumberCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedNumberCases(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw NumberCases
@@ -5867,6 +6553,7 @@ func FuzzNullCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedNullCases(t, data)
 		oracleData := data
 		{
 			var zjRaw NullCases
@@ -6082,6 +6769,7 @@ func FuzzFoldNamesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedFoldNames(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw FoldNames
@@ -6262,6 +6950,7 @@ func FuzzFoldUnicodeNamesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedFoldUnicodeNames(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw FoldUnicodeNames
@@ -6473,6 +7162,7 @@ func FuzzOrderedLookupZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedOrderedLookup(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw OrderedLookup
@@ -6635,6 +7325,7 @@ func FuzzIgnoredOnlyZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedIgnoredOnly(t, data)
 		oracleData := data
 		{
 			var zjRaw IgnoredOnly
@@ -6763,6 +7454,7 @@ func FuzzEventMetaZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedEventMeta(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw EventMeta
@@ -6865,6 +7557,7 @@ func FuzzReuseInnerZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedReuseInner(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw ReuseInner

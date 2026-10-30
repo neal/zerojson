@@ -273,6 +273,7 @@ type generator struct {
 	compatEasyjson bool // also emit easyjson Marshaler/Unmarshaler wrappers
 	pool           bool // emit reset-first Decoder types
 	ordered        bool // emit the speculative ordered-decode fast path (ordered.go)
+	trusted        bool // emit UnmarshalZJSONTrusted, which skips the up-front Valid
 }
 
 func main() {
@@ -286,6 +287,7 @@ func main() {
 	testsOut := flag.String("tests", "", "also emit a differential fuzz test file at this path (a _test.go file, relative to -dir; not combinable with -compat)")
 	pool := flag.Bool("pool", false, "emit reset-first Decoder types with fresh per-call storage")
 	noOrdered := flag.Bool("no-ordered", false, "disable the speculative ordered-decode fast path (ordered.go)")
+	trusted := flag.Bool("trusted", false, "also emit UnmarshalZJSONTrusted, which skips the up-front validity check, for data already known to be valid JSON")
 	force := flag.Bool("force", false, "overwrite -out/-tests even if the existing file is not zerojsongen (or easyjson) output")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage: zerojsongen -types T1,T2 [-dir DIR] [-out FILE] [flags]\n\nFlags:\n")
@@ -350,7 +352,7 @@ func main() {
 
 	g := &generator{pkg: pkg, outPath: *out, replaceableMethodFiles: map[string]bool{}, explicit: map[string]bool{}, genSet: map[string]bool{}, leaves: leaves, imports: map[string]string{},
 		aliasOwner: map[string]string{}, leafPkgNames: resolveLeafPkgNames(*dir, leaves), enumHelpers: map[string]*enumHelper{}, mapHelpers: map[string]*mapHelper{},
-		compat: *compat || *compatEasyjson, compatEasyjson: *compatEasyjson, pool: *pool, ordered: !*noOrdered}
+		compat: *compat || *compatEasyjson, compatEasyjson: *compatEasyjson, pool: *pool, ordered: !*noOrdered, trusted: *trusted}
 	g.testNames = loadTestNames(*dir, pkg.Name)
 	if pos, ok := g.testNames[runtimeAlias]; ok {
 		log.Fatalf("test declaration %s at %s collides with the runtime import", runtimeAlias, pos)

@@ -38,6 +38,7 @@ or generator changes. Keep the runtime and generator on compatible versions;
 upgrading the tool does not automatically regenerate existing codecs.
 
 Optional flags add [reusable decoders](#reusable-decoders) (`-pool`),
+[trusted decoding](#trusted-decoding) (`-trusted`),
 [differential tests](#generated-differential-tests--tests) (`-tests`), or
 [stdlib wrappers](#compatibility-wrappers) (`-compat`). Use
 `go tool zerojsongen -help` for the full flag reference.
@@ -206,6 +207,24 @@ The Decoder does not retain high-water-mark storage from previous messages.
 Fresh storage costs allocations and GC work on collection-heavy workloads;
 see [resource considerations](compatibility.md#resource-considerations).
 An empty JSON array replaces its slice with a non-nil, zero-capacity value.
+
+## Trusted decoding
+
+Every public decode first checks that the whole document is valid JSON,
+which keeps malformed input from reaching the decoders. For data already
+known to be valid, that check is repeated work, typically a fifth to a
+third of decode time. `-trusted` adds `UnmarshalZJSONTrusted`, which
+decodes exactly as `UnmarshalZJSON` does but skips the check.
+
+Use it only for data whose validity something else guarantees, such as
+`AppendZJSON` output read back from storage or a log that detects
+corruption. Given invalid JSON, a trusted decode may return an error or
+decode without one, so a document it accepts is not thereby known to be
+valid. It still copies strings, enforces the nesting limit, and rejects
+trailing data, and fields with their own `UnmarshalJSON` or `UnmarshalText`
+still receive only values that are themselves valid. With `-tests`, each
+generated fuzzer also checks that trusted decoding matches `UnmarshalZJSON`
+on valid input and does not panic on any input.
 
 ## Projection / passthrough decoding
 

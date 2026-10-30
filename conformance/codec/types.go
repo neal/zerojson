@@ -19,7 +19,7 @@ import (
 )
 
 // EventLeg and EventMeta are auto-discovered from Event's fields.
-//go:generate go run github.com/neal/zerojson/cmd/zerojsongen -dir . -types Event,RawHolder,OmitZeroCases,StringOptCases,AppenderCases,MapFieldsLike,EventLeg,EmbedMid,EventProjection,InteractionOmitZero,MapPointerMethods,ReuseSemantics,OrderedSideEffects,PoolAppenderHolder,BytesCases,EventList,LegPtrList,LegIndex,PointerMethodIndex,PointerQuotedIndex,RawList,RawIndex,RawHolderList,DecimalList,PointerCollections,NumberCases,NullCases,FoldNames,FoldUnicodeNames,OrderedLookup,IgnoredOnly -leaf github.com/neal/zerojson/conformance/internal/testleaf.Decimal=github.com/neal/zerojson/conformance/internal/testleaf.Append,github.com/neal/zerojson/conformance/internal/testleaf.Read -pool -out zerojson_gen.go -tests zerojson_gen_fuzz_test.go
+//go:generate go run github.com/neal/zerojson/cmd/zerojsongen -dir . -types Event,RawHolder,OmitZeroCases,StringOptCases,AppenderCases,MapFieldsLike,EventLeg,EmbedMid,EventProjection,InteractionOmitZero,MapPointerMethods,ReuseSemantics,OrderedSideEffects,PoolAppenderHolder,BytesCases,EventList,LegPtrList,LegIndex,PointerMethodIndex,PointerQuotedIndex,RawList,RawIndex,RawHolderList,DecimalList,PointerCollections,NumberCases,NullCases,FoldNames,FoldUnicodeNames,OrderedLookup,IgnoredOnly -leaf github.com/neal/zerojson/conformance/internal/testleaf.Decimal=github.com/neal/zerojson/conformance/internal/testleaf.Append,github.com/neal/zerojson/conformance/internal/testleaf.Read -pool -trusted -out zerojson_gen.go -tests zerojson_gen_fuzz_test.go
 
 // EventList, LegPtrList, and LegIndex exercise the generator's named
 // slice/map ROOT support (root.go) — a top-level shape easyjson handles.

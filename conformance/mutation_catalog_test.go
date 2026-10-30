@@ -224,6 +224,16 @@ func mutationCatalog() []mutationCase {
 			wantOutput: "MarshalJSON allocations =",
 		},
 		{
+			// Trusted decoding skips only the validity check: strings are
+			// still copied, so the result does not alias the input.
+			name: "trusted_decode_borrows_input", tier: "quick", file: "cmd/zerojsongen/decode.go",
+			old:        `g.emitDecodeBody(n, "false")`,
+			new:        `g.emitDecodeBody(n, "true")`,
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^FuzzEventZJSON$`), wantOutput: "trusted decode differs",
+		},
+		{
 			// A replayed Marshaler error must name v's type, not the stand-in.
 			name: "append_interface_error_names_stand_in", tier: "full", file: "writer.go",
 			old:       "retyped.Type = vt",

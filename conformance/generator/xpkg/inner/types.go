@@ -2,7 +2,7 @@
 // inside its own generated types: the cross-package composition fixture.
 package inner
 
-//go:generate go run github.com/neal/zerojson/cmd/zerojsongen -dir . -types Ext,Exts,ExtIndex -pool -out zerojson_gen.go -tests zerojson_gen_fuzz_test.go
+//go:generate go run github.com/neal/zerojson/cmd/zerojsongen -dir . -types Ext,Exts,ExtIndex -pool -trusted -out zerojson_gen.go -tests zerojson_gen_fuzz_test.go
 
 type Kind string
 

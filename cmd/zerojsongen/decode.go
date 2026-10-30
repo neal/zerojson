@@ -293,6 +293,32 @@ func (g *generator) emitNonNilEmptySlice(cell, cellType, ind string) {
 	g.p("%s}", ind)
 }
 
+// emitDecodeBody emits the decode the public entry points share once any
+// validity check has passed: decode data into v, then require that nothing
+// but whitespace follows.
+func (g *generator) emitDecodeBody(n, borrow string) {
+	g.p("\tl := zerojson.NewLexer(data, %s)", borrow)
+	g.p("\ta := &%s{}", arenaName(n))
+	g.p("\t%s(&l, v, a)", decodeName(n))
+	g.p("\tl.Finish()")
+	g.p("\treturn l.Err()")
+}
+
+// emitTrustedDecode emits UnmarshalZJSONTrusted under -trusted.
+func (g *generator) emitTrustedDecode(n string) {
+	if !g.trusted {
+		return
+	}
+	g.p("")
+	g.p("// UnmarshalZJSONTrusted is UnmarshalZJSON without the up-front check that")
+	g.p("// data is valid JSON, for data already known to be valid, such as")
+	g.p("// AppendZJSON output read back from storage that detects corruption.")
+	g.p("// Invalid JSON may decode without an error.")
+	g.p("func (v *%s) UnmarshalZJSONTrusted(data []byte) error {", n)
+	g.emitDecodeBody(n, "false")
+	g.p("}")
+}
+
 func (g *generator) genDecode(ti typeInfo) {
 	g.p("")
 	g.p("// UnmarshalZJSON decodes data into v, copying strings and Raw values.")
@@ -313,12 +339,9 @@ func (g *generator) genDecode(ti typeInfo) {
 	g.p("")
 	g.p("func (v *%s) unmarshalZJSON(data []byte, borrow bool) error {", ti.name)
 	g.p("\tif err := zerojson.Valid(data); err != nil { return err }")
-	g.p("\tl := zerojson.NewLexer(data, borrow)")
-	g.p("\ta := &%s{}", arenaName(ti.name))
-	g.p("\t%s(&l, v, a)", decodeName(ti.name))
-	g.p("\tl.Finish()")
-	g.p("\treturn l.Err()")
+	g.emitDecodeBody(ti.name, "borrow")
 	g.p("}")
+	g.emitTrustedDecode(ti.name)
 	g.genReadZJSON(ti.name)
 	g.emitFieldName(ti)
 

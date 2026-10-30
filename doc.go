@@ -51,6 +51,9 @@
 // Generated unmarshal methods and pooled decoders validate the complete
 // document before custom methods run. Use Valid alone for opaque payloads.
 // ReadZJSON and low-level Lexer readers are not whole-document validators.
+// With -trusted, the generator also emits UnmarshalZJSONTrusted, which skips
+// that check for data already known to be valid JSON; given invalid JSON it
+// may decode without an error.
 //
 // The codec targets classic encoding/json semantics and easyjson-style
 // encoding, with documented differences including unsorted maps, float

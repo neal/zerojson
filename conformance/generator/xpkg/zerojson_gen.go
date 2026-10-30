@@ -203,6 +203,18 @@ func (v *Outer) unmarshalZJSON(data []byte, borrow bool) error {
 	return l.Err()
 }
 
+// UnmarshalZJSONTrusted is UnmarshalZJSON without the up-front check that
+// data is valid JSON, for data already known to be valid, such as
+// AppendZJSON output read back from storage that detects corruption.
+// Invalid JSON may decode without an error.
+func (v *Outer) UnmarshalZJSONTrusted(data []byte) error {
+	l := zerojson.NewLexer(data, false)
+	a := &zjArenaOuter{}
+	zjDecode_Outer(&l, v, a)
+	l.Finish()
+	return l.Err()
+}
+
 // ReadZJSON implements zerojson.Reader: it decodes the next JSON value
 // from l into v, so Outer can be a field of a zerojson-generated type in
 // another package. Errors are reported through l, per the Reader contract.
@@ -584,6 +596,18 @@ func (v *Chain) unmarshalZJSON(data []byte, borrow bool) error {
 		return err
 	}
 	l := zerojson.NewLexer(data, borrow)
+	a := &zjArenaChain{}
+	zjDecode_Chain(&l, v, a)
+	l.Finish()
+	return l.Err()
+}
+
+// UnmarshalZJSONTrusted is UnmarshalZJSON without the up-front check that
+// data is valid JSON, for data already known to be valid, such as
+// AppendZJSON output read back from storage that detects corruption.
+// Invalid JSON may decode without an error.
+func (v *Chain) UnmarshalZJSONTrusted(data []byte) error {
+	l := zerojson.NewLexer(data, false)
 	a := &zjArenaChain{}
 	zjDecode_Chain(&l, v, a)
 	l.Finish()

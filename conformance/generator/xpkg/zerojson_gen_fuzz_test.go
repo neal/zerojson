@@ -345,6 +345,26 @@ func zjEscapedDirectLeafOuter(data []byte) bool {
 	return false // no unescaping direct leaf reachable from Outer
 }
 
+func zjCheckTrustedOuter(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted Outer
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked Outer
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusChain returns data with the leading '+' removed from every
 // quoted value on one of Chain's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -387,6 +407,26 @@ func zjDecodeStricterAllowedChain(data []byte) bool {
 func zjEscapedDirectLeafChain(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from Chain
+}
+
+func zjCheckTrustedChain(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted Chain
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked Chain
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 func zjFuzzHugeExponent(data []byte) bool {
@@ -448,6 +488,7 @@ func FuzzOuterZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedOuter(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw Outer
@@ -616,6 +657,7 @@ func FuzzChainZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedChain(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw Chain

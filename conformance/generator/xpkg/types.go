@@ -5,7 +5,7 @@
 // match encoding/json exactly.
 package xpkg
 
-//go:generate go run github.com/neal/zerojson/cmd/zerojsongen -dir . -types Outer,Chain -pool -out zerojson_gen.go -tests zerojson_gen_fuzz_test.go
+//go:generate go run github.com/neal/zerojson/cmd/zerojsongen -dir . -types Outer,Chain -pool -trusted -out zerojson_gen.go -tests zerojson_gen_fuzz_test.go
 
 import "github.com/neal/zerojson/conformance/generator/xpkg/inner"
 
