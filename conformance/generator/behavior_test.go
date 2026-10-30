@@ -606,6 +606,7 @@ type Root struct { Field Text ` + "`json:\"field\"`" + ` }
 	cases = append(cases, publicationCases()...)
 	cases = append(cases, byteMethodSetCases()...)
 	cases = append(cases, customCodecFaultCases()...)
+	cases = append(cases, appenderSliceReuseCases()...)
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -656,4 +657,80 @@ var _ = zerojson.Valid
 			}
 		})
 	}
+}
+
+// appenderSliceReuseCases pins that slices of Appender/Reader values reuse
+// their elements as encoding/json reuses a slice's elements: the Reader
+// decodes into the element a slot already holds, and a pointer slot keeps
+// its pointer. Item's Reader merges into its receiver through
+// encoding/json, exactly as encoding/json decodes a plain struct, so any
+// reset slot shows up as a lost field.
+func appenderSliceReuseCases() []behaviorCase {
+	return []behaviorCase{{
+		name: "appender_slice_element_reuse", types: "Root,Items,ItemRefs",
+		declarations: strings.ReplaceAll(`
+type Item struct {
+	Name string ~json:"name"~
+	N    int    ~json:"n"~
+}
+type itemPlain Item
+func (v Item) AppendZJSON(dst []byte) ([]byte, error) {
+	b, err := json.Marshal(itemPlain(v))
+	if err != nil { return dst, err }
+	return append(dst, b...), nil
+}
+func (v *Item) ReadZJSON(l *zerojson.Lexer) {
+	if raw := l.RawValue(); l.Err() == nil {
+		if err := json.Unmarshal(raw, (*itemPlain)(v)); err != nil { l.AddError(err) }
+	}
+}
+type Root struct {
+	S  []Item  ~json:"s"~
+	SP []*Item ~json:"sp"~
+}
+type Items []Item
+type ItemRefs []*Item
+`, "~", "`"),
+		testBody: `
+ seeded := func(r *Root) { r.S = []Item{{"a", 1}}; r.SP = []*Item{{"b", 2}} }
+ hidden := func(r *Root) { s := []Item{{"a", 1}, {"b", 2}}; r.S = s[:0] }
+ for _, c := range []struct{ doc string; seed func(*Root) }{
+  {"{\"s\":[{\"name\":\"old\",\"n\":42}],\"s\":[{\"name\":\"new\"}],\"sp\":[{\"name\":\"old\",\"n\":7}],\"sp\":[{\"name\":\"new\"}]}", func(*Root) {}},
+  {"{\"s\":[{\"name\":\"x\"}],\"sp\":[{\"name\":\"y\"}]}", seeded},
+  {"{\"s\":[null],\"sp\":[null]}", seeded},
+  {"{\"s\":[{\"name\":\"x\"},{\"name\":\"y\"},{\"name\":\"z\"}]}", seeded},
+  {"{\"s\":[{\"name\":\"x\"},{\"name\":\"y\"}]}", hidden},
+ } {
+  for _, borrow := range []bool{false, true} {
+   var want, got Root
+   c.seed(&want); c.seed(&got)
+   wantPtrs, gotPtrs := append([]*Item(nil), want.SP...), append([]*Item(nil), got.SP...)
+   if err := json.Unmarshal([]byte(c.doc), &want); err != nil { t.Fatal(err) }
+   decode := got.UnmarshalZJSON
+   if borrow { decode = got.UnmarshalZJSONBorrow }
+   if err := decode([]byte(c.doc)); err != nil { t.Fatal(err) }
+   if !reflect.DeepEqual(&want, &got) { t.Fatalf("appender slice reuse borrow=%v %s\nwant %+v\ngot  %+v", borrow, c.doc, want, got) }
+   for i := range wantPtrs {
+    if i < len(want.SP) && (want.SP[i] == wantPtrs[i]) != (got.SP[i] == gotPtrs[i]) {
+     t.Fatalf("appender slice reuse borrow=%v %s: pointer %d reused by stdlib=%v, zerojson=%v", borrow, c.doc, i, want.SP[i] == wantPtrs[i], got.SP[i] == gotPtrs[i])
+    }
+   }
+   if len(got.S) > 0 && len(want.S) > 0 && &got.S[0] == &want.S[0] { t.Fatal("decoders shared storage") }
+  }
+ }
+ for _, doc := range []string{"[{\"name\":\"x\"}]", "[null]"} {
+  wantList, gotList := Items{{"a", 1}}, Items{{"a", 1}}
+  if err := json.Unmarshal([]byte(doc), &wantList); err != nil { t.Fatal(err) }
+  if err := gotList.UnmarshalZJSON([]byte(doc)); err != nil { t.Fatal(err) }
+  if !reflect.DeepEqual(wantList, gotList) { t.Fatalf("appender root slice reuse %s\nwant %+v\ngot  %+v", doc, wantList, gotList) }
+  wantRef, gotRef := &Item{"b", 2}, &Item{"b", 2}
+  wantRefs, gotRefs := ItemRefs{wantRef}, ItemRefs{gotRef}
+  if err := json.Unmarshal([]byte(doc), &wantRefs); err != nil { t.Fatal(err) }
+  if err := gotRefs.UnmarshalZJSON([]byte(doc)); err != nil { t.Fatal(err) }
+  if !reflect.DeepEqual(wantRefs, gotRefs) || (wantRefs[0] == wantRef) != (gotRefs[0] == gotRef) {
+   t.Fatalf("appender root pointer slice reuse %s\nwant %+v\ngot  %+v", doc, wantRefs, gotRefs)
+  }
+ }
+`,
+	}}
 }

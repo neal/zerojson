@@ -35,11 +35,12 @@ properties each harness checks, not a mechanically generated copy of this table.
 | String escapes | Backspace/form-feed use `\u0008`/`\u000c` | Stdlib uses `\b`/`\f`; easyjson uses the long forms |
 | Quoted-int64 marker null | Leaves a value-typed marker unchanged | Its `UnmarshalJSON` is bypassed; stdlib would call it |
 | Registered leaf null | Leaves a non-pointer leaf unchanged, except the built-in Raw leaf | Registration overrides the type's JSON methods; see custom leaf rules |
-| Registered-leaf container reuse | Containers whose traversal contains an explicit leaf/marker override keep the generated reader's reset behavior | Ordinary containers use stdlib element reuse; extension contracts can override it |
+| Registered-leaf container reuse | Containers whose traversal contains an explicit leaf/marker override keep the generated reader's reset behavior | Ordinary containers use stdlib element reuse, as do slices of `Appender`/`Reader` values, whose Reader decodes into the element or pointer a slot already holds |
 | Escaped direct-leaf strings | Timestamp, UUID, and quoted-int64 paths unescape before parsing; custom leaves follow their selected reader | Stdlib passes raw JSON to `UnmarshalJSON`, which may reject an escaped spelling |
 
 Duplicate members are applied in order. Objects merge into reused structs
-and maps; ordinary slices reuse their elements as stdlib does. Field lookup
+and maps; ordinary slices reuse their elements as stdlib does, including
+slices of types generated in another package. Field lookup
 prefers exact names, then the first case-insensitive match in field order.
 
 Nil and empty `zerojson.Raw` values encode as `null`; stdlib rejects an empty

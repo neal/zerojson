@@ -234,6 +234,31 @@ func mutationCatalog() []mutationCase {
 			detector:   codecDetector(`^FuzzEventZJSON$`), wantOutput: "trusted decode differs",
 		},
 		{
+			// MarshalJSONTo outranks MarshalJSON in encoding/json built on
+			// encoding/json/v2, so the MarshalJSON fast path must yield.
+			name: "append_interface_marshal_json_outranked", tier: "quick", file: "writer.go",
+			old:       "if hasMarshalJSONTo(v) {",
+			new:       "if false && hasMarshalJSONTo(v) {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestAppendInterfaceMethodPrecedence$`), wantOutput: "AppendInterface",
+		},
+		{
+			// MarshalJSONTo outranks MarshalText too.
+			name: "append_interface_marshal_text_outranked_by_json_to", tier: "quick", file: "writer.go",
+			old:       "if hasMarshalJSONTo(v) || hasAppendText(v) {",
+			new:       "if hasAppendText(v) {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestAppendInterfaceMethodPrecedence$`), wantOutput: "AppendInterface",
+		},
+		{
+			// AppendText outranks MarshalText.
+			name: "append_interface_marshal_text_outranked_by_append_text", tier: "quick", file: "writer.go",
+			old:       "if hasMarshalJSONTo(v) || hasAppendText(v) {",
+			new:       "if hasMarshalJSONTo(v) {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestAppendInterfaceMatchesMarshal$`), wantOutput: "append text",
+		},
+		{
 			// A replayed Marshaler error must name v's type, not the stand-in.
 			name: "append_interface_error_names_stand_in", tier: "full", file: "writer.go",
 			old:       "retyped.Type = vt",
@@ -492,6 +517,24 @@ func mutationCatalog() []mutationCase {
 			wantCount:  1,
 			detector:   generatorDetector(`^TestMapKeyInterningOptIn$`),
 			wantOutput: "tagged map key is not interned",
+		},
+		{
+			// An Appender's Reader decodes into the element a reused slot
+			// holds, as encoding/json does; resetting the slot loses the
+			// fields the input omits.
+			name: "appender_slice_slot_is_reset", tier: "quick", file: "cmd/zerojsongen/decode.go",
+			old:       "if vi.kind != kAppender {",
+			new:       "if true {",
+			wantCount: 1,
+			detector:  generatorDetector(`^TestGeneratorBehaviorMatrix/appender_slice_element_reuse$`), wantOutput: "appender slice reuse",
+		},
+		{
+			// A pointer slot within the capacity keeps its pointer.
+			name: "appender_pointer_slot_is_replaced", tier: "quick", file: "cmd/zerojsongen/decode.go",
+			old:       `g.p("%sif len(%s) < cap(%s) { e = %s[:len(%s)+1][len(%s)] }", ind, cell, cell, cell, cell, cell)`,
+			new:       `g.p("%s_ = %s", ind, cell)`,
+			wantCount: 1,
+			detector:  generatorDetector(`^TestGeneratorBehaviorMatrix/appender_slice_element_reuse$`), wantOutput: "appender slice reuse",
 		},
 		{
 			// The member that overflows the stack slots is handed to the

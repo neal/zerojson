@@ -283,6 +283,39 @@ func (g *generator) emitSlicePublication(f fieldInfo, target, cell, ind string) 
 	g.p("%s}", ind)
 }
 
+// emitGrowLeafSlice extends a leaf slice by the element about to be read. A
+// slot past the capacity starts at zero. A slot within it holds an element
+// from the slice's earlier contents: an Appender's Reader decodes into that
+// element, as encoding/json decodes into the elements of a slice it reuses,
+// while other leaf readers start from a reset slot (the registered-leaf
+// container rule in docs/compatibility.md).
+func (g *generator) emitGrowLeafSlice(cell string, vi *fieldInfo, ind string) {
+	g.p("%sif len(%s) == cap(%s) {", ind, cell, cell)
+	g.p("%s\tvar zjZero %s", ind, vi.typeStr)
+	g.p("%s\t%s = append(%s, zjZero)", ind, cell, cell)
+	g.p("%s} else {", ind)
+	g.p("%s\t%s = %s[:len(%s)+1]", ind, cell, cell, cell)
+	if vi.kind != kAppender {
+		g.p("%s\tvar zjZero %s", ind, vi.typeStr)
+		g.p("%s\t%s[len(%s)-1] = zjZero", ind, cell, cell)
+	}
+	g.p("%s}", ind)
+}
+
+// emitReusedPointerElem declares e, the pointer element about to be read,
+// and opens the block that reads it: as encoding/json does, e is the
+// pointer the slot already holds within the slice's capacity, a fresh
+// value when that is nil, and nil for JSON null. The caller emits the read
+// into e and closes the block.
+func (g *generator) emitReusedPointerElem(cell, elemType, ind string) {
+	g.p("%svar e *%s", ind, elemType)
+	g.p("%sif len(%s) < cap(%s) { e = %s[:len(%s)+1][len(%s)] }", ind, cell, cell, cell, cell, cell)
+	g.p("%sif l.IsNull() {", ind)
+	g.p("%s\te = nil", ind)
+	g.p("%s} else {", ind)
+	g.p("%s\tif e == nil { e = new(%s) }", ind, elemType)
+}
+
 // Empty arrays replace the slice with a non-nil, zero-capacity value, as
 // stdlib does. Keeping an arena's old capacity would expose previous-message
 // elements when a later duplicate field reuses those slots for JSON null.
@@ -976,9 +1009,7 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 			g.p("%s%s = %s[:0]", ind, cell, cell)
 			g.p("%sif l.EnterArray() {", ind)
 			g.p("%sfor {", ind)
-			g.p("%s\tvar e *%s", ind, f.valInfo.typeStr)
-			g.p("%s\tif !l.IsNull() {", ind)
-			g.p("%s\t\te = new(%s)", ind, f.valInfo.typeStr)
+			g.emitReusedPointerElem(cell, f.valInfo.typeStr, ind+"\t")
 			switch f.valInfo.kind {
 			case kMarshaler:
 				g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := e.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
@@ -1000,14 +1031,7 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		g.p("%s%s = %s[:0]", ind, cell, cell)
 		g.p("%sif l.EnterArray() {", ind)
 		g.p("%sfor {", ind)
-		g.p("%s\tif len(%s) == cap(%s) {", ind, cell, cell)
-		g.p("%s\t\tvar zjZero %s", ind, f.valInfo.typeStr)
-		g.p("%s\t\t%s = append(%s, zjZero)", ind, cell, cell)
-		g.p("%s\t} else {", ind)
-		g.p("%s\t\t%s = %s[:len(%s)+1]", ind, cell, cell, cell)
-		g.p("%s\t\tvar zjZero %s", ind, f.valInfo.typeStr)
-		g.p("%s\t\t%s[len(%s)-1] = zjZero", ind, cell, cell)
-		g.p("%s\t}", ind)
+		g.emitGrowLeafSlice(cell, f.valInfo, ind+"\t")
 		g.p("%s\tidx := len(%s) - 1", ind, cell)
 		g.emitElemNullOpen(f.valInfo, fmt.Sprintf("%s[idx]", cell), ind+"\t")
 		switch f.valInfo.kind {

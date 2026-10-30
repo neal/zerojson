@@ -281,9 +281,7 @@ func (g *generator) emitRootLeafSliceBody(rf *fieldInfo, cell, ind string) {
 	vi := rf.valInfo
 	if rf.elemPtr {
 		// Only Marshaler/TextMarshaler/Appender elements can be pointers.
-		g.p("%s\tvar e *%s", ind, vi.typeStr)
-		g.p("%s\tif !l.IsNull() {", ind)
-		g.p("%s\t\te = new(%s)", ind, vi.typeStr)
+		g.emitReusedPointerElem(cell, vi.typeStr, ind+"\t")
 		switch vi.kind {
 		case kMarshaler:
 			g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := e.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
@@ -298,14 +296,7 @@ func (g *generator) emitRootLeafSliceBody(rf *fieldInfo, cell, ind string) {
 		g.p("%s\tif !l.NextElem() { break }", ind)
 		return
 	}
-	g.p("%s\tif len(%s) == cap(%s) {", ind, cell, cell)
-	g.p("%s\t\tvar zjZero %s", ind, vi.typeStr)
-	g.p("%s\t\t%s = append(%s, zjZero)", ind, cell, cell)
-	g.p("%s\t} else {", ind)
-	g.p("%s\t\t%s = %s[:len(%s)+1]", ind, cell, cell, cell)
-	g.p("%s\t\tvar zjZero %s", ind, vi.typeStr)
-	g.p("%s\t\t%s[len(%s)-1] = zjZero", ind, cell, cell)
-	g.p("%s\t}", ind)
+	g.emitGrowLeafSlice(cell, vi, ind+"\t")
 	g.p("%s\tidx := len(%s) - 1", ind, cell)
 	g.emitElemNullOpen(vi, fmt.Sprintf("%s[idx]", cell), ind+"\t")
 	switch vi.kind {

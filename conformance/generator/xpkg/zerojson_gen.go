@@ -396,8 +396,6 @@ func zjDecodeFallback_Outer(l *zerojson.Lexer, v *Outer, a *zjArenaOuter) {
 						a.c3 = append(a.c3, zjZero)
 					} else {
 						a.c3 = a.c3[:len(a.c3)+1]
-						var zjZero inner.Ext
-						a.c3[len(a.c3)-1] = zjZero
 					}
 					idx := len(a.c3) - 1
 					if !l.IsNull() {
@@ -425,8 +423,15 @@ func zjDecodeFallback_Outer(l *zerojson.Lexer, v *Outer, a *zjArenaOuter) {
 			if l.EnterArray() {
 				for {
 					var e *inner.Ext
-					if !l.IsNull() {
-						e = new(inner.Ext)
+					if len(a.c4) < cap(a.c4) {
+						e = a.c4[:len(a.c4)+1][len(a.c4)]
+					}
+					if l.IsNull() {
+						e = nil
+					} else {
+						if e == nil {
+							e = new(inner.Ext)
+						}
 						e.ReadZJSON(l)
 					}
 					if l.Err() != nil {

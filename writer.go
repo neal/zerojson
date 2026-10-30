@@ -389,7 +389,10 @@ func (h *SizeHint) Observe(n int) {
 // Common values skip json.Marshal's reflection: nil, bools, numbers,
 // strings that need no escaping, the same kinds under a named type without
 // encoding methods, and json.Marshaler/encoding.TextMarshaler values whose
-// output encoding/json would copy unchanged. Each method is called once.
+// output encoding/json would copy unchanged. A value with a method that
+// encoding/json ranks above those (MarshalJSONTo or AppendText, once it is
+// built on encoding/json/v2) is left to json.Marshal. Each method is called
+// once.
 // Output that encoding/json would compact, escape, or reject is handed back
 // to json.Marshal through a stand-in that replays the method's result, so
 // the bytes and the error are json.Marshal's for v.
@@ -428,6 +431,9 @@ func AppendInterface(dst []byte, v any) ([]byte, error) {
 		}
 		return appendStdlib(dst, v)
 	case json.Marshaler:
+		if hasMarshalJSONTo(v) {
+			return appendStdlib(dst, v)
+		}
 		if isNilPointer(v) {
 			return append(dst, "null"...), nil
 		}
@@ -437,6 +443,9 @@ func AppendInterface(dst []byte, v any) ([]byte, error) {
 		}
 		return appendReplayed(dst, v, replayMarshaler{b, err})
 	case encoding.TextMarshaler:
+		if hasMarshalJSONTo(v) || hasAppendText(v) {
+			return appendStdlib(dst, v)
+		}
 		if isNilPointer(v) {
 			return append(dst, "null"...), nil
 		}

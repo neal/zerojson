@@ -99,6 +99,22 @@ func (ifaceAppendText) AppendText(b []byte) ([]byte, error) {
 	return append(b, "append text"...), nil
 }
 
+// AppendText outranks MarshalText once encoding/json is built on
+// encoding/json/v2, which calls a pointer method only through a pointer.
+type (
+	ifaceTextAppend    int
+	ifaceTextAppendPtr int
+)
+
+func (ifaceTextAppend) MarshalText() ([]byte, error) { return []byte("marshal text"), nil }
+func (ifaceTextAppend) AppendText(b []byte) ([]byte, error) {
+	return append(b, "append text"...), nil
+}
+func (ifaceTextAppendPtr) MarshalText() ([]byte, error) { return []byte("marshal text"), nil }
+func (*ifaceTextAppendPtr) AppendText(b []byte) ([]byte, error) {
+	return append(b, "pointer append text"...), nil
+}
+
 func appendInterfaceCorpus() []any {
 	const bs = `\`
 	lineSep, eAcute, bad := "\xe2\x80\xa8", "\xc3\xa9", "\xff"
@@ -142,6 +158,7 @@ func appendInterfaceCorpus() []any {
 		time.Duration(1500), ifaceNamedBool(true), ifaceNamedInt(-3), ifaceNamedUint(3), ifaceNamedFloat(0.1),
 		ifaceNamedFloat(float32(math.Inf(-1))), ifaceNamedNumber("12"), ifacePtrJSONInt(1), ifacePtrTextFloat(2.5),
 		ifaceAppendText(3), map[string]any{"n": ifaceNamedInt(1), "f": 2.5, "i": int64(-9)},
+		ifaceTextAppend(0), new(ifaceTextAppend), ifaceTextAppendPtr(0), new(ifaceTextAppendPtr), (*ifaceTextAppend)(nil),
 	)
 }
 
