@@ -523,7 +523,7 @@ func mutationCatalog() []mutationCase {
 			// holds, as encoding/json does; resetting the slot loses the
 			// fields the input omits.
 			name: "appender_slice_slot_is_reset", tier: "quick", file: "cmd/zerojsongen/decode.go",
-			old:       "if vi.kind != kAppender {",
+			old:       "if g.hasLeafOverride(*vi, map[string]bool{}) {",
 			new:       "if true {",
 			wantCount: 1,
 			detector:  generatorDetector(`^TestGeneratorBehaviorMatrix/appender_slice_element_reuse$`), wantOutput: "appender slice reuse",
@@ -536,6 +536,41 @@ func mutationCatalog() []mutationCase {
 			new:       "\t\tif false && isNullableField(f) {\n\t\t\tg.p(\"%sif l.IsNull() {\", ind)",
 			wantCount: 1,
 			detector:  generatorDetector(`^TestGeneratorBehaviorMatrix/appender_slice_null_clears_nullable$`), wantOutput: "appender null element",
+		},
+		{
+			// A struct slice whose elements reach no registered leaf keeps
+			// its reused slots, through nested Appender slices too.
+			name: "struct_slice_slot_is_reset_without_leaf", tier: "quick", file: "cmd/zerojsongen/decode.go",
+			old:       "\tif reset {\n\t\tg.p(\"%s\\t%s[len(%s)-1] = %s\", ind, cell, cell, zero)",
+			new:       "\tif true {\n\t\tg.p(\"%s\\t%s[len(%s)-1] = %s\", ind, cell, cell, zero)",
+			wantCount: 1,
+			detector:  generatorDetector(`^TestGeneratorBehaviorMatrix/appender_nested_slice_reuse$`), wantOutput: "nested appender",
+		},
+		{
+			// ...and a pointer slot keeps its pointer.
+			name: "struct_slice_pointer_is_replaced", tier: "quick", file: "cmd/zerojsongen/decode.go",
+			old:       `g.p("%s\tif %s == nil { %s = new(%s) }", ind, slot, slot, elem)`,
+			new:       `g.p("%s\t%s = new(%s)", ind, slot, elem)`,
+			wantCount: 1,
+			detector:  generatorDetector(`^TestGeneratorBehaviorMatrix/appender_nested_slice_reuse$`), wantOutput: "nested appender",
+		},
+		{
+			// An aliased easyjson pointee is the same type.
+			name: "easyjson_alias_pointee_missed", tier: "quick", file: "cmd/zerojsongen/load.go",
+			old:        "n, ok := types.Unalias(ptr.Elem()).(*types.Named)",
+			new:        "n, ok := ptr.Elem().(*types.Named)",
+			occurrence: 1,
+			wantCount:  2,
+			detector:   generatorDetector(`^TestGeneratorBehaviorMatrix/easyjson_only_aliased_pointee_refused$`), wantOutput: "want substring",
+		},
+		{
+			// So is an aliased easyjson pointer type.
+			name: "easyjson_alias_pointer_missed", tier: "quick", file: "cmd/zerojsongen/load.go",
+			old:        "ptr, ok := types.Unalias(sig.Params().At(0).Type()).(*types.Pointer)",
+			new:        "ptr, ok := sig.Params().At(0).Type().(*types.Pointer)",
+			occurrence: 1,
+			wantCount:  2,
+			detector:   generatorDetector(`^TestGeneratorBehaviorMatrix/easyjson_only_aliased_pointer_refused$`), wantOutput: "want substring",
 		},
 		{
 			// A pointer slot within the capacity keeps its pointer.
@@ -699,8 +734,8 @@ func mutationCatalog() []mutationCase {
 			name:       "reused_slice_slot_is_not_zeroed",
 			tier:       "full",
 			file:       "cmd/zerojsongen/decode.go",
-			old:        `g.p("%s\t\t%s[len(%s)-1] = %s", ind, cell, cell, zero)`,
-			new:        `g.p("%s\t\tif false { %s[len(%s)-1] = %s }", ind, cell, cell, zero)`,
+			old:        `g.p("%s\t%s[len(%s)-1] = %s", ind, cell, cell, zero)`,
+			new:        `g.p("%s\tif false { %s[len(%s)-1] = %s }", ind, cell, cell, zero)`,
 			occurrence: 0,
 			wantCount:  1,
 			regenerate: true,

@@ -308,8 +308,6 @@ func zjDecodeOrderedField_Sample(l *zerojson.Lexer, v *Sample, a *zjArenaSample,
 						a.c0 = append(a.c0, zjZero)
 					} else {
 						a.c0 = a.c0[:len(a.c0)+1]
-						var zjZero int
-						a.c0[len(a.c0)-1] = zjZero
 					}
 					idx := len(a.c0) - 1
 					if !l.IsNull() {
@@ -479,8 +477,6 @@ func zjDecodeMembers_Sample(l *zerojson.Lexer, v *Sample, a *zjArenaSample) {
 							a.c0 = append(a.c0, zjZero)
 						} else {
 							a.c0 = a.c0[:len(a.c0)+1]
-							var zjZero int
-							a.c0[len(a.c0)-1] = zjZero
 						}
 						idx := len(a.c0) - 1
 						if !l.IsNull() {
@@ -1518,8 +1514,6 @@ func zjDecodeOrderedField_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPaylo
 						a.c4 = append(a.c4, zjZero)
 					} else {
 						a.c4 = a.c4[:len(a.c4)+1]
-						var zjZero string
-						a.c4[len(a.c4)-1] = zjZero
 					}
 					idx := len(a.c4) - 1
 					if !l.IsNull() {
@@ -1558,7 +1552,6 @@ func zjDecodeOrderedField_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPaylo
 						a.c5 = append(a.c5, Item{})
 					} else {
 						a.c5 = a.c5[:len(a.c5)+1]
-						a.c5[len(a.c5)-1] = Item{}
 					}
 					if !l.IsNull() {
 						var ea zjArenaItem
@@ -1843,8 +1836,6 @@ func zjDecodeMembers_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) {
 							a.c4 = append(a.c4, zjZero)
 						} else {
 							a.c4 = a.c4[:len(a.c4)+1]
-							var zjZero string
-							a.c4[len(a.c4)-1] = zjZero
 						}
 						idx := len(a.c4) - 1
 						if !l.IsNull() {
@@ -1883,7 +1874,6 @@ func zjDecodeMembers_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) {
 							a.c5 = append(a.c5, Item{})
 						} else {
 							a.c5 = a.c5[:len(a.c5)+1]
-							a.c5[len(a.c5)-1] = Item{}
 						}
 						if !l.IsNull() {
 							var ea zjArenaItem

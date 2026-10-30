@@ -432,8 +432,6 @@ func zjDecodeOrderedField_Ext(l *zerojson.Lexer, v *Ext, a *zjArenaExt, k int) b
 						a.c4 = append(a.c4, zjZero)
 					} else {
 						a.c4 = a.c4[:len(a.c4)+1]
-						var zjZero string
-						a.c4[len(a.c4)-1] = zjZero
 					}
 					idx := len(a.c4) - 1
 					if !l.IsNull() {
@@ -693,8 +691,6 @@ func zjDecodeMembers_Ext(l *zerojson.Lexer, v *Ext, a *zjArenaExt) {
 							a.c4 = append(a.c4, zjZero)
 						} else {
 							a.c4 = a.c4[:len(a.c4)+1]
-							var zjZero string
-							a.c4[len(a.c4)-1] = zjZero
 						}
 						idx := len(a.c4) - 1
 						if !l.IsNull() {
@@ -887,7 +883,6 @@ func zjDecode_Exts(l *zerojson.Lexer, v *Exts, a *zjArenaExts) {
 				a.cRoot = append(a.cRoot, Ext{})
 			} else {
 				a.cRoot = a.cRoot[:len(a.cRoot)+1]
-				a.cRoot[len(a.cRoot)-1] = Ext{}
 			}
 			if !l.IsNull() {
 				var ea zjArenaExt
@@ -1420,8 +1415,6 @@ func zjDecodeOrderedField_Sub(l *zerojson.Lexer, v *Sub, a *zjArenaSub, k int) b
 						a.c1 = append(a.c1, zjZero)
 					} else {
 						a.c1 = a.c1[:len(a.c1)+1]
-						var zjZero int
-						a.c1[len(a.c1)-1] = zjZero
 					}
 					idx := len(a.c1) - 1
 					if !l.IsNull() {
@@ -1605,8 +1598,6 @@ func zjDecodeMembers_Sub(l *zerojson.Lexer, v *Sub, a *zjArenaSub) {
 							a.c1 = append(a.c1, zjZero)
 						} else {
 							a.c1 = a.c1[:len(a.c1)+1]
-							var zjZero int
-							a.c1[len(a.c1)-1] = zjZero
 						}
 						idx := len(a.c1) - 1
 						if !l.IsNull() {

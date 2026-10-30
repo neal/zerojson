@@ -1,4 +1,4 @@
-//go:build go1.27
+//go:build goexperiment.jsonv2 && go1.27
 
 package zerojson
 

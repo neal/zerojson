@@ -250,6 +250,43 @@ func (g *generator) stdlibValue(f fieldInfo, visiting map[string]bool) bool {
 	return true
 }
 
+// hasLeafOverride reports whether f's traversal reaches a registered leaf
+// (other than Raw) or a quoted-int marker. Their readers replace a value
+// rather than decode into it, so a slice whose elements reach one resets a
+// reused slot before reading into it: the registered-leaf container rule in
+// docs/compatibility.md. An Appender/Reader is opaque and decodes into what
+// the slot holds, so everywhere else a reused slot keeps its element, and a
+// pointer slot its pointer, as encoding/json decodes into the elements of a
+// slice it reuses.
+func (g *generator) hasLeafOverride(f fieldInfo, visiting map[string]bool) bool {
+	switch f.kind {
+	case kCustomLeaf:
+		return !isRawLeaf(f)
+	case kQuotedInt:
+		return true
+	case kStruct, kSlice:
+		if visiting[f.elem] {
+			return false
+		}
+		visiting[f.elem] = true
+		defer delete(visiting, f.elem)
+		for _, ti := range g.types {
+			if ti.name != f.elem {
+				continue
+			}
+			for _, child := range ti.fields {
+				if g.hasLeafOverride(child, visiting) {
+					return true
+				}
+			}
+		}
+		return false
+	case kLeafSlice, kMap:
+		return f.valInfo != nil && g.hasLeafOverride(*f.valInfo, visiting)
+	}
+	return false
+}
+
 // Preserve an existing receiver, including aliases held elsewhere in the
 // caller's object graph. An arena cell can be published only once per public
 // decode: null may detach it after a callback has retained its address.
@@ -283,19 +320,59 @@ func (g *generator) emitSlicePublication(f fieldInfo, target, cell, ind string) 
 	g.p("%s}", ind)
 }
 
+// emitStructSliceElem extends a struct slice by the element about to be
+// read and reads it. With reset (see hasLeafOverride) a reused slot starts
+// at zero; otherwise it keeps its element, or its pointer, for the decode.
+// JSON null leaves a value element as it is and clears a pointer.
+func (g *generator) emitStructSliceElem(elem string, elemPtr, reset bool, cell, ind string) {
+	zero := "nil"
+	if !elemPtr {
+		zero = elem + "{}"
+	}
+	slot := cell + "[len(" + cell + ")-1]"
+	g.p("%sif len(%s) == cap(%s) {", ind, cell, cell)
+	g.p("%s\t%s = append(%s, %s)", ind, cell, cell, zero)
+	g.p("%s} else {", ind)
+	g.p("%s\t%s = %s[:len(%s)+1]", ind, cell, cell, cell)
+	if reset {
+		g.p("%s\t%s[len(%s)-1] = %s", ind, cell, cell, zero)
+	}
+	g.p("%s}", ind)
+	switch {
+	case elemPtr && reset:
+		g.p("%sif !l.IsNull() {", ind)
+		g.p("%s\te := new(%s)", ind, elem)
+		g.p("%s\tvar ea %s", ind, arenaName(elem))
+		g.p("%s\t%s(l, e, &ea)", ind, decodeName(elem))
+		g.p("%s\t%s = e", ind, slot)
+		g.p("%s}", ind)
+	case elemPtr:
+		g.p("%sif l.IsNull() {", ind)
+		g.p("%s\t%s = nil", ind, slot)
+		g.p("%s} else {", ind)
+		g.p("%s\tif %s == nil { %s = new(%s) }", ind, slot, slot, elem)
+		g.p("%s\tvar ea %s", ind, arenaName(elem))
+		g.p("%s\t%s(l, %s, &ea)", ind, decodeName(elem), slot)
+		g.p("%s}", ind)
+	default:
+		g.p("%sif !l.IsNull() {", ind)
+		g.p("%s\tvar ea %s", ind, arenaName(elem))
+		g.p("%s\t%s(l, &%s, &ea)", ind, decodeName(elem), slot)
+		g.p("%s}", ind)
+	}
+}
+
 // emitGrowLeafSlice extends a leaf slice by the element about to be read. A
 // slot past the capacity starts at zero. A slot within it holds an element
-// from the slice's earlier contents: an Appender's Reader decodes into that
-// element, as encoding/json decodes into the elements of a slice it reuses,
-// while other leaf readers start from a reset slot (the registered-leaf
-// container rule in docs/compatibility.md).
+// from the slice's earlier contents, which the read decodes into unless the
+// element is a registered leaf or quoted-int marker (see hasLeafOverride).
 func (g *generator) emitGrowLeafSlice(cell string, vi *fieldInfo, ind string) {
 	g.p("%sif len(%s) == cap(%s) {", ind, cell, cell)
 	g.p("%s\tvar zjZero %s", ind, vi.typeStr)
 	g.p("%s\t%s = append(%s, zjZero)", ind, cell, cell)
 	g.p("%s} else {", ind)
 	g.p("%s\t%s = %s[:len(%s)+1]", ind, cell, cell, cell)
-	if vi.kind != kAppender {
+	if g.hasLeafOverride(*vi, map[string]bool{}) {
 		g.p("%s\tvar zjZero %s", ind, vi.typeStr)
 		g.p("%s\t%s[len(%s)-1] = zjZero", ind, cell, cell)
 	}
@@ -957,35 +1034,13 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		// ordered attempt's confirmed-key write followed by a fallback
 		// retry after a later bail) would otherwise double up elements
 		// instead of replacing them. It matches encoding/json's own
-		// behavior (it resets a slice's length before populating it) and,
-		// combined with zeroing every reused slot below, ensures no stale
-		// element survives from a prior decode.
+		// behavior (it resets a slice's length before populating it).
+		// Reused slots then keep their elements, as encoding/json's do,
+		// unless the elements reach a registered leaf (hasLeafOverride).
 		g.p("%s%s = %s[:0]", ind, cell, cell)
 		g.p("%sif l.EnterArray() {", ind)
 		g.p("%sfor {", ind)
-		zero := "nil"
-		if !f.elemPtr {
-			zero = f.elem + "{}"
-		}
-		g.p("%s\tif len(%s) == cap(%s) {", ind, cell, cell)
-		g.p("%s\t\t%s = append(%s, %s)", ind, cell, cell, zero)
-		g.p("%s\t} else {", ind)
-		g.p("%s\t\t%s = %s[:len(%s)+1]", ind, cell, cell, cell)
-		g.p("%s\t\t%s[len(%s)-1] = %s", ind, cell, cell, zero)
-		g.p("%s\t}", ind)
-		if f.elemPtr {
-			g.p("%s\tif !l.IsNull() {", ind)
-			g.p("%s\t\te := new(%s)", ind, f.elem)
-			g.p("%s\t\tvar ea %s", ind, arenaName(f.elem))
-			g.p("%s\t\t%s(l, e, &ea)", ind, decodeName(f.elem))
-			g.p("%s\t\t%s[len(%s)-1] = e", ind, cell, cell)
-			g.p("%s\t}", ind)
-		} else {
-			g.p("%s\tif !l.IsNull() {", ind)
-			g.p("%s\t\tvar ea %s", ind, arenaName(f.elem))
-			g.p("%s\t\t%s(l, &%s[len(%s)-1], &ea)", ind, decodeName(f.elem), cell, cell)
-			g.p("%s\t}", ind)
-		}
+		g.emitStructSliceElem(f.elem, f.elemPtr, g.hasLeafOverride(f, map[string]bool{}), cell, ind+"\t")
 		g.p("%s\tif l.Err() != nil { %s }", ind, retStmt)
 		g.p("%s\tif !l.NextElem() { break }", ind)
 		g.p("%s}", ind)

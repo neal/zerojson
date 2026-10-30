@@ -532,6 +532,41 @@ type Root struct { Amount Cents ` + "`json:\"amount\"`" + ` }
 			wantGenError: "has a hand-written MarshalEasyJSON method but no MarshalJSON/UnmarshalJSON",
 		},
 		{
+			// An alias for easyjson's Writer or Lexer names the same type, so
+			// the refusal must see through it, in the pointee and in the
+			// parameter type itself.
+			name: "easyjson_only_aliased_pointee_refused",
+			imports: `	"github.com/mailru/easyjson/jlexer"
+	"github.com/mailru/easyjson/jwriter"
+`,
+			declarations: `
+type WriterAlias = jwriter.Writer
+type LexerAlias = jlexer.Lexer
+type Cents struct{ V int64 }
+func (c Cents) MarshalEasyJSON(w *WriterAlias) { w.RawString("\"1.00\"") }
+func (c *Cents) UnmarshalEasyJSON(l *LexerAlias) { l.Skip() }
+type Root struct { Amount Cents ` + "`json:\"amount\"`" + ` }
+`,
+			types:        "Root",
+			wantGenError: "has a hand-written MarshalEasyJSON method but no MarshalJSON/UnmarshalJSON",
+		},
+		{
+			name: "easyjson_only_aliased_pointer_refused",
+			imports: `	"github.com/mailru/easyjson/jlexer"
+	"github.com/mailru/easyjson/jwriter"
+`,
+			declarations: `
+type WriterRef = *jwriter.Writer
+type LexerRef = *jlexer.Lexer
+type Cents struct{ V int64 }
+func (c Cents) MarshalEasyJSON(w WriterRef) { w.RawString("\"1.00\"") }
+func (c *Cents) UnmarshalEasyJSON(l LexerRef) { l.Skip() }
+type Root struct { Amount Cents ` + "`json:\"amount\"`" + ` }
+`,
+			types:        "Root",
+			wantGenError: "has a hand-written MarshalEasyJSON method but no MarshalJSON/UnmarshalJSON",
+		},
+		{
 			name: "easyjson_only_scalar_field_refused",
 			imports: `	"github.com/mailru/easyjson/jlexer"
 `,
@@ -797,6 +832,70 @@ type TagsList []Tags
    if !reflect.DeepEqual(wantTags, gotTags) { t.Fatalf("appender null root map element %s\nwant %+v\ngot  %+v", doc, wantTags, gotTags) }
   }
  }
+`,
+	}, {
+		// Reuse holds through a slice of structs that contain Appender
+		// slices: the enclosing slots, their omitted fields, and the
+		// nested elements all keep what they held, as in encoding/json.
+		name: "appender_nested_slice_reuse", types: "Root,Wrappers,WrapperRefs", flags: []string{"-trusted"},
+		declarations: strings.ReplaceAll(`
+type Item struct {
+	Name string ~json:"name"~
+	N    int    ~json:"n"~
+}
+type itemPlain Item
+func (v Item) MarshalJSON() ([]byte, error) { return json.Marshal(itemPlain(v)) }
+func (v *Item) UnmarshalJSON(b []byte) error { return json.Unmarshal(b, (*itemPlain)(v)) }
+func (v Item) AppendZJSON(dst []byte) ([]byte, error) {
+	b, err := json.Marshal(itemPlain(v))
+	if err != nil { return dst, err }
+	return append(dst, b...), nil
+}
+func (v *Item) ReadZJSON(l *zerojson.Lexer) {
+	if raw := l.RawValue(); l.Err() == nil {
+		if err := json.Unmarshal(raw, (*itemPlain)(v)); err != nil { l.AddError(err) }
+	}
+}
+type Wrapper struct {
+	Name  string ~json:"name"~
+	Extra int    ~json:"extra"~
+	Items []Item ~json:"items"~
+}
+type Root struct {
+	W  []Wrapper  ~json:"w"~
+	WP []*Wrapper ~json:"wp"~
+}
+type Wrappers []Wrapper
+type WrapperRefs []*Wrapper
+`, "~", "`"),
+		testBody: `
+ mk := func() Wrapper { return Wrapper{Name: "w", Extra: 5, Items: []Item{{"a", 1}}} }
+ seed := func(r *Root) { w := mk(); r.W = []Wrapper{mk()}; r.WP = []*Wrapper{&w} }
+ for _, doc := range []string{
+  "{\"w\":[{\"items\":[{\"name\":\"x\"}]}],\"wp\":[{\"items\":[{\"name\":\"y\"}]}]}",
+  "{\"w\":[{\"name\":\"v\"}],\"wp\":[{\"extra\":6}]}",
+  "{\"w\":[{\"items\":[null]}],\"wp\":[null]}",
+ } {
+  for mode, decode := range map[string]func(*Root, []byte) error{"copy": (*Root).UnmarshalZJSON, "borrow": (*Root).UnmarshalZJSONBorrow, "trusted": (*Root).UnmarshalZJSONTrusted} {
+   var want, got Root
+   seed(&want); seed(&got)
+   wantPtr, gotPtr := want.WP[0], got.WP[0]
+   if err := json.Unmarshal([]byte(doc), &want); err != nil { t.Fatal(err) }
+   if err := decode(&got, []byte(doc)); err != nil { t.Fatal(err) }
+   if !reflect.DeepEqual(&want, &got) { t.Fatalf("nested appender reuse %s %s\nwant %+v\ngot  %+v", mode, doc, want, got) }
+   if len(want.WP) > 0 && (want.WP[0] == wantPtr) != (got.WP[0] == gotPtr) { t.Fatalf("nested appender reuse %s %s: pointer reuse differs", mode, doc) }
+  }
+ }
+ doc := "[{\"items\":[{\"name\":\"x\"}]}]"
+ wantList, gotList := Wrappers{mk()}, Wrappers{mk()}
+ if err := json.Unmarshal([]byte(doc), &wantList); err != nil { t.Fatal(err) }
+ if err := gotList.UnmarshalZJSON([]byte(doc)); err != nil { t.Fatal(err) }
+ if !reflect.DeepEqual(wantList, gotList) { t.Fatalf("nested appender root reuse\nwant %+v\ngot  %+v", wantList, gotList) }
+ w1, w2 := mk(), mk()
+ wantRefs, gotRefs := WrapperRefs{&w1}, WrapperRefs{&w2}
+ if err := json.Unmarshal([]byte(doc), &wantRefs); err != nil { t.Fatal(err) }
+ if err := gotRefs.UnmarshalZJSON([]byte(doc)); err != nil { t.Fatal(err) }
+ if !reflect.DeepEqual(wantRefs, gotRefs) || (wantRefs[0] == &w1) != (gotRefs[0] == &w2) { t.Fatalf("nested appender root pointer reuse\nwant %+v\ngot  %+v", wantRefs, gotRefs) }
 `,
 	}}
 }

@@ -1085,8 +1085,6 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 							a.c18 = append(a.c18, zjZero)
 						} else {
 							a.c18 = a.c18[:len(a.c18)+1]
-							var zjZero string
-							a.c18[len(a.c18)-1] = zjZero
 						}
 						idx := len(a.c18) - 1
 						if !l.IsNull() {
@@ -1182,8 +1180,6 @@ func zjDecodeFallback_Event(l *zerojson.Lexer, v *Event, a *zjArenaEvent) {
 							a.c30 = append(a.c30, zjZero)
 						} else {
 							a.c30 = a.c30[:len(a.c30)+1]
-							var zjZero any
-							a.c30[len(a.c30)-1] = zjZero
 						}
 						idx := len(a.c30) - 1
 						if l.IsNull() {
@@ -2289,8 +2285,6 @@ func zjDecodeOrderedField_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *
 						a.c6 = append(a.c6, zjZero)
 					} else {
 						a.c6 = a.c6[:len(a.c6)+1]
-						var zjZero string
-						a.c6[len(a.c6)-1] = zjZero
 					}
 					idx := len(a.c6) - 1
 					if !l.IsNull() {
@@ -2349,8 +2343,6 @@ func zjDecodeOrderedField_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *
 						a.c7 = append(a.c7, zjZero)
 					} else {
 						a.c7 = a.c7[:len(a.c7)+1]
-						var zjZero string
-						a.c7[len(a.c7)-1] = zjZero
 					}
 					idx := len(a.c7) - 1
 					if !l.IsNull() {
@@ -2628,8 +2620,6 @@ func zjDecodeMembers_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjAre
 							a.c6 = append(a.c6, zjZero)
 						} else {
 							a.c6 = a.c6[:len(a.c6)+1]
-							var zjZero string
-							a.c6[len(a.c6)-1] = zjZero
 						}
 						idx := len(a.c6) - 1
 						if !l.IsNull() {
@@ -2688,8 +2678,6 @@ func zjDecodeMembers_OmitZeroCases(l *zerojson.Lexer, v *OmitZeroCases, a *zjAre
 							a.c7 = append(a.c7, zjZero)
 						} else {
 							a.c7 = a.c7[:len(a.c7)+1]
-							var zjZero string
-							a.c7[len(a.c7)-1] = zjZero
 						}
 						idx := len(a.c7) - 1
 						if !l.IsNull() {
@@ -5682,8 +5670,6 @@ func zjDecodeOrderedField_InteractionOmitZero(l *zerojson.Lexer, v *InteractionO
 						a.c3 = append(a.c3, zjZero)
 					} else {
 						a.c3 = a.c3[:len(a.c3)+1]
-						var zjZero int
-						a.c3[len(a.c3)-1] = zjZero
 					}
 					idx := len(a.c3) - 1
 					if !l.IsNull() {
@@ -5915,8 +5901,6 @@ func zjDecodeMembers_InteractionOmitZero(l *zerojson.Lexer, v *InteractionOmitZe
 							a.c3 = append(a.c3, zjZero)
 						} else {
 							a.c3 = a.c3[:len(a.c3)+1]
-							var zjZero int
-							a.c3[len(a.c3)-1] = zjZero
 						}
 						idx := len(a.c3) - 1
 						if !l.IsNull() {
@@ -7567,8 +7551,6 @@ func zjDecodeOrderedField_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjAren
 						a.c2 = append(a.c2, zjZero)
 					} else {
 						a.c2 = a.c2[:len(a.c2)+1]
-						var zjZero []byte
-						a.c2[len(a.c2)-1] = zjZero
 					}
 					idx := len(a.c2) - 1
 					if l.IsNull() {
@@ -7832,8 +7814,6 @@ func zjDecodeMembers_BytesCases(l *zerojson.Lexer, v *BytesCases, a *zjArenaByte
 							a.c2 = append(a.c2, zjZero)
 						} else {
 							a.c2 = a.c2[:len(a.c2)+1]
-							var zjZero []byte
-							a.c2[len(a.c2)-1] = zjZero
 						}
 						idx := len(a.c2) - 1
 						if l.IsNull() {
@@ -8758,8 +8738,6 @@ func zjDecode_RawList(l *zerojson.Lexer, v *RawList, a *zjArenaRawList) {
 				a.cRoot = append(a.cRoot, zjZero)
 			} else {
 				a.cRoot = a.cRoot[:len(a.cRoot)+1]
-				var zjZero zerojson.Raw
-				a.cRoot[len(a.cRoot)-1] = zjZero
 			}
 			idx := len(a.cRoot) - 1
 			if l.IsNull() {
@@ -9064,7 +9042,6 @@ func zjDecode_RawHolderList(l *zerojson.Lexer, v *RawHolderList, a *zjArenaRawHo
 				a.cRoot = append(a.cRoot, RawHolder{})
 			} else {
 				a.cRoot = a.cRoot[:len(a.cRoot)+1]
-				a.cRoot[len(a.cRoot)-1] = RawHolder{}
 			}
 			if !l.IsNull() {
 				var ea zjArenaRawHolder
@@ -9727,8 +9704,6 @@ func zjDecodeOrderedField_PointerCollections(l *zerojson.Lexer, v *PointerCollec
 						a.c0 = append(a.c0, zjZero)
 					} else {
 						a.c0 = a.c0[:len(a.c0)+1]
-						var zjZero string
-						a.c0[len(a.c0)-1] = zjZero
 					}
 					idx := len(a.c0) - 1
 					if !l.IsNull() {
@@ -10017,8 +9992,6 @@ func zjDecodeMembers_PointerCollections(l *zerojson.Lexer, v *PointerCollections
 							a.c0 = append(a.c0, zjZero)
 						} else {
 							a.c0 = a.c0[:len(a.c0)+1]
-							var zjZero string
-							a.c0[len(a.c0)-1] = zjZero
 						}
 						idx := len(a.c0) - 1
 						if !l.IsNull() {
@@ -10658,8 +10631,6 @@ func zjDecodeOrderedField_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjAr
 						a.c3 = append(a.c3, zjZero)
 					} else {
 						a.c3 = a.c3[:len(a.c3)+1]
-						var zjZero json_.Number
-						a.c3[len(a.c3)-1] = zjZero
 					}
 					idx := len(a.c3) - 1
 					if !l.IsNull() {
@@ -10947,8 +10918,6 @@ func zjDecodeMembers_NumberCases(l *zerojson.Lexer, v *NumberCases, a *zjArenaNu
 							a.c3 = append(a.c3, zjZero)
 						} else {
 							a.c3 = a.c3[:len(a.c3)+1]
-							var zjZero json_.Number
-							a.c3[len(a.c3)-1] = zjZero
 						}
 						idx := len(a.c3) - 1
 						if !l.IsNull() {

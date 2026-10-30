@@ -1017,11 +1017,14 @@ func hasEasyjsonMethodSig(named *types.Named, name, pkgPath, typeName string) bo
 	if sig == nil || sig.Variadic() || sig.Params().Len() != 1 || sig.Results().Len() != 0 {
 		return false
 	}
-	ptr, ok := sig.Params().At(0).Type().(*types.Pointer)
+	// Look through aliases on both the parameter and the pointee, as
+	// hasReadZJSONSig does: `type WriterAlias = jwriter.Writer` names the
+	// same type.
+	ptr, ok := types.Unalias(sig.Params().At(0).Type()).(*types.Pointer)
 	if !ok {
 		return false
 	}
-	n, ok := ptr.Elem().(*types.Named)
+	n, ok := types.Unalias(ptr.Elem()).(*types.Named)
 	return ok && n.Obj().Name() == typeName && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == pkgPath
 }
 

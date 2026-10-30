@@ -1576,8 +1576,6 @@ func zjDecodeOrderedField_C_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nes
 						a.c0 = append(a.c0, zjZero)
 					} else {
 						a.c0 = a.c0[:len(a.c0)+1]
-						var zjZero []byte
-						a.c0[len(a.c0)-1] = zjZero
 					}
 					idx := len(a.c0) - 1
 					if l.IsNull() {
@@ -1730,8 +1728,6 @@ func zjDecodeMembers_C_bytes_nested_slice(l *zerojson.Lexer, v *C_bytes_nested_s
 							a.c0 = append(a.c0, zjZero)
 						} else {
 							a.c0 = a.c0[:len(a.c0)+1]
-							var zjZero []byte
-							a.c0[len(a.c0)-1] = zjZero
 						}
 						idx := len(a.c0) - 1
 						if l.IsNull() {
@@ -2048,8 +2044,6 @@ func zjDecodeOrderedField_C_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_
 						a.c0 = append(a.c0, zjZero)
 					} else {
 						a.c0 = a.c0[:len(a.c0)+1]
-						var zjZero []byte
-						a.c0[len(a.c0)-1] = zjZero
 					}
 					idx := len(a.c0) - 1
 					if l.IsNull() {
@@ -2202,8 +2196,6 @@ func zjDecodeMembers_C_bytes_nested_slice_oe(l *zerojson.Lexer, v *C_bytes_neste
 							a.c0 = append(a.c0, zjZero)
 						} else {
 							a.c0 = a.c0[:len(a.c0)+1]
-							var zjZero []byte
-							a.c0[len(a.c0)-1] = zjZero
 						}
 						idx := len(a.c0) - 1
 						if l.IsNull() {
@@ -8385,8 +8377,6 @@ func zjDecodeOrderedField_C_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjAr
 						a.c0 = append(a.c0, zjZero)
 					} else {
 						a.c0 = a.c0[:len(a.c0)+1]
-						var zjZero int
-						a.c0[len(a.c0)-1] = zjZero
 					}
 					idx := len(a.c0) - 1
 					if !l.IsNull() {
@@ -8556,8 +8546,6 @@ func zjDecodeMembers_C_slice_int(l *zerojson.Lexer, v *C_slice_int, a *zjArenaC_
 							a.c0 = append(a.c0, zjZero)
 						} else {
 							a.c0 = a.c0[:len(a.c0)+1]
-							var zjZero int
-							a.c0[len(a.c0)-1] = zjZero
 						}
 						idx := len(a.c0) - 1
 						if !l.IsNull() {
@@ -8891,8 +8879,6 @@ func zjDecodeOrderedField_C_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a
 						a.c0 = append(a.c0, zjZero)
 					} else {
 						a.c0 = a.c0[:len(a.c0)+1]
-						var zjZero int
-						a.c0[len(a.c0)-1] = zjZero
 					}
 					idx := len(a.c0) - 1
 					if !l.IsNull() {
@@ -9062,8 +9048,6 @@ func zjDecodeMembers_C_slice_int_oe(l *zerojson.Lexer, v *C_slice_int_oe, a *zjA
 							a.c0 = append(a.c0, zjZero)
 						} else {
 							a.c0 = a.c0[:len(a.c0)+1]
-							var zjZero int
-							a.c0[len(a.c0)-1] = zjZero
 						}
 						idx := len(a.c0) - 1
 						if !l.IsNull() {
@@ -9385,13 +9369,15 @@ func zjDecodeOrderedField_C_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstr
 						a.c0 = append(a.c0, nil)
 					} else {
 						a.c0 = a.c0[:len(a.c0)+1]
-						a.c0[len(a.c0)-1] = nil
 					}
-					if !l.IsNull() {
-						e := new(Inner)
+					if l.IsNull() {
+						a.c0[len(a.c0)-1] = nil
+					} else {
+						if a.c0[len(a.c0)-1] == nil {
+							a.c0[len(a.c0)-1] = new(Inner)
+						}
 						var ea zjArenaInner
-						zjDecode_Inner(l, e, &ea)
-						a.c0[len(a.c0)-1] = e
+						zjDecode_Inner(l, a.c0[len(a.c0)-1], &ea)
 					}
 					if l.Err() != nil {
 						break
@@ -9537,13 +9523,15 @@ func zjDecodeMembers_C_slice_ptrstruct(l *zerojson.Lexer, v *C_slice_ptrstruct, 
 							a.c0 = append(a.c0, nil)
 						} else {
 							a.c0 = a.c0[:len(a.c0)+1]
-							a.c0[len(a.c0)-1] = nil
 						}
-						if !l.IsNull() {
-							e := new(Inner)
+						if l.IsNull() {
+							a.c0[len(a.c0)-1] = nil
+						} else {
+							if a.c0[len(a.c0)-1] == nil {
+								a.c0[len(a.c0)-1] = new(Inner)
+							}
 							var ea zjArenaInner
-							zjDecode_Inner(l, e, &ea)
-							a.c0[len(a.c0)-1] = e
+							zjDecode_Inner(l, a.c0[len(a.c0)-1], &ea)
 						}
 						if l.Err() != nil {
 							break
@@ -9861,13 +9849,15 @@ func zjDecodeOrderedField_C_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptr
 						a.c0 = append(a.c0, nil)
 					} else {
 						a.c0 = a.c0[:len(a.c0)+1]
-						a.c0[len(a.c0)-1] = nil
 					}
-					if !l.IsNull() {
-						e := new(Inner)
+					if l.IsNull() {
+						a.c0[len(a.c0)-1] = nil
+					} else {
+						if a.c0[len(a.c0)-1] == nil {
+							a.c0[len(a.c0)-1] = new(Inner)
+						}
 						var ea zjArenaInner
-						zjDecode_Inner(l, e, &ea)
-						a.c0[len(a.c0)-1] = e
+						zjDecode_Inner(l, a.c0[len(a.c0)-1], &ea)
 					}
 					if l.Err() != nil {
 						break
@@ -10013,13 +10003,15 @@ func zjDecodeMembers_C_slice_ptrstruct_oe(l *zerojson.Lexer, v *C_slice_ptrstruc
 							a.c0 = append(a.c0, nil)
 						} else {
 							a.c0 = a.c0[:len(a.c0)+1]
-							a.c0[len(a.c0)-1] = nil
 						}
-						if !l.IsNull() {
-							e := new(Inner)
+						if l.IsNull() {
+							a.c0[len(a.c0)-1] = nil
+						} else {
+							if a.c0[len(a.c0)-1] == nil {
+								a.c0[len(a.c0)-1] = new(Inner)
+							}
 							var ea zjArenaInner
-							zjDecode_Inner(l, e, &ea)
-							a.c0[len(a.c0)-1] = e
+							zjDecode_Inner(l, a.c0[len(a.c0)-1], &ea)
 						}
 						if l.Err() != nil {
 							break
@@ -10349,8 +10341,6 @@ func zjDecodeOrderedField_C_slice_string(l *zerojson.Lexer, v *C_slice_string, a
 						a.c0 = append(a.c0, zjZero)
 					} else {
 						a.c0 = a.c0[:len(a.c0)+1]
-						var zjZero string
-						a.c0[len(a.c0)-1] = zjZero
 					}
 					idx := len(a.c0) - 1
 					if !l.IsNull() {
@@ -10520,8 +10510,6 @@ func zjDecodeMembers_C_slice_string(l *zerojson.Lexer, v *C_slice_string, a *zjA
 							a.c0 = append(a.c0, zjZero)
 						} else {
 							a.c0 = a.c0[:len(a.c0)+1]
-							var zjZero string
-							a.c0[len(a.c0)-1] = zjZero
 						}
 						idx := len(a.c0) - 1
 						if !l.IsNull() {
@@ -10855,8 +10843,6 @@ func zjDecodeOrderedField_C_slice_string_oe(l *zerojson.Lexer, v *C_slice_string
 						a.c0 = append(a.c0, zjZero)
 					} else {
 						a.c0 = a.c0[:len(a.c0)+1]
-						var zjZero string
-						a.c0[len(a.c0)-1] = zjZero
 					}
 					idx := len(a.c0) - 1
 					if !l.IsNull() {
@@ -11026,8 +11012,6 @@ func zjDecodeMembers_C_slice_string_oe(l *zerojson.Lexer, v *C_slice_string_oe, 
 							a.c0 = append(a.c0, zjZero)
 						} else {
 							a.c0 = a.c0[:len(a.c0)+1]
-							var zjZero string
-							a.c0[len(a.c0)-1] = zjZero
 						}
 						idx := len(a.c0) - 1
 						if !l.IsNull() {
@@ -11345,7 +11329,6 @@ func zjDecodeOrderedField_C_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a
 						a.c0 = append(a.c0, Inner{})
 					} else {
 						a.c0 = a.c0[:len(a.c0)+1]
-						a.c0[len(a.c0)-1] = Inner{}
 					}
 					if !l.IsNull() {
 						var ea zjArenaInner
@@ -11495,7 +11478,6 @@ func zjDecodeMembers_C_slice_struct(l *zerojson.Lexer, v *C_slice_struct, a *zjA
 							a.c0 = append(a.c0, Inner{})
 						} else {
 							a.c0 = a.c0[:len(a.c0)+1]
-							a.c0[len(a.c0)-1] = Inner{}
 						}
 						if !l.IsNull() {
 							var ea zjArenaInner
@@ -11813,7 +11795,6 @@ func zjDecodeOrderedField_C_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct
 						a.c0 = append(a.c0, Inner{})
 					} else {
 						a.c0 = a.c0[:len(a.c0)+1]
-						a.c0[len(a.c0)-1] = Inner{}
 					}
 					if !l.IsNull() {
 						var ea zjArenaInner
@@ -11963,7 +11944,6 @@ func zjDecodeMembers_C_slice_struct_oe(l *zerojson.Lexer, v *C_slice_struct_oe, 
 							a.c0 = append(a.c0, Inner{})
 						} else {
 							a.c0 = a.c0[:len(a.c0)+1]
-							a.c0[len(a.c0)-1] = Inner{}
 						}
 						if !l.IsNull() {
 							var ea zjArenaInner
@@ -31125,8 +31105,6 @@ func zjDecodeOrderedField_Z_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjAren
 						a.c1 = append(a.c1, zjZero)
 					} else {
 						a.c1 = a.c1[:len(a.c1)+1]
-						var zjZero string
-						a.c1[len(a.c1)-1] = zjZero
 					}
 					idx := len(a.c1) - 1
 					if !l.IsNull() {
@@ -31324,8 +31302,6 @@ func zjDecodeMembers_Z_omitzero(l *zerojson.Lexer, v *Z_omitzero, a *zjArenaZ_om
 							a.c1 = append(a.c1, zjZero)
 						} else {
 							a.c1 = a.c1[:len(a.c1)+1]
-							var zjZero string
-							a.c1[len(a.c1)-1] = zjZero
 						}
 						idx := len(a.c1) - 1
 						if !l.IsNull() {

@@ -59,6 +59,18 @@ run_nounsafe() {
 run_modules test go test ./... -count=1
 run_modules vet go vet ./...
 
+# The runtime picks its encoding/json method checks by build tag; build and
+# test it with the jsonv2 experiment explicitly on and off, whichever the
+# toolchain defaults to (see jsonv2_*.go).
+for experiment in jsonv2 nojsonv2; do
+	echo "zerojson verify: root module with GOEXPERIMENT=$experiment"
+	(
+		cd "$root"
+		GOEXPERIMENT=$experiment go vet .
+		GOEXPERIMENT=$experiment go test . -count=1
+	)
+done
+
 if [[ $mode == race || $mode == full ]]; then
 	run_modules race go test -race ./... -count=1
 	run_checkptr_modules

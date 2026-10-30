@@ -241,29 +241,7 @@ func (g *generator) emitRootSliceDecode(ti typeInfo) {
 	g.p("%sif l.EnterArray() {", ind)
 	g.p("%sfor {", ind)
 	if rf.kind == kSlice {
-		zero := "nil"
-		if !rf.elemPtr {
-			zero = rf.elem + "{}"
-		}
-		g.p("%s\tif len(%s) == cap(%s) {", ind, cell, cell)
-		g.p("%s\t\t%s = append(%s, %s)", ind, cell, cell, zero)
-		g.p("%s\t} else {", ind)
-		g.p("%s\t\t%s = %s[:len(%s)+1]", ind, cell, cell, cell)
-		g.p("%s\t\t%s[len(%s)-1] = %s", ind, cell, cell, zero)
-		g.p("%s\t}", ind)
-		if rf.elemPtr {
-			g.p("%s\tif !l.IsNull() {", ind)
-			g.p("%s\t\te := new(%s)", ind, rf.elem)
-			g.p("%s\t\tvar ea %s", ind, arenaName(rf.elem))
-			g.p("%s\t\t%s(l, e, &ea)", ind, decodeName(rf.elem))
-			g.p("%s\t\t%s[len(%s)-1] = e", ind, cell, cell)
-			g.p("%s\t}", ind)
-		} else {
-			g.p("%s\tif !l.IsNull() {", ind)
-			g.p("%s\t\tvar ea %s", ind, arenaName(rf.elem))
-			g.p("%s\t\t%s(l, &%s[len(%s)-1], &ea)", ind, decodeName(rf.elem), cell, cell)
-			g.p("%s\t}", ind)
-		}
+		g.emitStructSliceElem(rf.elem, rf.elemPtr, g.hasLeafOverride(*rf, map[string]bool{}), cell, ind+"\t")
 		g.p("%s\tif l.Err() != nil { return }", ind)
 		g.p("%s\tif !l.NextElem() { break }", ind)
 	} else {
