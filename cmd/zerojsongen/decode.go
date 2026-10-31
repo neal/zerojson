@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // leafRead emits a decode statement for a custom leaf into ptrExpr.
@@ -103,24 +105,27 @@ func (g *generator) emitEnumHelpers() {
 }
 
 func (g *generator) genArena(ti typeInfo) {
+	ownCells := false
+	for _, f := range ti.fields {
+		ownCells = ownCells || f.ptr
+	}
+	block := g.typeHasCells(ti.name, map[string]bool{})
 	g.p("")
-	g.p("// %s holds first-use pointer cells for a decoded %s in one", arenaName(ti.name), ti.name)
-	g.p("// allocation, plus working container headers for this call only.")
+	g.p("// %s holds per-call working state for a decoded %s: publication", arenaName(ti.name), ti.name)
+	g.p("// flags, container headers, and nested types' arenas. It stays off the")
+	g.p("// heap; pointer cells live in a cell block allocated on first use.")
 	g.p("// Detached storage is not reused within the same decode.")
 	g.p("type %s struct {", arenaName(ti.name))
+	if block {
+		g.p("\tzjBlock *%s", cellsName(ti.name))
+	}
 	for _, f := range ti.fields {
 		if f.ptr {
 			g.p("\tpublished%s bool", f.cellName)
 		}
 		if f.kind == kStruct {
-			if f.ptr {
-				g.p("\tv%s %s", f.cellName, f.elem)
-			}
 			g.p("\ta%s %s", f.cellName, arenaName(f.elem))
 			continue
-		}
-		if f.ptr {
-			g.p("\tf%s %s", f.cellName, f.typeStr)
 		}
 		switch f.kind {
 		case kSlice:
@@ -132,6 +137,71 @@ func (g *generator) genArena(ti typeInfo) {
 		}
 	}
 	g.p("}")
+	if !block {
+		return
+	}
+	g.p("")
+	g.p("// %s holds the first-use pointer cells of one %s decode, and those of", cellsName(ti.name), ti.name)
+	g.p("// its nested structs, in a single allocation made only when the input")
+	g.p("// sets a nil pointer field.")
+	g.p("type %s struct {", cellsName(ti.name))
+	for _, f := range ti.fields {
+		switch {
+		case f.ptr && f.kind == kStruct:
+			g.p("\tv%s %s", f.cellName, f.elem)
+		case f.ptr:
+			g.p("\tf%s %s", f.cellName, f.typeStr)
+		}
+		if f.kind == kStruct && g.typeHasCells(f.elem, map[string]bool{}) {
+			g.p("\ts%s %s", f.cellName, cellsName(f.elem))
+		}
+	}
+	g.p("}")
+	if !ownCells {
+		return
+	}
+	g.p("")
+	g.p("func (a *%s) zjCells() *%s {", arenaName(ti.name), cellsName(ti.name))
+	g.p("\tif a.zjBlock == nil {")
+	g.p("\t\ta.zjBlock = new(%s)", cellsName(ti.name))
+	g.p("\t}")
+	g.p("\treturn a.zjBlock")
+	g.p("}")
+}
+
+// typeHasCells reports whether decoding the named generated struct can
+// publish a pointer cell, in its own fields or in a nested struct field's.
+func (g *generator) typeHasCells(name string, visiting map[string]bool) bool {
+	if visiting[name] {
+		return false
+	}
+	visiting[name] = true
+	defer delete(visiting, name)
+	for _, ti := range g.types {
+		if ti.name != name {
+			continue
+		}
+		for _, f := range ti.fields {
+			if f.ptr || (f.kind == kStruct && g.typeHasCells(f.elem, visiting)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// emitShareCells points a nested struct's arena at its slot in this
+// decode's cell block when the block already exists, so a populated
+// message keeps one cell allocation. Otherwise the nested decode allocates
+// its own block on first use. The link is made only while the nested arena
+// has no block, so a published cell never moves.
+func (g *generator) emitShareCells(f fieldInfo, ind string) {
+	if !g.typeHasCells(f.elem, map[string]bool{}) {
+		return
+	}
+	g.p("%sif a.a%s.zjBlock == nil && a.zjBlock != nil {", ind, f.cellName)
+	g.p("%s\ta.a%s.zjBlock = &a.zjBlock.s%s", ind, f.cellName, f.cellName)
+	g.p("%s}", ind)
 }
 
 func sliceCellType(elemType string, elemPtr bool) string {
@@ -180,6 +250,43 @@ func (g *generator) stdlibValue(f fieldInfo, visiting map[string]bool) bool {
 	return true
 }
 
+// hasLeafOverride reports whether f's traversal reaches a registered leaf
+// (other than Raw) or a quoted-int marker. Their readers replace a value
+// rather than decode into it, so a slice whose elements reach one resets a
+// reused slot before reading into it: the registered-leaf container rule in
+// docs/compatibility.md. An Appender/Reader is opaque and decodes into what
+// the slot holds, so everywhere else a reused slot keeps its element, and a
+// pointer slot its pointer, as encoding/json decodes into the elements of a
+// slice it reuses.
+func (g *generator) hasLeafOverride(f fieldInfo, visiting map[string]bool) bool {
+	switch f.kind {
+	case kCustomLeaf:
+		return !isRawLeaf(f)
+	case kQuotedInt:
+		return true
+	case kStruct, kSlice:
+		if visiting[f.elem] {
+			return false
+		}
+		visiting[f.elem] = true
+		defer delete(visiting, f.elem)
+		for _, ti := range g.types {
+			if ti.name != f.elem {
+				continue
+			}
+			for _, child := range ti.fields {
+				if g.hasLeafOverride(child, visiting) {
+					return true
+				}
+			}
+		}
+		return false
+	case kLeafSlice, kMap:
+		return f.valInfo != nil && g.hasLeafOverride(*f.valInfo, visiting)
+	}
+	return false
+}
+
 // Preserve an existing receiver, including aliases held elsewhere in the
 // caller's object graph. An arena cell can be published only once per public
 // decode: null may detach it after a callback has retained its address.
@@ -189,7 +296,7 @@ func (g *generator) emitPointerCellInit(f fieldInfo, target, cell, ind string) {
 	g.p("%s\tif a.published%s {", ind, f.cellName)
 	g.p("%s\t\t%s = new(%s)", ind, target, f.typeStr)
 	g.p("%s\t} else {", ind)
-	// An unpublished cell in this call's fresh arena is already zero.
+	// An unpublished cell in this call's fresh cell block is already zero.
 	g.p("%s\t%s = &%s", ind, target, cell)
 	g.p("%s\ta.published%s = true", ind, f.cellName)
 	g.p("%s\t}", ind)
@@ -213,6 +320,79 @@ func (g *generator) emitSlicePublication(f fieldInfo, target, cell, ind string) 
 	g.p("%s}", ind)
 }
 
+// emitStructSliceElem extends a struct slice by the element about to be
+// read and reads it. With reset (see hasLeafOverride) a reused slot starts
+// at zero; otherwise it keeps its element, or its pointer, for the decode.
+// JSON null leaves a value element as it is and clears a pointer.
+func (g *generator) emitStructSliceElem(elem string, elemPtr, reset bool, cell, ind string) {
+	zero := "nil"
+	if !elemPtr {
+		zero = elem + "{}"
+	}
+	slot := cell + "[len(" + cell + ")-1]"
+	g.p("%sif len(%s) == cap(%s) {", ind, cell, cell)
+	g.p("%s\t%s = append(%s, %s)", ind, cell, cell, zero)
+	g.p("%s} else {", ind)
+	g.p("%s\t%s = %s[:len(%s)+1]", ind, cell, cell, cell)
+	if reset {
+		g.p("%s\t%s[len(%s)-1] = %s", ind, cell, cell, zero)
+	}
+	g.p("%s}", ind)
+	switch {
+	case elemPtr && reset:
+		g.p("%sif !l.IsNull() {", ind)
+		g.p("%s\te := new(%s)", ind, elem)
+		g.p("%s\tvar ea %s", ind, arenaName(elem))
+		g.p("%s\t%s(l, e, &ea)", ind, decodeName(elem))
+		g.p("%s\t%s = e", ind, slot)
+		g.p("%s}", ind)
+	case elemPtr:
+		g.p("%sif l.IsNull() {", ind)
+		g.p("%s\t%s = nil", ind, slot)
+		g.p("%s} else {", ind)
+		g.p("%s\tif %s == nil { %s = new(%s) }", ind, slot, slot, elem)
+		g.p("%s\tvar ea %s", ind, arenaName(elem))
+		g.p("%s\t%s(l, %s, &ea)", ind, decodeName(elem), slot)
+		g.p("%s}", ind)
+	default:
+		g.p("%sif !l.IsNull() {", ind)
+		g.p("%s\tvar ea %s", ind, arenaName(elem))
+		g.p("%s\t%s(l, &%s, &ea)", ind, decodeName(elem), slot)
+		g.p("%s}", ind)
+	}
+}
+
+// emitGrowLeafSlice extends a leaf slice by the element about to be read. A
+// slot past the capacity starts at zero. A slot within it holds an element
+// from the slice's earlier contents, which the read decodes into unless the
+// element is a registered leaf or quoted-int marker (see hasLeafOverride).
+func (g *generator) emitGrowLeafSlice(cell string, vi *fieldInfo, ind string) {
+	g.p("%sif len(%s) == cap(%s) {", ind, cell, cell)
+	g.p("%s\tvar zjZero %s", ind, vi.typeStr)
+	g.p("%s\t%s = append(%s, zjZero)", ind, cell, cell)
+	g.p("%s} else {", ind)
+	g.p("%s\t%s = %s[:len(%s)+1]", ind, cell, cell, cell)
+	if g.hasLeafOverride(*vi, map[string]bool{}) {
+		g.p("%s\tvar zjZero %s", ind, vi.typeStr)
+		g.p("%s\t%s[len(%s)-1] = zjZero", ind, cell, cell)
+	}
+	g.p("%s}", ind)
+}
+
+// emitReusedPointerElem declares e, the pointer element about to be read,
+// and opens the block that reads it: as encoding/json does, e is the
+// pointer the slot already holds within the slice's capacity, a fresh
+// value when that is nil, and nil for JSON null. The caller emits the read
+// into e and closes the block.
+func (g *generator) emitReusedPointerElem(cell, elemType, ind string) {
+	g.p("%svar e *%s", ind, elemType)
+	g.p("%sif len(%s) < cap(%s) { e = %s[:len(%s)+1][len(%s)] }", ind, cell, cell, cell, cell, cell)
+	g.p("%sif l.IsNull() {", ind)
+	g.p("%s\te = nil", ind)
+	g.p("%s} else {", ind)
+	g.p("%s\tif e == nil { e = new(%s) }", ind, elemType)
+}
+
 // Empty arrays replace the slice with a non-nil, zero-capacity value, as
 // stdlib does. Keeping an arena's old capacity would expose previous-message
 // elements when a later duplicate field reuses those slots for JSON null.
@@ -221,6 +401,32 @@ func (g *generator) emitNonNilEmptySlice(cell, cellType, ind string) {
 	g.p("%sif len(%s) == 0 {", ind, cell)
 	g.p("%s\t%s = %s{}", ind, cell, cellType)
 	g.p("%s}", ind)
+}
+
+// emitDecodeBody emits the decode the public entry points share once any
+// validity check has passed: decode data into v, then require that nothing
+// but whitespace follows.
+func (g *generator) emitDecodeBody(n, borrow string) {
+	g.p("\tl := zerojson.NewLexer(data, %s)", borrow)
+	g.p("\ta := &%s{}", arenaName(n))
+	g.p("\t%s(&l, v, a)", decodeName(n))
+	g.p("\tl.Finish()")
+	g.p("\treturn l.Err()")
+}
+
+// emitTrustedDecode emits UnmarshalZJSONTrusted under -trusted.
+func (g *generator) emitTrustedDecode(n string) {
+	if !g.trusted {
+		return
+	}
+	g.p("")
+	g.p("// UnmarshalZJSONTrusted is UnmarshalZJSON without the up-front check that")
+	g.p("// data is valid JSON, for data already known to be valid, such as")
+	g.p("// AppendZJSON output read back from storage that detects corruption.")
+	g.p("// Invalid JSON may decode without an error.")
+	g.p("func (v *%s) UnmarshalZJSONTrusted(data []byte) error {", n)
+	g.emitDecodeBody(n, "false")
+	g.p("}")
 }
 
 func (g *generator) genDecode(ti typeInfo) {
@@ -243,12 +449,9 @@ func (g *generator) genDecode(ti typeInfo) {
 	g.p("")
 	g.p("func (v *%s) unmarshalZJSON(data []byte, borrow bool) error {", ti.name)
 	g.p("\tif err := zerojson.Valid(data); err != nil { return err }")
-	g.p("\tl := zerojson.NewLexer(data, borrow)")
-	g.p("\ta := &%s{}", arenaName(ti.name))
-	g.p("\t%s(&l, v, a)", decodeName(ti.name))
-	g.p("\tl.Finish()")
-	g.p("\treturn l.Err()")
+	g.emitDecodeBody(ti.name, "borrow")
 	g.p("}")
+	g.emitTrustedDecode(ti.name)
 	g.genReadZJSON(ti.name)
 	g.emitFieldName(ti)
 
@@ -284,6 +487,7 @@ func (g *generator) genDecode(ti typeInfo) {
 		g.emitOrderedDecode(ti)
 		g.emitOrderedField(ti)
 		g.emitOrderedTryKey(ti)
+		g.emitOrderedSeekKey(ti)
 		g.emitOrderedDeclaredKey(ti)
 	}
 
@@ -296,6 +500,17 @@ func (g *generator) genDecode(ti typeInfo) {
 	g.p("\tif !l.EnterObject() {")
 	g.p("\t\treturn")
 	g.p("\t}")
+	if orderedOK {
+		// The ordered decoder hands a deviating object's remaining members
+		// to the same loop, so it lives in its own function.
+		g.p("\t%s(l, v, a)", membersDecodeName(ti.name))
+		g.p("}")
+		g.p("")
+		g.p("// %s decodes the remaining members of an object whose opening", membersDecodeName(ti.name))
+		g.p("// brace and nesting level are already consumed, positioned at a key.")
+		g.p("func %s(l *zerojson.Lexer, v *%s, a *%s) {", membersDecodeName(ti.name), ti.name, arenaName(ti.name))
+		g.p("\t_ = a")
+	}
 	g.p("\tfor {")
 	g.p("\t\tkey := l.ReadKey()")
 	g.p("\t\tif l.Err() != nil { return }")
@@ -317,7 +532,7 @@ func (g *generator) genDecode(ti typeInfo) {
 		g.emitDecode(f, false)
 	}
 	g.p("\t\tdefault:")
-	g.p("\t\t\tif folded := zjFieldName_%s(name); folded != name { name = folded; goto zjDispatch }", ti.name)
+	g.p("\t\t\tif folded := %s(name); folded != name { name = folded; goto zjDispatch }", foldFieldNameFunc(ti.name))
 	g.p("\t\t\tl.Skip()")
 	g.p("\t\t}")
 	g.p("\t\tif l.Err() != nil {")
@@ -331,6 +546,8 @@ func (g *generator) genDecode(ti typeInfo) {
 
 // Exact names take precedence. Folded ties follow field index order, like
 // encoding/json's first folded-name match, including Unicode simple folds.
+// zjFieldName_<T> checks the exact names first; callers that have already
+// ruled them out call zjFoldFieldName_<T> directly.
 func (g *generator) emitFieldName(ti typeInfo) {
 	g.p("func zjFieldName_%s(name string) string {", ti.name)
 	if len(ti.fields) != 0 {
@@ -339,14 +556,109 @@ func (g *generator) emitFieldName(ti typeInfo) {
 			g.p("\tcase %q: return name", f.jsonName)
 		}
 		g.p("\t}")
-		q := g.importAlias("strings", "strings")
-		for _, f := range ti.fields {
-			g.p("\tif %s.EqualFold(name, %q) { return %q }", q, f.jsonName, f.jsonName)
+	}
+	g.p("\treturn %s(name)", foldFieldNameFunc(ti.name))
+	g.p("}")
+	g.p("")
+	g.emitFoldFieldName(ti)
+}
+
+// emitFoldFieldName emits zjFoldFieldName_<T>(name), the first declared
+// name that strings.EqualFold matches, or name itself. name must not be a
+// declared name exactly: an exact match can also fold onto an earlier field.
+//
+// An all-ASCII key, nearly every key on the wire, matches a declared name
+// exactly when the key, lowercased, equals that name's ASCII fold key (see
+// asciiFoldKey), so one switch replaces a strings.EqualFold call per field.
+// Any other key takes the EqualFold chain.
+func (g *generator) emitFoldFieldName(ti typeInfo) {
+	n := ti.name
+	g.p("func %s(name string) string {", foldFieldNameFunc(n))
+	if len(ti.fields) == 0 {
+		g.p("\treturn name")
+		g.p("}")
+		return
+	}
+	type foldCase struct{ key, name string }
+	var cases []foldCase
+	seen := map[string]bool{}
+	width := 0
+	for _, f := range ti.fields {
+		key, ok := asciiFoldKey(f.jsonName)
+		if !ok || seen[key] {
+			continue
 		}
+		seen[key] = true
+		cases = append(cases, foldCase{key, f.jsonName})
+		width = max(width, len(key))
+	}
+	if len(cases) == 0 {
+		g.p("\tfor i := 0; i < len(name); i++ {")
+		g.p("\t\tif name[i] >= 0x80 { goto zjUnicode }")
+		g.p("\t}")
+		g.p("\treturn name")
+	} else {
+		g.p("\tvar lower [%d]byte", width)
+		g.p("\tfor i := 0; i < len(name); i++ {")
+		g.p("\t\tc := name[i]")
+		g.p("\t\tif c >= 0x80 { goto zjUnicode }")
+		g.p("\t\tif i < len(lower) {")
+		g.p("\t\t\tif 'A' <= c && c <= 'Z' { c += 'a' - 'A' }")
+		g.p("\t\t\tlower[i] = c")
+		g.p("\t\t}")
+		g.p("\t}")
+		g.p("\tif len(name) > len(lower) { return name }")
+		g.p("\tswitch string(lower[:len(name)]) {")
+		for _, c := range cases {
+			g.p("\tcase %q: return %q", c.key, c.name)
+		}
+		g.p("\t}")
+		g.p("\treturn name")
+	}
+	g.p("zjUnicode:")
+	q := g.importAlias("strings", "strings")
+	for _, f := range ti.fields {
+		g.p("\tif %s.EqualFold(name, %q) { return %q }", q, f.jsonName, f.jsonName)
 	}
 	g.p("\treturn name")
 	g.p("}")
 }
+
+// asciiFoldKey returns the lowercase ASCII string that an all-ASCII key,
+// lowercased, must equal to match name under strings.EqualFold. EqualFold
+// compares rune by rune, and an ASCII byte matches exactly the runes whose
+// simple-fold orbit contains it, so each rune of name contributes the
+// lowercased ASCII member of its orbit: itself for ASCII, 'k' for the
+// Kelvin sign, 's' for long s. It reports false when some rune's orbit has
+// no ASCII member, since no ASCII key can then match name.
+func asciiFoldKey(name string) (string, bool) {
+	key := make([]byte, 0, len(name))
+	for _, r := range name {
+		c, ok := asciiFoldMember(r)
+		if !ok {
+			return "", false
+		}
+		key = append(key, c)
+	}
+	return string(key), true
+}
+
+func asciiFoldMember(r rune) (byte, bool) {
+	for f := r; ; {
+		if f < utf8.RuneSelf {
+			c := byte(f)
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			return c, true
+		}
+		if f = unicode.SimpleFold(f); f == r {
+			return 0, false
+		}
+	}
+}
+
+func foldFieldNameFunc(t string) string { return "zjFoldFieldName_" + t }
 
 // genReadZJSON emits ReadZJSON, zerojson.Reader's method, next to the
 // generated AppendZJSON (which already satisfies zerojson.Appender). The
@@ -527,7 +839,7 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		g.p("%s} else {", ind)
 		defer g.p("%s}", ind)
 	}
-	cell := "a.f" + f.cellName
+	cell := "a.zjCells().f" + f.cellName
 	// A mid-loop element error (kSlice/kLeafSlice/kMap) breaks out of
 	// the element loop rather than returning, so control reaches the
 	// enclosing decoder's error check, which annotates the error with
@@ -684,9 +996,11 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 			}
 		}
 		if f.ptr {
-			g.emitPointerCellInit(f, target, "a.v"+f.cellName, ind)
+			g.emitPointerCellInit(f, target, "a.zjCells().v"+f.cellName, ind)
+			g.emitShareCells(f, ind)
 			nestedCall(target, "&a.a"+f.cellName)
 		} else {
+			g.emitShareCells(f, ind)
 			nestedCall("&"+target, "&a.a"+f.cellName)
 		}
 	case kMarshaler:
@@ -720,35 +1034,13 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		// ordered attempt's confirmed-key write followed by a fallback
 		// retry after a later bail) would otherwise double up elements
 		// instead of replacing them. It matches encoding/json's own
-		// behavior (it resets a slice's length before populating it) and,
-		// combined with zeroing every reused slot below, ensures no stale
-		// element survives from a prior decode.
+		// behavior (it resets a slice's length before populating it).
+		// Reused slots then keep their elements, as encoding/json's do,
+		// unless the elements reach a registered leaf (hasLeafOverride).
 		g.p("%s%s = %s[:0]", ind, cell, cell)
 		g.p("%sif l.EnterArray() {", ind)
 		g.p("%sfor {", ind)
-		zero := "nil"
-		if !f.elemPtr {
-			zero = f.elem + "{}"
-		}
-		g.p("%s\tif len(%s) == cap(%s) {", ind, cell, cell)
-		g.p("%s\t\t%s = append(%s, %s)", ind, cell, cell, zero)
-		g.p("%s\t} else {", ind)
-		g.p("%s\t\t%s = %s[:len(%s)+1]", ind, cell, cell, cell)
-		g.p("%s\t\t%s[len(%s)-1] = %s", ind, cell, cell, zero)
-		g.p("%s\t}", ind)
-		if f.elemPtr {
-			g.p("%s\tif !l.IsNull() {", ind)
-			g.p("%s\t\te := new(%s)", ind, f.elem)
-			g.p("%s\t\tvar ea %s", ind, arenaName(f.elem))
-			g.p("%s\t\t%s(l, e, &ea)", ind, decodeName(f.elem))
-			g.p("%s\t\t%s[len(%s)-1] = e", ind, cell, cell)
-			g.p("%s\t}", ind)
-		} else {
-			g.p("%s\tif !l.IsNull() {", ind)
-			g.p("%s\t\tvar ea %s", ind, arenaName(f.elem))
-			g.p("%s\t\t%s(l, &%s[len(%s)-1], &ea)", ind, decodeName(f.elem), cell, cell)
-			g.p("%s\t}", ind)
-		}
+		g.emitStructSliceElem(f.elem, f.elemPtr, g.hasLeafOverride(f, map[string]bool{}), cell, ind+"\t")
 		g.p("%s\tif l.Err() != nil { %s }", ind, retStmt)
 		g.p("%s\tif !l.NextElem() { break }", ind)
 		g.p("%s}", ind)
@@ -766,20 +1058,20 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 			g.p("%s} else {", ind)
 		}
 		if f.elemPtr {
-			// Rare (only Marshaler/TextMarshaler elements can be
-			// pointers): pool the outer slice-of-pointers only, same
+			// Rare (only Marshaler/TextMarshaler/Appender elements can
+			// be pointers): pool the outer slice-of-pointers only, same
 			// reset-first discipline as kSlice.
 			g.p("%s%s = %s[:0]", ind, cell, cell)
 			g.p("%sif l.EnterArray() {", ind)
 			g.p("%sfor {", ind)
-			g.p("%s\tvar e *%s", ind, f.valInfo.typeStr)
-			g.p("%s\tif !l.IsNull() {", ind)
-			g.p("%s\t\te = new(%s)", ind, f.valInfo.typeStr)
+			g.emitReusedPointerElem(cell, f.valInfo.typeStr, ind+"\t")
 			switch f.valInfo.kind {
 			case kMarshaler:
 				g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := e.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
 			case kTextMarshaler:
 				g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := e.UnmarshalText(txt); err != nil { l.AddError(err) } }", ind)
+			case kAppender:
+				g.p("%s\t\te.ReadZJSON(l)", ind)
 			}
 			g.p("%s\t}", ind)
 			g.p("%s\tif l.Err() != nil { %s }", ind, retStmt)
@@ -794,14 +1086,7 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		g.p("%s%s = %s[:0]", ind, cell, cell)
 		g.p("%sif l.EnterArray() {", ind)
 		g.p("%sfor {", ind)
-		g.p("%s\tif len(%s) == cap(%s) {", ind, cell, cell)
-		g.p("%s\t\tvar zjZero %s", ind, f.valInfo.typeStr)
-		g.p("%s\t\t%s = append(%s, zjZero)", ind, cell, cell)
-		g.p("%s\t} else {", ind)
-		g.p("%s\t\t%s = %s[:len(%s)+1]", ind, cell, cell, cell)
-		g.p("%s\t\tvar zjZero %s", ind, f.valInfo.typeStr)
-		g.p("%s\t\t%s[len(%s)-1] = zjZero", ind, cell, cell)
-		g.p("%s\t}", ind)
+		g.emitGrowLeafSlice(cell, f.valInfo, ind+"\t")
 		g.p("%s\tidx := len(%s) - 1", ind, cell)
 		g.emitElemNullOpen(f.valInfo, fmt.Sprintf("%s[idx]", cell), ind+"\t")
 		switch f.valInfo.kind {
@@ -811,6 +1096,8 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 			g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := %s[idx].UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind, cell)
 		case kTextMarshaler:
 			g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := %s[idx].UnmarshalText(txt); err != nil { l.AddError(err) } }", ind, cell)
+		case kAppender:
+			g.p("%s\t\t%s[idx].ReadZJSON(l)", ind, cell)
 		case kInterface:
 			g.p("%s\t\t%s[idx] = l.ReadInterface()", ind, cell)
 		default:
@@ -828,75 +1115,33 @@ func (g *generator) emitDecode(f fieldInfo, ordered bool) {
 		}
 	case kMap:
 		cell := "a.m" + f.cellName
-		// Seed the cell from an existing NON-NIL map behind target (for a
+		// Seed the helper with an existing NON-NIL map behind target (for a
 		// pointer field: the pointer must be non-nil AND point at a
-		// non-nil map — a pointer to a nil map must not be adopted as the
-		// cell, or the first assignment would panic).
+		// non-nil map — a pointer to a nil map must not be adopted, or the
+		// first assignment would panic).
 		seedCond := target + " != nil"
 		if f.ptr {
 			seedCond += " && " + derefTarget + " != nil"
 		}
 		// A sibling pointer or callback may have replaced the target's map
 		// header since this field last appeared. Re-adopt it on every member.
-		g.p("%s{", ind)
-		g.p("%s\tif %s {", ind, seedCond)
-		g.p("%s\t\t%s = %s", ind, cell, derefTarget)
-		g.p("%s\t} else {", ind)
-		g.p("%s\t\t%s = make(%s)", ind, cell, f.typeStr)
-		g.p("%s\t}", ind)
-		g.p("%s}", ind)
-		g.p("%sif l.EnterObject() {", ind)
-		g.p("%sfor {", ind)
-		if f.intern {
-			g.p("%s\tmk := %s(zerojson.Intern(l.ReadKey()))", ind, f.keyTypeStr)
-		} else {
-			// string() copies the key: ReadKey aliases the input buffer and a
-			// map key outlives the decode. Interning (which also copies) is
-			// opt-in via zerojson:"intern" — map keys are attacker-controlled
-			// and unbounded in cardinality, so it is not done by default.
-			g.p("%s\tmk := %s(string(l.ReadKey()))", ind, f.keyTypeStr)
-		}
-		g.p("%s\tvar mv %s", ind, f.valInfo.typeStr)
-		g.emitElemNullOpen(f.valInfo, "mv", ind+"\t")
-		switch f.valInfo.kind {
-		case kCustomLeaf:
-			g.leafRead(f.valInfo.leaf, "&mv", ind+"\t\t")
-		case kEmptyStruct:
-			// struct{} set-map value: require an object (any contents,
-			// ignored) — a number/array/string is rejected, matching
-			// encoding/json and easyjson. null already handled by IsNull.
-			g.p("%s\t\tl.SkipObject()", ind)
-		case kStruct:
-			g.p("%s\t\tvar ea %s", ind, arenaName(f.valInfo.elem))
-			g.p("%s\t\t%s(l, &mv, &ea)", ind, decodeName(f.valInfo.elem))
-		case kMarshaler:
-			g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := mv.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
-		case kTextMarshaler:
-			g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := mv.UnmarshalText(txt); err != nil { l.AddError(err) } }", ind)
-		case kQuotedInt:
-			if !f.valInfo.marshalOnValue {
-				g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := mv.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
-			} else {
-				g.p("%s\t\tmv = %s", ind, g.leafReadExpr(f.valInfo))
-			}
-		case kInterface:
-			g.p("%s\t\tmv = l.ReadInterface()", ind)
-		default:
-			g.p("%s\t\tmv = %s", ind, g.leafReadExpr(f.valInfo))
-		}
-		g.p("%s\t}", ind)
-		g.p("%s\tif l.Err() != nil { %s }", ind, retStmt)
-		g.p("%s\t%s[mk] = mv", ind, cell)
-		g.p("%s\tif !l.NextMember() { break }", ind)
-		g.p("%s}", ind)
+		read := g.mapReadCall(f.typeStr, f.keyTypeStr, f.valInfo, f.intern, f.mapEntrySize)
+		g.p("%sif %s {", ind, seedCond)
+		g.p("%s\t%s = %s(l, %s)", ind, cell, read, derefTarget)
+		g.p("%s} else {", ind)
+		g.p("%s\t%s = %s(l, nil)", ind, cell, read)
 		g.p("%s}", ind)
 		finishCollection(cell)
 	}
 }
 
 // emitElemNullOpen opens the per-element value read: for a null-delivered
-// leaf kind it emits `if l.IsNull() { <deliver> } else {`, otherwise the
-// plain `if !l.IsNull() {`; the caller closes the block either way.
+// leaf kind it emits `if l.IsNull() { <deliver> } else {`, for a nullable
+// one `if l.IsNull() { target = nil } else {`, otherwise the plain
+// `if !l.IsNull() {`; the caller closes the block either way. A reused
+// slice slot can hold an earlier element, so null clears a reference-typed
+// one (including an Appender-only slice or map) as encoding/json does, and
+// leaves anything else as it is.
 func (g *generator) emitElemNullOpen(vi *fieldInfo, target, ind string) {
 	if vi != nil && vi.kind != kEmptyStruct && vi.kind != kStruct {
 		f := *vi
@@ -904,6 +1149,12 @@ func (g *generator) emitElemNullOpen(vi *fieldInfo, target, ind string) {
 		if isNullDelivered(f) {
 			g.p("%sif l.IsNull() {", ind)
 			g.emitNullDelivery(f, target, ind+"\t")
+			g.p("%s} else {", ind)
+			return
+		}
+		if isNullableField(f) {
+			g.p("%sif l.IsNull() {", ind)
+			g.p("%s\t%s = nil", ind, target)
 			g.p("%s} else {", ind)
 			return
 		}

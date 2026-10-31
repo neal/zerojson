@@ -404,6 +404,41 @@ func emitRawGraphRoundTrip(b *strings.Builder, n string) {
 `, n)
 }
 
+// emitTrustedCheck emits zjCheckTrusted<T> under -trusted. It needs no
+// stdlib oracle, so it runs for every fuzz input, before any oracle check
+// can return: input zerojson.Valid accepts must decode exactly as
+// UnmarshalZJSON decodes it, into storage of its own (the trusted decode
+// reads a private copy that is overwritten before the comparison), and any
+// other input may decode or fail but must not panic. The fuzzer's own
+// timeout catches a decode that never returns.
+func (g *generator) emitTrustedCheck(b *strings.Builder, n string) {
+	if !g.trusted {
+		return
+	}
+	fmt.Fprintf(b, "func zjCheckTrusted%s(t *testing.T, data []byte) {\n", n)
+	fmt.Fprintf(b, "\tinput := append([]byte(nil), data...)\n")
+	fmt.Fprintf(b, "\tvar trusted %s\n", n)
+	fmt.Fprintf(b, "\ttrustedErr := trusted.UnmarshalZJSONTrusted(input)\n")
+	fmt.Fprintf(b, "\tif zerojson.Valid(data) != nil { return }\n")
+	fmt.Fprintf(b, "\tfor i := range input { input[i] = 'x' }\n")
+	fmt.Fprintf(b, "\tvar checked %s\n", n)
+	fmt.Fprintf(b, "\tcheckedErr := checked.UnmarshalZJSON(data)\n")
+	fmt.Fprintf(b, "\tif (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {\n")
+	fmt.Fprintf(b, "\t\tt.Fatalf(\"trusted decode error %%v, checked decode error %%v, for %%q\", trustedErr, checkedErr, data)\n")
+	fmt.Fprintf(b, "\t}\n")
+	fmt.Fprintf(b, "\tif !reflect.DeepEqual(&trusted, &checked) {\n")
+	fmt.Fprintf(b, "\t\tt.Fatalf(\"trusted decode differs for %%q\\ntrusted: %%+v\\nchecked: %%+v\", data, &trusted, &checked)\n")
+	fmt.Fprintf(b, "\t}\n")
+	fmt.Fprintf(b, "}\n\n")
+}
+
+// emitTrustedCall runs zjCheckTrusted<T> from a fuzz target under -trusted.
+func (g *generator) emitTrustedCall(b *strings.Builder, n string) {
+	if g.trusted {
+		fmt.Fprintf(b, "\t\tzjCheckTrusted%s(t, data)\n", n)
+	}
+}
+
 // emitDecodeErrorDirection emits the decode-error ORACLE DIRECTION arm:
 // zerojson-error ⇒ stdlib-error. If zerojson REJECTS the raw fuzz input but
 // encoding/json ACCEPTS it, zerojson is stricter than stdlib — a violation
@@ -511,12 +546,16 @@ func (g *generator) generateTests() string {
 			needsReflect = true
 		}
 	}
+	if g.trusted {
+		// zjCheckTrusted<T> compares with reflect and calls zerojson.Valid.
+		needsReflect = true
+	}
 	fmt.Fprintf(&b, "import (\n\t\"bytes\"\n\t\"encoding/json\"\n\t\"errors\"\n\t\"math/big\"\n")
 	if needsReflect {
 		fmt.Fprintf(&b, "\t\"reflect\"\n")
 	}
 	fmt.Fprintf(&b, "\t\"strings\"\n\t\"testing\"\n")
-	if hasStruct {
+	if hasStruct || g.trusted {
 		fmt.Fprintf(&b, "\n\t%q\n", runtimePath)
 	}
 	fmt.Fprintf(&b, ")\n\n")
@@ -660,6 +699,7 @@ func (g *generator) generateTests() string {
 	for _, ti := range g.types {
 		g.emitStricterAllowed(&b, ti)
 		g.emitEscapedLeafGuard(&b, ti)
+		g.emitTrustedCheck(&b, ti.name)
 		if g.typeHasInvalidTag(ti.name, map[string]bool{}) {
 			g.emitNoOracleFuzz(&b, ti)
 		}
@@ -684,6 +724,7 @@ func (g *generator) generateTests() string {
 		emitStructFuzzSeeds(&b, ti)
 		fmt.Fprintf(&b, "\tf.Fuzz(func(t *testing.T, data []byte) {\n")
 		fmt.Fprintf(&b, "\t\tif zjFuzzHugeExponent(data) { return }\n")
+		g.emitTrustedCall(&b, n)
 		emitNoOracleCall(&b, n, g.typeHasInvalidTag(n, map[string]bool{}))
 		b.WriteString("\t\toracleData := data\n")
 		g.emitRawValueComparison(&b, n, ti.fields, false)
@@ -820,6 +861,7 @@ func (g *generator) emitRootFuzz(b *strings.Builder, ti typeInfo) {
 	fmt.Fprintf(b, "\tf.Add([]byte(`%s x`))\n", seed)
 	fmt.Fprintf(b, "\tf.Fuzz(func(t *testing.T, data []byte) {\n")
 	fmt.Fprintf(b, "\t\tif zjFuzzHugeExponent(data) { return }\n")
+	g.emitTrustedCall(b, n)
 	emitNoOracleCall(b, n, g.typeHasInvalidTag(n, map[string]bool{}))
 	b.WriteString("\t\toracleData := data\n")
 	if g.fieldRawComparable(*ti.rootField, map[string]bool{}) {

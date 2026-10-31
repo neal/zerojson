@@ -10,8 +10,9 @@ import (
 	strings_ "strings"
 )
 
-// zjArenaPoint holds first-use pointer cells for a decoded Point in one
-// allocation, plus working container headers for this call only.
+// zjArenaPoint holds per-call working state for a decoded Point: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaPoint struct {
 }
@@ -89,6 +90,36 @@ func zjFieldName_Point(name string) string {
 	case "name":
 		return name
 	}
+	return zjFoldFieldName_Point(name)
+}
+
+func zjFoldFieldName_Point(name string) string {
+	var lower [4]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "x":
+		return "x"
+	case "y":
+		return "y"
+	case "name":
+		return "name"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "x") {
 		return "x"
 	}
@@ -127,10 +158,13 @@ func zjDecode_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
 
 // zjDecodeOrdered_Point speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
-// the general keyed loop. It returns false with zero observable
-// effect (once the caller rewinds via Lexer.OrderedBail) on any
-// structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallback_Point;
+// the general keyed loop. A deviation at a member boundary (an
+// out-of-order, duplicate, or escaped key, or non-compact syntax
+// around one) hands the rest of the object to zjDecodeMembers_Point:
+// every member before it was decoded exactly as the keyed decoder
+// would, so only the remainder needs the general path. Any other
+// deviation returns false, and the caller rewinds via
+// Lexer.OrderedBail and retries the object through zjDecodeFallback_Point;
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) bool {
 	_ = a
@@ -158,14 +192,32 @@ func zjDecodeOrdered_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) bool {
 	}
 	expected := 0
 	for {
-		matched := -1
-		for k := expected; k < 3; k++ {
-			if zjTryOrderedKeyPoint(l, k) {
-				matched = k
-				break
-			}
+		matched := expected
+		if !zjTryOrderedKeyPoint(l, expected) {
+			matched = zjSeekOrderedKeyPoint(l, expected)
 		}
-		if matched < 0 {
+		switch {
+		case matched >= 0:
+			if !zjDecodeOrderedField_Point(l, v, a, matched) {
+				return false
+			}
+			expected = matched + 1
+		case matched == -3:
+			// A name matching no declared field, even folded as the keyed
+			// decoder folds it, is unknown and safe to skip inline (the
+			// projection-struct fast path).
+			l.Skip()
+			if l.Err() != nil {
+				return false
+			}
+		case matched == -2:
+			// A declared name out of order, repeated, or matching only
+			// under case folding: the keyed decoder's last-wins/general
+			// handling takes over from this member.
+			zjDecodeMembers_Point(l, v, a)
+			return l.Err() == nil
+		default:
+			memberPos := l.Pos()
 			// A whitespace-padded empty object (`{ }`) is valid but
 			// cannot literal-match the compact fast path. Bail without
 			// asking ReadKey to parse the closing brace as a string;
@@ -173,33 +225,24 @@ func zjDecodeOrdered_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) bool {
 			if l.IsDelim('}') {
 				return false
 			}
-			// No declared field k >= expected literal-matched at this
-			// position. Read the key properly (ReadKey tolerates
-			// whitespace and unescapes, unlike the word-compare above)
-			// and check its *name*, not its byte position: a declared
-			// name here — regardless of index — means duplicate,
-			// out-of-order, non-compact syntax around an otherwise
-			// valid key, or an escaped key that decodes to a declared
-			// name; any of those must bail so the fallback's
-			// last-wins/general handling applies. Only a name matching
-			// no declared field is genuinely unknown and safe to skip
-			// inline (the projection-struct fast path).
+			// Not a plain key: whitespace around it, an escape, or a
+			// control or non-ASCII byte. Read it properly and check its
+			// *name*: a declared name (duplicate, out of order, folded,
+			// or escaped) hands the member to the keyed decoder; only an
+			// unknown name is skipped inline.
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
 			}
 			if zjIsDeclaredKeyPoint(string(key)) {
-				return false
+				l.SetPos(memberPos)
+				zjDecodeMembers_Point(l, v, a)
+				return l.Err() == nil
 			}
 			l.Skip()
 			if l.Err() != nil {
 				return false
 			}
-		} else {
-			if !zjDecodeOrderedField_Point(l, v, a, matched) {
-				return false
-			}
-			expected = matched + 1
 		}
 		d, p := l.DataAndPos()
 		if p >= len(d) {
@@ -213,7 +256,13 @@ func zjDecodeOrdered_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) bool {
 			l.Leave()
 			return true
 		default:
-			return false
+			// Whitespace before the separator: the member is complete,
+			// so the keyed decoder continues from here. NextMember
+			// leaves the nesting level on the closing brace.
+			if l.NextMember() {
+				zjDecodeMembers_Point(l, v, a)
+			}
+			return l.Err() == nil
 		}
 	}
 }
@@ -287,12 +336,47 @@ func zjTryOrderedKeyPoint(l *zerojson.Lexer, k int) bool {
 	return false
 }
 
+// zjSeekOrderedKeyPoint classifies a plain key that is not field from's literal:
+// k >= from is the field it names, consumed; -2 a declared name the
+// keyed loop must take, not consumed; -3 an unknown name, consumed;
+// -1 not a plain key, not consumed.
+func zjSeekOrderedKeyPoint(l *zerojson.Lexer, from int) int {
+	key, next, ok := l.PlainKey()
+	if !ok {
+		return -1
+	}
+	k := -1
+	switch string(key) {
+	case "x":
+		k = 0
+	case "y":
+		k = 1
+	case "name":
+		k = 2
+	}
+	if k >= from {
+		l.SetPos(next)
+		return k
+	}
+	if k >= 0 {
+		return -2
+	}
+	// The names are ASCII, so a key folds only onto one of its length.
+	if len(key) <= 4 {
+		if name := string(key); zjFoldFieldName_Point(name) != name {
+			return -2
+		}
+	}
+	l.SetPos(next)
+	return -3
+}
+
 func zjIsDeclaredKeyPoint(name string) bool {
 	switch name {
 	case "x", "y", "name":
 		return true
 	}
-	return zjFieldName_Point(name) != name
+	return zjFoldFieldName_Point(name) != name
 }
 
 // zjDecodeFallback_Point is the general keyed decoder: every member is read via
@@ -303,6 +387,13 @@ func zjDecodeFallback_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
 	if !l.EnterObject() {
 		return
 	}
+	zjDecodeMembers_Point(l, v, a)
+}
+
+// zjDecodeMembers_Point decodes the remaining members of an object whose opening
+// brace and nesting level are already consumed, positioned at a key.
+func zjDecodeMembers_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
+	_ = a
 	for {
 		key := l.ReadKey()
 		if l.Err() != nil {
@@ -329,7 +420,7 @@ func zjDecodeFallback_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
 		case "name":
 			v.Name = l.ReadString()
 		default:
-			if folded := zjFieldName_Point(name); folded != name {
+			if folded := zjFoldFieldName_Point(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -345,15 +436,23 @@ func zjDecodeFallback_Point(l *zerojson.Lexer, v *Point, a *zjArenaPoint) {
 	}
 }
 
+// zjSizeHint_Point sizes the buffers Point's encoding wrappers start from.
+var zjSizeHint_Point zerojson.SizeHint
+
 // MarshalJSON implements json.Marshaler via zerojson.
-func (v Point) MarshalJSON() ([]byte, error) { return v.AppendZJSON(nil) }
+func (v Point) MarshalJSON() ([]byte, error) {
+	b, err := v.AppendZJSON(zjSizeHint_Point.Buffer())
+	zjSizeHint_Point.Observe(len(b))
+	return b, err
+}
 
 // UnmarshalJSON implements json.Unmarshaler via zerojson.
 func (v *Point) UnmarshalJSON(data []byte) error { return v.UnmarshalZJSON(data) }
 
 // MarshalEasyJSON implements easyjson.Marshaler via zerojson.
 func (v Point) MarshalEasyJSON(w *jwriter_.Writer) {
-	b, err := v.AppendZJSON(nil)
+	b, err := v.AppendZJSON(zjSizeHint_Point.Buffer())
+	zjSizeHint_Point.Observe(len(b))
 	if err != nil {
 		w.Error = err
 		return

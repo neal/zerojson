@@ -35,11 +35,12 @@ properties each harness checks, not a mechanically generated copy of this table.
 | String escapes | Backspace/form-feed use `\u0008`/`\u000c` | Stdlib uses `\b`/`\f`; easyjson uses the long forms |
 | Quoted-int64 marker null | Leaves a value-typed marker unchanged | Its `UnmarshalJSON` is bypassed; stdlib would call it |
 | Registered leaf null | Leaves a non-pointer leaf unchanged, except the built-in Raw leaf | Registration overrides the type's JSON methods; see custom leaf rules |
-| Registered-leaf container reuse | Containers whose traversal contains an explicit leaf/marker override keep the generated reader's reset behavior | Ordinary containers use stdlib element reuse; extension contracts can override it |
+| Registered-leaf container reuse | Containers whose traversal contains an explicit leaf/marker override keep the generated reader's reset behavior | Ordinary containers use stdlib element reuse, as do slices of `Appender`/`Reader` values and of structs that contain them: a slot keeps its element or pointer, which the Reader decodes into |
 | Escaped direct-leaf strings | Timestamp, UUID, and quoted-int64 paths unescape before parsing; custom leaves follow their selected reader | Stdlib passes raw JSON to `UnmarshalJSON`, which may reject an escaped spelling |
 
 Duplicate members are applied in order. Objects merge into reused structs
-and maps; ordinary slices reuse their elements as stdlib does. Field lookup
+and maps; ordinary slices reuse their elements as stdlib does, including
+slices of types generated in another package. Field lookup
 prefers exact names, then the first case-insensitive match in field order.
 
 Nil and empty `zerojson.Raw` values encode as `null`; stdlib rejects an empty
@@ -127,6 +128,14 @@ byte-identity guarantee.
 - Interface encoding delegates to the selected Go toolchain's `encoding/json`.
   Its output can differ from classic-v1 fixtures, including invalid UTF-8
   replacement spelling under the v2-backed implementation.
+
+Types whose only custom codec is easyjson's are refused at generate time.
+easyjson calls a type's hand-written `MarshalEasyJSON`/`UnmarshalEasyJSON`
+ahead of everything else; zerojson cannot call them, so encoding such a type
+by its Go structure would silently change its wire format. Give the type a
+`MarshalJSON`/`UnmarshalJSON` (or `AppendZJSON`/`ReadZJSON`) pair producing
+the same bytes and zerojson delegates to it. easyjson's own generated methods
+and zerojson's `-compat-easyjson` wrappers don't count.
 
 Maps use Go range order, so multi-key map encodings are not deterministic even
 between two calls to the same encoder. Compare those objects semantically or

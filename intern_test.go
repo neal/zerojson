@@ -2,6 +2,7 @@ package zerojson
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -25,17 +26,27 @@ func TestReadInterfaceDoesNotInternObjectKeys(t *testing.T) {
 		sh.Unlock()
 	})
 
-	l := Lexer{data: []byte(`{"zj-interface-probe":1}`)}
-	_ = l.ReadInterface()
-	l.Finish()
-	if err := l.Err(); err != nil {
-		t.Fatal(err)
-	}
-	sh.RLock()
-	_, interned := sh.m[key]
-	sh.RUnlock()
-	if interned {
-		t.Fatal("ReadInterface retained an arbitrary object key in the intern table")
+	// The probe lands on each buffering stage of readObject: the stack
+	// slots, the spill buffer, and direct insertion past it.
+	for _, at := range []int{0, objectSlots + 1, 2 * objectSpillSlots} {
+		var doc strings.Builder
+		doc.WriteByte('{')
+		for i := range at {
+			fmt.Fprintf(&doc, `"filler-%d":%d,`, i, i)
+		}
+		doc.WriteString(`"` + key + `":1}`)
+		l := Lexer{data: []byte(doc.String())}
+		_ = l.ReadInterface()
+		l.Finish()
+		if err := l.Err(); err != nil {
+			t.Fatal(err)
+		}
+		sh.RLock()
+		_, interned := sh.m[key]
+		sh.RUnlock()
+		if interned {
+			t.Fatalf("ReadInterface retained an arbitrary object key (member %d) in the intern table", at)
+		}
 	}
 }
 

@@ -321,14 +321,14 @@ func FuzzAPIAppendBool(f *testing.F) {
 }
 
 // FuzzAPIAppendInterface builds a variety of any values out of the fuzz
-// bytes and asserts AppendInterface never panics and, on a nil error,
-// emits valid JSON. AppendInterface delegates to json.Marshal, so its
-// error parity is json.Marshal's by construction; the value here is the
-// panic-freedom sweep and the invariant that a nil error implies valid
-// output.
+// bytes, including Marshaler and TextMarshaler values that return them, and
+// asserts AppendInterface never panics and matches json.Marshal: the same
+// bytes on success, and failure exactly when json.Marshal fails.
 func FuzzAPIAppendInterface(f *testing.F) {
 	f.Add([]byte("hello"), uint8(0))
 	f.Add([]byte{0xff, 0x00, 0x7f}, uint8(3))
+	f.Add([]byte(`{"a": [1, "<x>"]}`), uint8(8))
+	f.Add([]byte(`"2026-10-28"`), uint8(9))
 	f.Fuzz(func(t *testing.T, b []byte, shape uint8) {
 		values := []any{
 			nil,
@@ -339,6 +339,9 @@ func FuzzAPIAppendInterface(f *testing.F) {
 			map[string]any{"k": string(b), "n": len(b)},
 			[]any{string(b), len(b), nil},
 			json.RawMessage(b), // may be invalid JSON -> json.Marshal errors, must not panic
+			ifaceJSON{out: string(b)},
+			ifaceText{out: string(b)},
+			map[string]any{"j": ifaceJSON{out: string(b)}, "t": ifaceText{out: string(b)}},
 		}
 		v := values[int(shape)%len(values)]
 		var got []byte
@@ -351,8 +354,12 @@ func FuzzAPIAppendInterface(f *testing.F) {
 			}()
 			got, err = AppendInterface(nil, v)
 		}()
-		if err == nil && !json.Valid(got) {
-			t.Fatalf("AppendInterface returned nil error but invalid JSON %q for %#v", got, v)
+		want, wantErr := json.Marshal(v)
+		if (err == nil) != (wantErr == nil) {
+			t.Fatalf("%#v: AppendInterface err=%v, json.Marshal err=%v", v, err, wantErr)
+		}
+		if err == nil && !bytes.Equal(got, want) {
+			t.Fatalf("%#v: AppendInterface=%q, json.Marshal=%q", v, got, want)
 		}
 	})
 }
@@ -383,6 +390,7 @@ func FuzzLexerReadersNeverPanic(f *testing.F) {
 		{"ReadEnumBytes", func(l *Lexer) { l.ReadEnumBytes() }},
 		{"ReadTextBytes", func(l *Lexer) { l.ReadTextBytes() }},
 		{"ReadKey", func(l *Lexer) { l.ReadKey() }},
+		{"PlainKey", func(l *Lexer) { l.PlainKey() }},
 		{"ReadInt8", func(l *Lexer) { l.ReadInt8() }},
 		{"ReadInt16", func(l *Lexer) { l.ReadInt16() }},
 		{"ReadInt32", func(l *Lexer) { l.ReadInt32() }},

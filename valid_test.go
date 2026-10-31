@@ -2,6 +2,8 @@ package zerojson
 
 import (
 	"encoding/json"
+	"math/bits"
+	"math/rand/v2"
 	"strings"
 	"testing"
 )
@@ -104,6 +106,169 @@ func TestValidAllocs(t *testing.T) {
 	})
 	if allocs != 0 {
 		t.Fatalf("Valid (valid input) allocations=%v, want 0", allocs)
+	}
+}
+
+// validDepth is the container nesting depth of valid JSON data.
+func validDepth(data []byte) int {
+	depth, deepest, inString := 0, 0, false
+	for i := 0; i < len(data); i++ {
+		switch c := data[i]; {
+		case inString && c == '\\':
+			i++
+		case c == '"':
+			inString = !inString
+		case inString:
+		case c == '{' || c == '[':
+			depth++
+			deepest = max(deepest, depth)
+		case c == '}' || c == ']':
+			depth--
+		}
+	}
+	return deepest
+}
+
+// checkValidFast holds validFast to its contract on data: it never accepts
+// what encoding/json rejects, and it accepts every valid document nested
+// at most validFastDepth deep, so Valid does not quietly fall back to
+// validExact. validExact must agree with encoding/json.
+func checkValidFast(t *testing.T, data []byte) {
+	t.Helper()
+	want := json.Valid(data)
+	if exact := validExact(data) == nil; exact != want {
+		t.Fatalf("validExact(%q) valid=%v, encoding/json valid=%v", data, exact, want)
+	}
+	fast := validFast(data)
+	if fast && !want {
+		t.Fatalf("validFast accepted invalid %q", data)
+	}
+	if want && !fast && validDepth(data) <= validFastDepth {
+		t.Fatalf("validFast rejected valid %q (depth %d)", data, validDepth(data))
+	}
+}
+
+// validFastCases put each grammar corner where validFast scans it a word
+// at a time as well as within a word of the end.
+var validFastCases = []string{
+	"0", "-0", "1.5e-3", "01", "1.", "-", "1e+", "true", "false", "null", "nul", "tru e", "nulll", "fals",
+	`""`, `"ok"`, `"0123456789abcdef"`, "\"0123456789\x01abcdef\"", "\"0123\x1f\"", "\"\xff\xfe raw\"",
+	`"0123456789\n0123456"`, `"0123456789\q0123456"`, `"0123456789\u12G4abcdef"`, `"0123\u00e9"`, `"\"`,
+	`"unterminated`, `"012345678901234567`,
+	"{}", "[]", "{ }", "[ ]", `{"a":1}`, `{"0123456789abcdef":1}`, `[1,2,3]`, `{"a":[1,{"b":2}]}`,
+	`{"a":1,}`, `[1,]`, `[,1]`, `{,}`, `{"a":}`, `{:"a"}`, `{"a" 1}`, `{"a":1 "b":2}`, `[1 2]`, `"a" "b"`,
+	`[1}`, `{"a":1]`, `[{]}`, `{"a":[}]}`, `[[]`, `[]]`, `{}}`, `]`, `}`, `[`, `{`, `1,2`, `1]`, `1}`,
+	`{1:2}`, `{"a":1,"b"}`, `[true,fals]`, `[-]`, `[01]`, `[1.]`,
+	" { \"a\" : [ true , false , null ] , \"b\" : { } } \t", "", "   ", "\t\n\r ", `{"id":1}garbage`,
+}
+
+func TestValidFastMatchesExact(t *testing.T) {
+	pad := strings.Repeat(" ", 16)
+	for _, c := range validFastCases {
+		for _, doc := range []string{c, "[" + c + "]", `{"k":` + c + `}`, c + pad, "[" + c + "," + pad + "0]", `{"0123456789abcdef":` + c + `,"z":0}`} {
+			checkValidFast(t, []byte(doc))
+		}
+	}
+}
+
+// TestValidFastDepthBoundary nests alternating objects and arrays across
+// the stack's word boundaries up to one past validFastDepth, with matched
+// and swapped closers.
+func TestValidFastDepthBoundary(t *testing.T) {
+	nest := func(d int, swap bool) []byte {
+		var open, closers strings.Builder
+		for i := range d {
+			if i%2 == 0 {
+				open.WriteString(`{"a":`)
+			} else {
+				open.WriteString("[")
+			}
+		}
+		for i := d - 1; i >= 0; i-- {
+			obj := i%2 == 0
+			if swap && i == 0 {
+				obj = !obj
+			}
+			if obj {
+				closers.WriteString("}")
+			} else {
+				closers.WriteString("]")
+			}
+		}
+		return []byte(open.String() + "1" + closers.String())
+	}
+	for _, d := range []int{1, 63, 64, 65, 127, 128, 129, 255, 256, 257} {
+		for _, swap := range []bool{false, true} {
+			data := nest(d, swap)
+			checkValidFast(t, data)
+			if !swap && d > validFastDepth && validFast(data) {
+				t.Fatalf("validFast accepted depth %d, beyond its %d-level stack", d, validFastDepth)
+			}
+		}
+	}
+}
+
+func FuzzValidFast(f *testing.F) {
+	for _, c := range validFastCases {
+		f.Add([]byte(c))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		checkValidFast(t, data)
+	})
+}
+
+// TestStringSpecialFindsFirstSpecialByte checks stringSpecial's lowest
+// marked lane against a byte-by-byte search: for every lane, every byte
+// value there, plain bytes below it, and random bytes above it, plus random
+// words drawn mostly from the bytes near the thresholds.
+func TestStringSpecialFindsFirstSpecialByte(t *testing.T) {
+	special := func(c byte) bool { return c == '"' || c == '\\' || c < 0x20 }
+	check := func(v uint64) {
+		want := 8
+		for i := range 8 {
+			if special(byte(v >> (8 * i))) {
+				want = i
+				break
+			}
+		}
+		if got := bits.TrailingZeros64(stringSpecial(v)) >> 3; got != want {
+			t.Fatalf("stringSpecial(%#016x): first special lane %d, want %d", v, got, want)
+		}
+	}
+	rng := rand.New(rand.NewPCG(1, 2))
+	plain := func() uint64 {
+		for {
+			if c := byte(rng.Uint32()); !special(c) {
+				return uint64(c)
+			}
+		}
+	}
+	near := []byte{0x00, 0x01, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23, 0x5b, 0x5c, 0x5d, 0x7f, 0x80, 0xa2, 0xdc, 0xff}
+	for lane := range 8 {
+		for c := range 256 {
+			for range 64 {
+				var v uint64
+				for i := range lane {
+					v |= plain() << (8 * i)
+				}
+				v |= uint64(c) << (8 * lane)
+				for i := lane + 1; i < 8; i++ {
+					v |= uint64(near[rng.IntN(len(near))]) << (8 * i)
+				}
+				check(v)
+			}
+		}
+	}
+	for range 1 << 20 {
+		var v uint64
+		for i := range 8 {
+			c := byte(rng.Uint32())
+			if rng.IntN(2) == 0 {
+				c = near[rng.IntN(len(near))]
+			}
+			v |= uint64(c) << (8 * i)
+		}
+		check(v)
 	}
 }
 

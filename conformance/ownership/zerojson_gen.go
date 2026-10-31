@@ -10,8 +10,9 @@ import (
 	"sync/atomic"
 )
 
-// zjArenaSample holds first-use pointer cells for a decoded Sample in one
-// allocation, plus working container headers for this call only.
+// zjArenaSample holds per-call working state for a decoded Sample: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaSample struct {
 	c0 []int
@@ -83,6 +84,32 @@ func zjFieldName_Sample(name string) string {
 	case "Values":
 		return name
 	}
+	return zjFoldFieldName_Sample(name)
+}
+
+func zjFoldFieldName_Sample(name string) string {
+	var lower [6]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "values":
+		return "Values"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "Values") {
 		return "Values"
 	}
@@ -115,10 +142,13 @@ func zjDecode_Sample(l *zerojson.Lexer, v *Sample, a *zjArenaSample) {
 
 // zjDecodeOrdered_Sample speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
-// the general keyed loop. It returns false with zero observable
-// effect (once the caller rewinds via Lexer.OrderedBail) on any
-// structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallback_Sample;
+// the general keyed loop. A deviation at a member boundary (an
+// out-of-order, duplicate, or escaped key, or non-compact syntax
+// around one) hands the rest of the object to zjDecodeMembers_Sample:
+// every member before it was decoded exactly as the keyed decoder
+// would, so only the remainder needs the general path. Any other
+// deviation returns false, and the caller rewinds via
+// Lexer.OrderedBail and retries the object through zjDecodeFallback_Sample;
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_Sample(l *zerojson.Lexer, v *Sample, a *zjArenaSample) bool {
 	_ = a
@@ -150,14 +180,32 @@ func zjDecodeOrdered_Sample(l *zerojson.Lexer, v *Sample, a *zjArenaSample) bool
 	}
 	expected := 0
 	for {
-		matched := -1
-		for k := expected; k < 1; k++ {
-			if zjTryOrderedKeySample(l, k) {
-				matched = k
-				break
-			}
+		matched := expected
+		if !zjTryOrderedKeySample(l, expected) {
+			matched = zjSeekOrderedKeySample(l, expected)
 		}
-		if matched < 0 {
+		switch {
+		case matched >= 0:
+			if !zjDecodeOrderedField_Sample(l, v, a, matched) {
+				return false
+			}
+			expected = matched + 1
+		case matched == -3:
+			// A name matching no declared field, even folded as the keyed
+			// decoder folds it, is unknown and safe to skip inline (the
+			// projection-struct fast path).
+			l.Skip()
+			if l.Err() != nil {
+				return false
+			}
+		case matched == -2:
+			// A declared name out of order, repeated, or matching only
+			// under case folding: the keyed decoder's last-wins/general
+			// handling takes over from this member.
+			zjDecodeMembers_Sample(l, v, a)
+			return l.Err() == nil
+		default:
+			memberPos := l.Pos()
 			// A whitespace-padded empty object (`{ }`) is valid but
 			// cannot literal-match the compact fast path. Bail without
 			// asking ReadKey to parse the closing brace as a string;
@@ -165,33 +213,24 @@ func zjDecodeOrdered_Sample(l *zerojson.Lexer, v *Sample, a *zjArenaSample) bool
 			if l.IsDelim('}') {
 				return false
 			}
-			// No declared field k >= expected literal-matched at this
-			// position. Read the key properly (ReadKey tolerates
-			// whitespace and unescapes, unlike the word-compare above)
-			// and check its *name*, not its byte position: a declared
-			// name here — regardless of index — means duplicate,
-			// out-of-order, non-compact syntax around an otherwise
-			// valid key, or an escaped key that decodes to a declared
-			// name; any of those must bail so the fallback's
-			// last-wins/general handling applies. Only a name matching
-			// no declared field is genuinely unknown and safe to skip
-			// inline (the projection-struct fast path).
+			// Not a plain key: whitespace around it, an escape, or a
+			// control or non-ASCII byte. Read it properly and check its
+			// *name*: a declared name (duplicate, out of order, folded,
+			// or escaped) hands the member to the keyed decoder; only an
+			// unknown name is skipped inline.
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
 			}
 			if zjIsDeclaredKeySample(string(key)) {
-				return false
+				l.SetPos(memberPos)
+				zjDecodeMembers_Sample(l, v, a)
+				return l.Err() == nil
 			}
 			l.Skip()
 			if l.Err() != nil {
 				return false
 			}
-		} else {
-			if !zjDecodeOrderedField_Sample(l, v, a, matched) {
-				return false
-			}
-			expected = matched + 1
 		}
 		d, p := l.DataAndPos()
 		if p >= len(d) {
@@ -205,7 +244,13 @@ func zjDecodeOrdered_Sample(l *zerojson.Lexer, v *Sample, a *zjArenaSample) bool
 			l.Leave()
 			return true
 		default:
-			return false
+			// Whitespace before the separator: the member is complete,
+			// so the keyed decoder continues from here. NextMember
+			// leaves the nesting level on the closing brace.
+			if l.NextMember() {
+				zjDecodeMembers_Sample(l, v, a)
+			}
+			return l.Err() == nil
 		}
 	}
 }
@@ -263,8 +308,6 @@ func zjDecodeOrderedField_Sample(l *zerojson.Lexer, v *Sample, a *zjArenaSample,
 						a.c0 = append(a.c0, zjZero)
 					} else {
 						a.c0 = a.c0[:len(a.c0)+1]
-						var zjZero int
-						a.c0[len(a.c0)-1] = zjZero
 					}
 					idx := len(a.c0) - 1
 					if !l.IsNull() {
@@ -317,12 +360,43 @@ func zjTryOrderedKeySample(l *zerojson.Lexer, k int) bool {
 	return false
 }
 
+// zjSeekOrderedKeySample classifies a plain key that is not field from's literal:
+// k >= from is the field it names, consumed; -2 a declared name the
+// keyed loop must take, not consumed; -3 an unknown name, consumed;
+// -1 not a plain key, not consumed.
+func zjSeekOrderedKeySample(l *zerojson.Lexer, from int) int {
+	key, next, ok := l.PlainKey()
+	if !ok {
+		return -1
+	}
+	k := -1
+	switch string(key) {
+	case "Values":
+		k = 0
+	}
+	if k >= from {
+		l.SetPos(next)
+		return k
+	}
+	if k >= 0 {
+		return -2
+	}
+	// The names are ASCII, so a key folds only onto one of its length.
+	if len(key) <= 6 {
+		if name := string(key); zjFoldFieldName_Sample(name) != name {
+			return -2
+		}
+	}
+	l.SetPos(next)
+	return -3
+}
+
 func zjIsDeclaredKeySample(name string) bool {
 	switch name {
 	case "Values":
 		return true
 	}
-	return zjFieldName_Sample(name) != name
+	return zjFoldFieldName_Sample(name) != name
 }
 
 // zjDecodeFallback_Sample is the general keyed decoder: every member is read via
@@ -333,6 +407,13 @@ func zjDecodeFallback_Sample(l *zerojson.Lexer, v *Sample, a *zjArenaSample) {
 	if !l.EnterObject() {
 		return
 	}
+	zjDecodeMembers_Sample(l, v, a)
+}
+
+// zjDecodeMembers_Sample decodes the remaining members of an object whose opening
+// brace and nesting level are already consumed, positioned at a key.
+func zjDecodeMembers_Sample(l *zerojson.Lexer, v *Sample, a *zjArenaSample) {
+	_ = a
 	for {
 		key := l.ReadKey()
 		if l.Err() != nil {
@@ -396,8 +477,6 @@ func zjDecodeFallback_Sample(l *zerojson.Lexer, v *Sample, a *zjArenaSample) {
 							a.c0 = append(a.c0, zjZero)
 						} else {
 							a.c0 = a.c0[:len(a.c0)+1]
-							var zjZero int
-							a.c0[len(a.c0)-1] = zjZero
 						}
 						idx := len(a.c0) - 1
 						if !l.IsNull() {
@@ -417,7 +496,7 @@ func zjDecodeFallback_Sample(l *zerojson.Lexer, v *Sample, a *zjArenaSample) {
 				v.Values = a.c0
 			}
 		default:
-			if folded := zjFieldName_Sample(name); folded != name {
+			if folded := zjFoldFieldName_Sample(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -484,8 +563,9 @@ func (d *SampleDecoder) DecodeBorrow(data []byte, v *Sample) error {
 	return l.Err()
 }
 
-// zjArenaItem holds first-use pointer cells for a decoded Item in one
-// allocation, plus working container headers for this call only.
+// zjArenaItem holds per-call working state for a decoded Item: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaItem struct {
 }
@@ -567,6 +647,36 @@ func zjFieldName_Item(name string) string {
 	case "Price":
 		return name
 	}
+	return zjFoldFieldName_Item(name)
+}
+
+func zjFoldFieldName_Item(name string) string {
+	var lower [8]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "id":
+		return "ID"
+	case "quantity":
+		return "Quantity"
+	case "price":
+		return "Price"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "ID") {
 		return "ID"
 	}
@@ -605,10 +715,13 @@ func zjDecode_Item(l *zerojson.Lexer, v *Item, a *zjArenaItem) {
 
 // zjDecodeOrdered_Item speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
-// the general keyed loop. It returns false with zero observable
-// effect (once the caller rewinds via Lexer.OrderedBail) on any
-// structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallback_Item;
+// the general keyed loop. A deviation at a member boundary (an
+// out-of-order, duplicate, or escaped key, or non-compact syntax
+// around one) hands the rest of the object to zjDecodeMembers_Item:
+// every member before it was decoded exactly as the keyed decoder
+// would, so only the remainder needs the general path. Any other
+// deviation returns false, and the caller rewinds via
+// Lexer.OrderedBail and retries the object through zjDecodeFallback_Item;
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_Item(l *zerojson.Lexer, v *Item, a *zjArenaItem) bool {
 	_ = a
@@ -636,14 +749,32 @@ func zjDecodeOrdered_Item(l *zerojson.Lexer, v *Item, a *zjArenaItem) bool {
 	}
 	expected := 0
 	for {
-		matched := -1
-		for k := expected; k < 3; k++ {
-			if zjTryOrderedKeyItem(l, k) {
-				matched = k
-				break
-			}
+		matched := expected
+		if !zjTryOrderedKeyItem(l, expected) {
+			matched = zjSeekOrderedKeyItem(l, expected)
 		}
-		if matched < 0 {
+		switch {
+		case matched >= 0:
+			if !zjDecodeOrderedField_Item(l, v, a, matched) {
+				return false
+			}
+			expected = matched + 1
+		case matched == -3:
+			// A name matching no declared field, even folded as the keyed
+			// decoder folds it, is unknown and safe to skip inline (the
+			// projection-struct fast path).
+			l.Skip()
+			if l.Err() != nil {
+				return false
+			}
+		case matched == -2:
+			// A declared name out of order, repeated, or matching only
+			// under case folding: the keyed decoder's last-wins/general
+			// handling takes over from this member.
+			zjDecodeMembers_Item(l, v, a)
+			return l.Err() == nil
+		default:
+			memberPos := l.Pos()
 			// A whitespace-padded empty object (`{ }`) is valid but
 			// cannot literal-match the compact fast path. Bail without
 			// asking ReadKey to parse the closing brace as a string;
@@ -651,33 +782,24 @@ func zjDecodeOrdered_Item(l *zerojson.Lexer, v *Item, a *zjArenaItem) bool {
 			if l.IsDelim('}') {
 				return false
 			}
-			// No declared field k >= expected literal-matched at this
-			// position. Read the key properly (ReadKey tolerates
-			// whitespace and unescapes, unlike the word-compare above)
-			// and check its *name*, not its byte position: a declared
-			// name here — regardless of index — means duplicate,
-			// out-of-order, non-compact syntax around an otherwise
-			// valid key, or an escaped key that decodes to a declared
-			// name; any of those must bail so the fallback's
-			// last-wins/general handling applies. Only a name matching
-			// no declared field is genuinely unknown and safe to skip
-			// inline (the projection-struct fast path).
+			// Not a plain key: whitespace around it, an escape, or a
+			// control or non-ASCII byte. Read it properly and check its
+			// *name*: a declared name (duplicate, out of order, folded,
+			// or escaped) hands the member to the keyed decoder; only an
+			// unknown name is skipped inline.
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
 			}
 			if zjIsDeclaredKeyItem(string(key)) {
-				return false
+				l.SetPos(memberPos)
+				zjDecodeMembers_Item(l, v, a)
+				return l.Err() == nil
 			}
 			l.Skip()
 			if l.Err() != nil {
 				return false
 			}
-		} else {
-			if !zjDecodeOrderedField_Item(l, v, a, matched) {
-				return false
-			}
-			expected = matched + 1
 		}
 		d, p := l.DataAndPos()
 		if p >= len(d) {
@@ -691,7 +813,13 @@ func zjDecodeOrdered_Item(l *zerojson.Lexer, v *Item, a *zjArenaItem) bool {
 			l.Leave()
 			return true
 		default:
-			return false
+			// Whitespace before the separator: the member is complete,
+			// so the keyed decoder continues from here. NextMember
+			// leaves the nesting level on the closing brace.
+			if l.NextMember() {
+				zjDecodeMembers_Item(l, v, a)
+			}
+			return l.Err() == nil
 		}
 	}
 }
@@ -765,12 +893,47 @@ func zjTryOrderedKeyItem(l *zerojson.Lexer, k int) bool {
 	return false
 }
 
+// zjSeekOrderedKeyItem classifies a plain key that is not field from's literal:
+// k >= from is the field it names, consumed; -2 a declared name the
+// keyed loop must take, not consumed; -3 an unknown name, consumed;
+// -1 not a plain key, not consumed.
+func zjSeekOrderedKeyItem(l *zerojson.Lexer, from int) int {
+	key, next, ok := l.PlainKey()
+	if !ok {
+		return -1
+	}
+	k := -1
+	switch string(key) {
+	case "ID":
+		k = 0
+	case "Quantity":
+		k = 1
+	case "Price":
+		k = 2
+	}
+	if k >= from {
+		l.SetPos(next)
+		return k
+	}
+	if k >= 0 {
+		return -2
+	}
+	// The names are ASCII, so a key folds only onto one of its length.
+	if len(key) <= 8 {
+		if name := string(key); zjFoldFieldName_Item(name) != name {
+			return -2
+		}
+	}
+	l.SetPos(next)
+	return -3
+}
+
 func zjIsDeclaredKeyItem(name string) bool {
 	switch name {
 	case "ID", "Quantity", "Price":
 		return true
 	}
-	return zjFieldName_Item(name) != name
+	return zjFoldFieldName_Item(name) != name
 }
 
 // zjDecodeFallback_Item is the general keyed decoder: every member is read via
@@ -781,6 +944,13 @@ func zjDecodeFallback_Item(l *zerojson.Lexer, v *Item, a *zjArenaItem) {
 	if !l.EnterObject() {
 		return
 	}
+	zjDecodeMembers_Item(l, v, a)
+}
+
+// zjDecodeMembers_Item decodes the remaining members of an object whose opening
+// brace and nesting level are already consumed, positioned at a key.
+func zjDecodeMembers_Item(l *zerojson.Lexer, v *Item, a *zjArenaItem) {
+	_ = a
 	for {
 		key := l.ReadKey()
 		if l.Err() != nil {
@@ -807,7 +977,7 @@ func zjDecodeFallback_Item(l *zerojson.Lexer, v *Item, a *zjArenaItem) {
 		case "Price":
 			v.Price = float64(l.ReadFloat64())
 		default:
-			if folded := zjFieldName_Item(name); folded != name {
+			if folded := zjFoldFieldName_Item(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -874,15 +1044,30 @@ func (d *ItemDecoder) DecodeBorrow(data []byte, v *Item) error {
 	return l.Err()
 }
 
-// zjArenaPayload holds first-use pointer cells for a decoded Payload in one
-// allocation, plus working container headers for this call only.
+// zjArenaPayload holds per-call working state for a decoded Payload: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaPayload struct {
+	zjBlock    *zjCellsPayload
 	c4         []string
 	c5         []Item
 	m6         map[string]int
 	published7 bool
-	f7         int
+}
+
+// zjCellsPayload holds the first-use pointer cells of one Payload decode, and those of
+// its nested structs, in a single allocation made only when the input
+// sets a nil pointer field.
+type zjCellsPayload struct {
+	f7 int
+}
+
+func (a *zjArenaPayload) zjCells() *zjCellsPayload {
+	if a.zjBlock == nil {
+		a.zjBlock = new(zjCellsPayload)
+	}
+	return a.zjBlock
 }
 
 // AppendZJSON appends the JSON encoding of v to dst. On error the
@@ -1056,6 +1241,46 @@ func zjFieldName_Payload(name string) string {
 	case "Optional":
 		return name
 	}
+	return zjFoldFieldName_Payload(name)
+}
+
+func zjFoldFieldName_Payload(name string) string {
+	var lower [8]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "id":
+		return "ID"
+	case "count":
+		return "Count"
+	case "ratio":
+		return "Ratio"
+	case "stamp":
+		return "Stamp"
+	case "names":
+		return "Names"
+	case "items":
+		return "Items"
+	case "index":
+		return "Index"
+	case "optional":
+		return "Optional"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "ID") {
 		return "ID"
 	}
@@ -1109,10 +1334,13 @@ func zjDecode_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) {
 
 // zjDecodeOrdered_Payload speculatively decodes a compact, declaration-ordered object
 // (the shape zerojson's own encoder emits) directly into v, without
-// the general keyed loop. It returns false with zero observable
-// effect (once the caller rewinds via Lexer.OrderedBail) on any
-// structural deviation: out-of-order/duplicate/escaped keys or
-// non-compact syntax. The caller retries those through zjDecodeFallback_Payload;
+// the general keyed loop. A deviation at a member boundary (an
+// out-of-order, duplicate, or escaped key, or non-compact syntax
+// around one) hands the rest of the object to zjDecodeMembers_Payload:
+// every member before it was decoded exactly as the keyed decoder
+// would, so only the remainder needs the general path. Any other
+// deviation returns false, and the caller rewinds via
+// Lexer.OrderedBail and retries the object through zjDecodeFallback_Payload;
 // real value/grammar errors are preserved without a redundant retry.
 func zjDecodeOrdered_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) bool {
 	_ = a
@@ -1144,14 +1372,32 @@ func zjDecodeOrdered_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) b
 	}
 	expected := 0
 	for {
-		matched := -1
-		for k := expected; k < 8; k++ {
-			if zjTryOrderedKeyPayload(l, k) {
-				matched = k
-				break
-			}
+		matched := expected
+		if !zjTryOrderedKeyPayload(l, expected) {
+			matched = zjSeekOrderedKeyPayload(l, expected)
 		}
-		if matched < 0 {
+		switch {
+		case matched >= 0:
+			if !zjDecodeOrderedField_Payload(l, v, a, matched) {
+				return false
+			}
+			expected = matched + 1
+		case matched == -3:
+			// A name matching no declared field, even folded as the keyed
+			// decoder folds it, is unknown and safe to skip inline (the
+			// projection-struct fast path).
+			l.Skip()
+			if l.Err() != nil {
+				return false
+			}
+		case matched == -2:
+			// A declared name out of order, repeated, or matching only
+			// under case folding: the keyed decoder's last-wins/general
+			// handling takes over from this member.
+			zjDecodeMembers_Payload(l, v, a)
+			return l.Err() == nil
+		default:
+			memberPos := l.Pos()
 			// A whitespace-padded empty object (`{ }`) is valid but
 			// cannot literal-match the compact fast path. Bail without
 			// asking ReadKey to parse the closing brace as a string;
@@ -1159,33 +1405,24 @@ func zjDecodeOrdered_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) b
 			if l.IsDelim('}') {
 				return false
 			}
-			// No declared field k >= expected literal-matched at this
-			// position. Read the key properly (ReadKey tolerates
-			// whitespace and unescapes, unlike the word-compare above)
-			// and check its *name*, not its byte position: a declared
-			// name here — regardless of index — means duplicate,
-			// out-of-order, non-compact syntax around an otherwise
-			// valid key, or an escaped key that decodes to a declared
-			// name; any of those must bail so the fallback's
-			// last-wins/general handling applies. Only a name matching
-			// no declared field is genuinely unknown and safe to skip
-			// inline (the projection-struct fast path).
+			// Not a plain key: whitespace around it, an escape, or a
+			// control or non-ASCII byte. Read it properly and check its
+			// *name*: a declared name (duplicate, out of order, folded,
+			// or escaped) hands the member to the keyed decoder; only an
+			// unknown name is skipped inline.
 			key := l.ReadKey()
 			if l.Err() != nil {
 				return false
 			}
 			if zjIsDeclaredKeyPayload(string(key)) {
-				return false
+				l.SetPos(memberPos)
+				zjDecodeMembers_Payload(l, v, a)
+				return l.Err() == nil
 			}
 			l.Skip()
 			if l.Err() != nil {
 				return false
 			}
-		} else {
-			if !zjDecodeOrderedField_Payload(l, v, a, matched) {
-				return false
-			}
-			expected = matched + 1
 		}
 		d, p := l.DataAndPos()
 		if p >= len(d) {
@@ -1199,7 +1436,13 @@ func zjDecodeOrdered_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) b
 			l.Leave()
 			return true
 		default:
-			return false
+			// Whitespace before the separator: the member is complete,
+			// so the keyed decoder continues from here. NextMember
+			// leaves the nesting level on the closing brace.
+			if l.NextMember() {
+				zjDecodeMembers_Payload(l, v, a)
+			}
+			return l.Err() == nil
 		}
 	}
 }
@@ -1271,8 +1514,6 @@ func zjDecodeOrderedField_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPaylo
 						a.c4 = append(a.c4, zjZero)
 					} else {
 						a.c4 = a.c4[:len(a.c4)+1]
-						var zjZero string
-						a.c4[len(a.c4)-1] = zjZero
 					}
 					idx := len(a.c4) - 1
 					if !l.IsNull() {
@@ -1311,7 +1552,6 @@ func zjDecodeOrderedField_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPaylo
 						a.c5 = append(a.c5, Item{})
 					} else {
 						a.c5 = a.c5[:len(a.c5)+1]
-						a.c5[len(a.c5)-1] = Item{}
 					}
 					if !l.IsNull() {
 						var ea zjArenaItem
@@ -1331,28 +1571,10 @@ func zjDecodeOrderedField_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPaylo
 			v.Items = a.c5
 		}
 	case 6:
-		{
-			if v.Index != nil {
-				a.m6 = v.Index
-			} else {
-				a.m6 = make(map[string]int)
-			}
-		}
-		if l.EnterObject() {
-			for {
-				mk := string(string(l.ReadKey()))
-				var mv int
-				if !l.IsNull() {
-					mv = int(l.ReadInt())
-				}
-				if l.Err() != nil {
-					break
-				}
-				a.m6[mk] = mv
-				if !l.NextMember() {
-					break
-				}
-			}
+		if v.Index != nil {
+			a.m6 = zjReadMap_map_string_int(l, v.Index)
+		} else {
+			a.m6 = zjReadMap_map_string_int(l, nil)
 		}
 		v.Index = a.m6
 	case 7:
@@ -1360,7 +1582,7 @@ func zjDecodeOrderedField_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPaylo
 			if a.published7 {
 				v.Optional = new(int)
 			} else {
-				v.Optional = &a.f7
+				v.Optional = &a.zjCells().f7
 				a.published7 = true
 			}
 		}
@@ -1469,12 +1691,57 @@ func zjTryOrderedKeyPayload(l *zerojson.Lexer, k int) bool {
 	return false
 }
 
+// zjSeekOrderedKeyPayload classifies a plain key that is not field from's literal:
+// k >= from is the field it names, consumed; -2 a declared name the
+// keyed loop must take, not consumed; -3 an unknown name, consumed;
+// -1 not a plain key, not consumed.
+func zjSeekOrderedKeyPayload(l *zerojson.Lexer, from int) int {
+	key, next, ok := l.PlainKey()
+	if !ok {
+		return -1
+	}
+	k := -1
+	switch string(key) {
+	case "ID":
+		k = 0
+	case "Count":
+		k = 1
+	case "Ratio":
+		k = 2
+	case "Stamp":
+		k = 3
+	case "Names":
+		k = 4
+	case "Items":
+		k = 5
+	case "Index":
+		k = 6
+	case "Optional":
+		k = 7
+	}
+	if k >= from {
+		l.SetPos(next)
+		return k
+	}
+	if k >= 0 {
+		return -2
+	}
+	// The names are ASCII, so a key folds only onto one of its length.
+	if len(key) <= 8 {
+		if name := string(key); zjFoldFieldName_Payload(name) != name {
+			return -2
+		}
+	}
+	l.SetPos(next)
+	return -3
+}
+
 func zjIsDeclaredKeyPayload(name string) bool {
 	switch name {
 	case "ID", "Count", "Ratio", "Stamp", "Names", "Items", "Index", "Optional":
 		return true
 	}
-	return zjFieldName_Payload(name) != name
+	return zjFoldFieldName_Payload(name) != name
 }
 
 // zjDecodeFallback_Payload is the general keyed decoder: every member is read via
@@ -1485,6 +1752,13 @@ func zjDecodeFallback_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) 
 	if !l.EnterObject() {
 		return
 	}
+	zjDecodeMembers_Payload(l, v, a)
+}
+
+// zjDecodeMembers_Payload decodes the remaining members of an object whose opening
+// brace and nesting level are already consumed, positioned at a key.
+func zjDecodeMembers_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) {
+	_ = a
 	for {
 		key := l.ReadKey()
 		if l.Err() != nil {
@@ -1562,8 +1836,6 @@ func zjDecodeFallback_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) 
 							a.c4 = append(a.c4, zjZero)
 						} else {
 							a.c4 = a.c4[:len(a.c4)+1]
-							var zjZero string
-							a.c4[len(a.c4)-1] = zjZero
 						}
 						idx := len(a.c4) - 1
 						if !l.IsNull() {
@@ -1602,7 +1874,6 @@ func zjDecodeFallback_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) 
 							a.c5 = append(a.c5, Item{})
 						} else {
 							a.c5 = a.c5[:len(a.c5)+1]
-							a.c5[len(a.c5)-1] = Item{}
 						}
 						if !l.IsNull() {
 							var ea zjArenaItem
@@ -1622,28 +1893,10 @@ func zjDecodeFallback_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) 
 				v.Items = a.c5
 			}
 		case "Index":
-			{
-				if v.Index != nil {
-					a.m6 = v.Index
-				} else {
-					a.m6 = make(map[string]int)
-				}
-			}
-			if l.EnterObject() {
-				for {
-					mk := string(string(l.ReadKey()))
-					var mv int
-					if !l.IsNull() {
-						mv = int(l.ReadInt())
-					}
-					if l.Err() != nil {
-						break
-					}
-					a.m6[mk] = mv
-					if !l.NextMember() {
-						break
-					}
-				}
+			if v.Index != nil {
+				a.m6 = zjReadMap_map_string_int(l, v.Index)
+			} else {
+				a.m6 = zjReadMap_map_string_int(l, nil)
 			}
 			v.Index = a.m6
 		case "Optional":
@@ -1651,13 +1904,13 @@ func zjDecodeFallback_Payload(l *zerojson.Lexer, v *Payload, a *zjArenaPayload) 
 				if a.published7 {
 					v.Optional = new(int)
 				} else {
-					v.Optional = &a.f7
+					v.Optional = &a.zjCells().f7
 					a.published7 = true
 				}
 			}
 			*v.Optional = int(l.ReadInt())
 		default:
-			if folded := zjFieldName_Payload(name); folded != name {
+			if folded := zjFoldFieldName_Payload(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -1724,8 +1977,9 @@ func (d *PayloadDecoder) DecodeBorrow(data []byte, v *Payload) error {
 	return l.Err()
 }
 
-// zjArenaObservedPayload holds first-use pointer cells for a decoded ObservedPayload in one
-// allocation, plus working container headers for this call only.
+// zjArenaObservedPayload holds per-call working state for a decoded ObservedPayload: publication
+// flags, container headers, and nested types' arenas. It stays off the
+// heap; pointer cells live in a cell block allocated on first use.
 // Detached storage is not reused within the same decode.
 type zjArenaObservedPayload struct {
 	c0 []Observed
@@ -1804,6 +2058,32 @@ func zjFieldName_ObservedPayload(name string) string {
 	case "Values":
 		return name
 	}
+	return zjFoldFieldName_ObservedPayload(name)
+}
+
+func zjFoldFieldName_ObservedPayload(name string) string {
+	var lower [6]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 {
+			goto zjUnicode
+		}
+		if i < len(lower) {
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			lower[i] = c
+		}
+	}
+	if len(name) > len(lower) {
+		return name
+	}
+	switch string(lower[:len(name)]) {
+	case "values":
+		return "Values"
+	}
+	return name
+zjUnicode:
 	if strings_.EqualFold(name, "Values") {
 		return "Values"
 	}
@@ -1860,7 +2140,7 @@ func zjDecodeFallback_ObservedPayload(l *zerojson.Lexer, v *ObservedPayload, a *
 				}
 			}
 		default:
-			if folded := zjFieldName_ObservedPayload(name); folded != name {
+			if folded := zjFoldFieldName_ObservedPayload(name); folded != name {
 				name = folded
 				goto zjDispatch
 			}
@@ -1925,4 +2205,88 @@ func (d *ObservedPayloadDecoder) DecodeBorrow(data []byte, v *ObservedPayload) e
 	zjDecode_ObservedPayload(&l, v, &a)
 	l.Finish()
 	return l.Err()
+}
+
+// zjMapEntry_map_string_int is one member of a map still being buffered.
+type zjMapEntry_map_string_int struct {
+	k string
+	v int
+}
+
+// zjReadMap_map_string_int decodes a JSON object into m, or into a new map when m is nil.
+// A new map is made at its final size: up to 8 members wait on the
+// stack, and one more moves them to zjSpillMap_map_string_int.
+func zjReadMap_map_string_int(l *zerojson.Lexer, m map[string]int) map[string]int {
+	var kv [8]zjMapEntry_map_string_int
+	n := 0
+	if l.EnterObject() {
+		for {
+			mk := string(string(l.ReadKey()))
+			var mv int
+			if !l.IsNull() {
+				mv = int(l.ReadInt())
+			}
+			if l.Err() != nil {
+				break
+			}
+			if m != nil {
+				m[mk] = mv
+			} else if n < len(kv) {
+				kv[n] = zjMapEntry_map_string_int{mk, mv}
+				n++
+			} else {
+				return zjSpillMap_map_string_int(l, &kv, mk, mv)
+			}
+			if !l.NextMember() {
+				break
+			}
+		}
+	}
+	if m == nil {
+		m = make(map[string]int, n)
+		for _, e := range kv[:n] {
+			m[e.k] = e.v
+		}
+	}
+	return m
+}
+
+// zjSpillMap_map_string_int continues zjReadMap_map_string_int past 8 members, given them and the
+// member just read. Past its own buffer it makes the map with room for
+// twice as many members and inserts the rest directly.
+func zjSpillMap_map_string_int(l *zerojson.Lexer, first *[8]zjMapEntry_map_string_int, mk string, mv int) map[string]int {
+	var kv [40]zjMapEntry_map_string_int
+	n := copy(kv[:], first[:])
+	kv[n] = zjMapEntry_map_string_int{mk, mv}
+	n++
+	var m map[string]int
+	for l.NextMember() {
+		mk := string(string(l.ReadKey()))
+		var mv int
+		if !l.IsNull() {
+			mv = int(l.ReadInt())
+		}
+		if l.Err() != nil {
+			break
+		}
+		if m != nil {
+			m[mk] = mv
+		} else if n < len(kv) {
+			kv[n] = zjMapEntry_map_string_int{mk, mv}
+			n++
+		} else {
+			m = make(map[string]int, 2*len(kv))
+			for _, e := range kv[:n] {
+				m[e.k] = e.v
+			}
+			m[mk] = mv
+		}
+	}
+	if m == nil {
+		m = make(map[string]int, n)
+		for _, e := range kv[:n] {
+			m[e.k] = e.v
+		}
+	}
+	return m
 }

@@ -357,6 +357,26 @@ func zjEscapedDirectLeafEvent(data []byte) bool {
 		zjMemberHasEscape(data, "id", 1)
 }
 
+func zjCheckTrustedEvent(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted Event
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked Event
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusRawHolder returns data with the leading '+' removed from every
 // quoted value on one of RawHolder's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -399,6 +419,26 @@ func zjDecodeStricterAllowedRawHolder(data []byte) bool {
 func zjEscapedDirectLeafRawHolder(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from RawHolder
+}
+
+func zjCheckTrustedRawHolder(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted RawHolder
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked RawHolder
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusOmitZeroCases returns data with the leading '+' removed from every
@@ -445,6 +485,26 @@ func zjEscapedDirectLeafOmitZeroCases(data []byte) bool {
 		zjMemberHasEscape(data, "when", 1) ||
 		zjMemberHasEscape(data, "amount", 1) ||
 		zjMemberHasEscape(data, "id", 1)
+}
+
+func zjCheckTrustedOmitZeroCases(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted OmitZeroCases
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked OmitZeroCases
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusStringOptCases returns data with the leading '+' removed from every
@@ -497,6 +557,26 @@ func zjEscapedDirectLeafStringOptCases(data []byte) bool {
 	return false // no unescaping direct leaf reachable from StringOptCases
 }
 
+func zjCheckTrustedStringOptCases(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted StringOptCases
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked StringOptCases
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusAppenderCases returns data with the leading '+' removed from every
 // quoted value on one of AppenderCases's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -539,6 +619,26 @@ func zjDecodeStricterAllowedAppenderCases(data []byte) bool {
 func zjEscapedDirectLeafAppenderCases(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from AppenderCases
+}
+
+func zjCheckTrustedAppenderCases(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted AppenderCases
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked AppenderCases
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusMapFieldsLike returns data with the leading '+' removed from every
@@ -585,6 +685,26 @@ func zjEscapedDirectLeafMapFieldsLike(data []byte) bool {
 	return false // no unescaping direct leaf reachable from MapFieldsLike
 }
 
+func zjCheckTrustedMapFieldsLike(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted MapFieldsLike
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked MapFieldsLike
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusEventLeg returns data with the leading '+' removed from every
 // quoted value on one of EventLeg's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -627,6 +747,26 @@ func zjDecodeStricterAllowedEventLeg(data []byte) bool {
 func zjEscapedDirectLeafEventLeg(data []byte) bool {
 	return false ||
 		zjMemberHasEscape(data, "ratio", 1)
+}
+
+func zjCheckTrustedEventLeg(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted EventLeg
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked EventLeg
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusEmbedMid returns data with the leading '+' removed from every
@@ -673,6 +813,26 @@ func zjEscapedDirectLeafEmbedMid(data []byte) bool {
 	return false // no unescaping direct leaf reachable from EmbedMid
 }
 
+func zjCheckTrustedEmbedMid(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted EmbedMid
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked EmbedMid
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusEventProjection returns data with the leading '+' removed from every
 // quoted value on one of EventProjection's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -715,6 +875,26 @@ func zjDecodeStricterAllowedEventProjection(data []byte) bool {
 func zjEscapedDirectLeafEventProjection(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from EventProjection
+}
+
+func zjCheckTrustedEventProjection(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted EventProjection
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked EventProjection
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusInteractionOmitZero returns data with the leading '+' removed from every
@@ -762,6 +942,26 @@ func zjEscapedDirectLeafInteractionOmitZero(data []byte) bool {
 		zjMemberHasEscape(data, "both", 1)
 }
 
+func zjCheckTrustedInteractionOmitZero(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted InteractionOmitZero
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked InteractionOmitZero
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusMapPointerMethods returns data with the leading '+' removed from every
 // quoted value on one of MapPointerMethods's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -804,6 +1004,26 @@ func zjDecodeStricterAllowedMapPointerMethods(data []byte) bool {
 func zjEscapedDirectLeafMapPointerMethods(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from MapPointerMethods
+}
+
+func zjCheckTrustedMapPointerMethods(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted MapPointerMethods
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked MapPointerMethods
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusReuseSemantics returns data with the leading '+' removed from every
@@ -850,6 +1070,26 @@ func zjEscapedDirectLeafReuseSemantics(data []byte) bool {
 	return false // no unescaping direct leaf reachable from ReuseSemantics
 }
 
+func zjCheckTrustedReuseSemantics(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted ReuseSemantics
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked ReuseSemantics
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusOrderedSideEffects returns data with the leading '+' removed from every
 // quoted value on one of OrderedSideEffects's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -892,6 +1132,26 @@ func zjDecodeStricterAllowedOrderedSideEffects(data []byte) bool {
 func zjEscapedDirectLeafOrderedSideEffects(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from OrderedSideEffects
+}
+
+func zjCheckTrustedOrderedSideEffects(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted OrderedSideEffects
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked OrderedSideEffects
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusPoolAppenderHolder returns data with the leading '+' removed from every
@@ -938,6 +1198,26 @@ func zjEscapedDirectLeafPoolAppenderHolder(data []byte) bool {
 	return false // no unescaping direct leaf reachable from PoolAppenderHolder
 }
 
+func zjCheckTrustedPoolAppenderHolder(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted PoolAppenderHolder
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked PoolAppenderHolder
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusBytesCases returns data with the leading '+' removed from every
 // quoted value on one of BytesCases's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -980,6 +1260,26 @@ func zjDecodeStricterAllowedBytesCases(data []byte) bool {
 func zjEscapedDirectLeafBytesCases(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from BytesCases
+}
+
+func zjCheckTrustedBytesCases(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted BytesCases
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked BytesCases
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusEventList returns data with the leading '+' removed from every
@@ -1038,6 +1338,26 @@ func zjEscapedDirectLeafEventList(data []byte) bool {
 		zjMemberHasEscape(data, "id", 2)
 }
 
+func zjCheckTrustedEventList(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted EventList
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked EventList
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusLegPtrList returns data with the leading '+' removed from every
 // quoted value on one of LegPtrList's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1080,6 +1400,26 @@ func zjDecodeStricterAllowedLegPtrList(data []byte) bool {
 func zjEscapedDirectLeafLegPtrList(data []byte) bool {
 	return false ||
 		zjMemberHasEscape(data, "ratio", 2)
+}
+
+func zjCheckTrustedLegPtrList(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted LegPtrList
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked LegPtrList
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusLegIndex returns data with the leading '+' removed from every
@@ -1126,6 +1466,26 @@ func zjEscapedDirectLeafLegIndex(data []byte) bool {
 		zjMemberHasEscape(data, "ratio", 2)
 }
 
+func zjCheckTrustedLegIndex(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted LegIndex
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked LegIndex
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusPointerMethodIndex returns data with the leading '+' removed from every
 // quoted value on one of PointerMethodIndex's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1168,6 +1528,26 @@ func zjDecodeStricterAllowedPointerMethodIndex(data []byte) bool {
 func zjEscapedDirectLeafPointerMethodIndex(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from PointerMethodIndex
+}
+
+func zjCheckTrustedPointerMethodIndex(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted PointerMethodIndex
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked PointerMethodIndex
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusPointerQuotedIndex returns data with the leading '+' removed from every
@@ -1214,6 +1594,26 @@ func zjEscapedDirectLeafPointerQuotedIndex(data []byte) bool {
 	return false // no unescaping direct leaf reachable from PointerQuotedIndex
 }
 
+func zjCheckTrustedPointerQuotedIndex(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted PointerQuotedIndex
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked PointerQuotedIndex
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusRawList returns data with the leading '+' removed from every
 // quoted value on one of RawList's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1256,6 +1656,26 @@ func zjDecodeStricterAllowedRawList(data []byte) bool {
 func zjEscapedDirectLeafRawList(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from RawList
+}
+
+func zjCheckTrustedRawList(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted RawList
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked RawList
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusRawIndex returns data with the leading '+' removed from every
@@ -1302,6 +1722,26 @@ func zjEscapedDirectLeafRawIndex(data []byte) bool {
 	return false // no unescaping direct leaf reachable from RawIndex
 }
 
+func zjCheckTrustedRawIndex(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted RawIndex
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked RawIndex
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusRawHolderList returns data with the leading '+' removed from every
 // quoted value on one of RawHolderList's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1344,6 +1784,26 @@ func zjDecodeStricterAllowedRawHolderList(data []byte) bool {
 func zjEscapedDirectLeafRawHolderList(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from RawHolderList
+}
+
+func zjCheckTrustedRawHolderList(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted RawHolderList
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked RawHolderList
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusDecimalList returns data with the leading '+' removed from every
@@ -1390,6 +1850,26 @@ func zjEscapedDirectLeafDecimalList(data []byte) bool {
 		zjMemberHasEscape(data, "DecimalList", 0)
 }
 
+func zjCheckTrustedDecimalList(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted DecimalList
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked DecimalList
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusPointerCollections returns data with the leading '+' removed from every
 // quoted value on one of PointerCollections's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1432,6 +1912,26 @@ func zjDecodeStricterAllowedPointerCollections(data []byte) bool {
 func zjEscapedDirectLeafPointerCollections(data []byte) bool {
 	return false ||
 		zjMemberHasEscape(data, "ratio", 3)
+}
+
+func zjCheckTrustedPointerCollections(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted PointerCollections
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked PointerCollections
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusNumberCases returns data with the leading '+' removed from every
@@ -1484,6 +1984,26 @@ func zjEscapedDirectLeafNumberCases(data []byte) bool {
 	return false // no unescaping direct leaf reachable from NumberCases
 }
 
+func zjCheckTrustedNumberCases(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted NumberCases
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked NumberCases
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusNullCases returns data with the leading '+' removed from every
 // quoted value on one of NullCases's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1526,6 +2046,282 @@ func zjDecodeStricterAllowedNullCases(data []byte) bool {
 func zjEscapedDirectLeafNullCases(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from NullCases
+}
+
+func zjCheckTrustedNullCases(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted NullCases
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked NullCases
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
+// zjStripStringOptPlusFoldNames returns data with the leading '+' removed from every
+// quoted value on one of FoldNames's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusFoldNames(data []byte) ([]byte, bool) {
+	return data, false // FoldNames has no `,string` fields
+}
+
+// zjStricterCausedByPlusFoldNames reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusFoldNames(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusFoldNames(data)
+	if !ok {
+		return false
+	}
+	var v FoldNames
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerFoldNames reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from FoldNames — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerFoldNames(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from FoldNames
+}
+
+// zjDecodeStricterAllowedFoldNames is the decode-error oracle-direction allowlist for
+// FoldNames: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedFoldNames(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusFoldNames(data)
+}
+
+// zjEscapedDirectLeafFoldNames reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from FoldNames with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafFoldNames(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from FoldNames
+}
+
+func zjCheckTrustedFoldNames(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted FoldNames
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked FoldNames
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
+// zjStripStringOptPlusFoldUnicodeNames returns data with the leading '+' removed from every
+// quoted value on one of FoldUnicodeNames's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusFoldUnicodeNames(data []byte) ([]byte, bool) {
+	return data, false // FoldUnicodeNames has no `,string` fields
+}
+
+// zjStricterCausedByPlusFoldUnicodeNames reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusFoldUnicodeNames(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusFoldUnicodeNames(data)
+	if !ok {
+		return false
+	}
+	var v FoldUnicodeNames
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerFoldUnicodeNames reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from FoldUnicodeNames — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerFoldUnicodeNames(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from FoldUnicodeNames
+}
+
+// zjDecodeStricterAllowedFoldUnicodeNames is the decode-error oracle-direction allowlist for
+// FoldUnicodeNames: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedFoldUnicodeNames(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusFoldUnicodeNames(data)
+}
+
+// zjEscapedDirectLeafFoldUnicodeNames reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from FoldUnicodeNames with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafFoldUnicodeNames(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from FoldUnicodeNames
+}
+
+func zjCheckTrustedFoldUnicodeNames(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted FoldUnicodeNames
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked FoldUnicodeNames
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
+// zjStripStringOptPlusOrderedLookup returns data with the leading '+' removed from every
+// quoted value on one of OrderedLookup's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusOrderedLookup(data []byte) ([]byte, bool) {
+	return data, false // OrderedLookup has no `,string` fields
+}
+
+// zjStricterCausedByPlusOrderedLookup reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusOrderedLookup(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusOrderedLookup(data)
+	if !ok {
+		return false
+	}
+	var v OrderedLookup
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerOrderedLookup reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from OrderedLookup — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerOrderedLookup(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from OrderedLookup
+}
+
+// zjDecodeStricterAllowedOrderedLookup is the decode-error oracle-direction allowlist for
+// OrderedLookup: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedOrderedLookup(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusOrderedLookup(data)
+}
+
+// zjEscapedDirectLeafOrderedLookup reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from OrderedLookup with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafOrderedLookup(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from OrderedLookup
+}
+
+func zjCheckTrustedOrderedLookup(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted OrderedLookup
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked OrderedLookup
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
+// zjStripStringOptPlusIgnoredOnly returns data with the leading '+' removed from every
+// quoted value on one of IgnoredOnly's `,string` fields (at that field's own nesting
+// depth), and whether there was any to remove.
+func zjStripStringOptPlusIgnoredOnly(data []byte) ([]byte, bool) {
+	return data, false // IgnoredOnly has no `,string` fields
+}
+
+// zjStricterCausedByPlusIgnoredOnly reports whether zerojson's rejection of data is
+// explained by a leading '+' on a `,string` member alone: with those '+'
+// bytes removed (and nothing else changed) zerojson must accept the document.
+func zjStricterCausedByPlusIgnoredOnly(data []byte) bool {
+	fixed, ok := zjStripStringOptPlusIgnoredOnly(data)
+	if !ok {
+		return false
+	}
+	var v IgnoredOnly
+	return v.UnmarshalZJSON(fixed) == nil
+}
+
+// zjNullOnValueUnmarshalerIgnoredOnly reports whether data delivers a JSON null to a
+// value-typed ZeroJSONQuotedInt64 marker type reachable from IgnoredOnly — the
+// documented divergence where encoding/json calls the type's UnmarshalJSON
+// ("null") and zerojson's quoted-int64 fast path leaves the value untouched.
+func zjNullOnValueUnmarshalerIgnoredOnly(data []byte) bool {
+	_ = data
+	return false // no value-typed quoted-int64 marker reachable from IgnoredOnly
+}
+
+// zjDecodeStricterAllowedIgnoredOnly is the decode-error oracle-direction allowlist for
+// IgnoredOnly: only the documented Go 1.27 v1-on-v2 `,string` leading-'+' drift, and
+// only when that drift alone accounts for the rejection.
+func zjDecodeStricterAllowedIgnoredOnly(data []byte) bool {
+	return zjStdlibJSONV2 && zjStricterCausedByPlusIgnoredOnly(data)
+}
+
+// zjEscapedDirectLeafIgnoredOnly reports whether data spells a timestamp, UUID,
+// quoted-int64 marker, or registered leaf reachable from IgnoredOnly with a JSON
+// escape — the documented divergence where zerojson unescapes before parsing
+// and encoding/json's UnmarshalJSON sees the raw bytes.
+func zjEscapedDirectLeafIgnoredOnly(data []byte) bool {
+	_ = data
+	return false // no unescaping direct leaf reachable from IgnoredOnly
+}
+
+func zjCheckTrustedIgnoredOnly(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted IgnoredOnly
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked IgnoredOnly
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 // zjStripStringOptPlusEventMeta returns data with the leading '+' removed from every
@@ -1572,6 +2368,26 @@ func zjEscapedDirectLeafEventMeta(data []byte) bool {
 		zjMemberHasEscape(data, "cost", 1)
 }
 
+func zjCheckTrustedEventMeta(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted EventMeta
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked EventMeta
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
+}
+
 // zjStripStringOptPlusReuseInner returns data with the leading '+' removed from every
 // quoted value on one of ReuseInner's `,string` fields (at that field's own nesting
 // depth), and whether there was any to remove.
@@ -1614,6 +2430,26 @@ func zjDecodeStricterAllowedReuseInner(data []byte) bool {
 func zjEscapedDirectLeafReuseInner(data []byte) bool {
 	_ = data
 	return false // no unescaping direct leaf reachable from ReuseInner
+}
+
+func zjCheckTrustedReuseInner(t *testing.T, data []byte) {
+	input := append([]byte(nil), data...)
+	var trusted ReuseInner
+	trustedErr := trusted.UnmarshalZJSONTrusted(input)
+	if zerojson.Valid(data) != nil {
+		return
+	}
+	for i := range input {
+		input[i] = 'x'
+	}
+	var checked ReuseInner
+	checkedErr := checked.UnmarshalZJSON(data)
+	if (trustedErr == nil) != (checkedErr == nil) || trustedErr != nil && trustedErr.Error() != checkedErr.Error() {
+		t.Fatalf("trusted decode error %v, checked decode error %v, for %q", trustedErr, checkedErr, data)
+	}
+	if !reflect.DeepEqual(&trusted, &checked) {
+		t.Fatalf("trusted decode differs for %q\ntrusted: %+v\nchecked: %+v", data, &trusted, &checked)
+	}
 }
 
 func zjFuzzHugeExponent(data []byte) bool {
@@ -1777,6 +2613,7 @@ func FuzzEventZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedEvent(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw Event
@@ -2052,6 +2889,7 @@ func FuzzRawHolderZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedRawHolder(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw RawHolder
@@ -2261,6 +3099,7 @@ func FuzzOmitZeroCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedOmitZeroCases(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw OmitZeroCases
@@ -2429,6 +3268,7 @@ func FuzzStringOptCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedStringOptCases(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw StringOptCases
@@ -2567,6 +3407,7 @@ func FuzzAppenderCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedAppenderCases(t, data)
 		oracleData := data
 		{
 			var zjRaw AppenderCases
@@ -2702,6 +3543,7 @@ func FuzzMapFieldsLikeZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedMapFieldsLike(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw MapFieldsLike
@@ -2852,6 +3694,7 @@ func FuzzEventLegZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedEventLeg(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw EventLeg
@@ -3014,6 +3857,7 @@ func FuzzEmbedMidZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedEmbedMid(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw EmbedMid
@@ -3164,6 +4008,7 @@ func FuzzEventProjectionZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedEventProjection(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw EventProjection
@@ -3316,6 +4161,7 @@ func FuzzInteractionOmitZeroZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedInteractionOmitZero(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw InteractionOmitZero
@@ -3464,6 +4310,7 @@ func FuzzMapPointerMethodsZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedMapPointerMethods(t, data)
 		oracleData := data
 		{
 			var zjRaw MapPointerMethods
@@ -3596,6 +4443,7 @@ func FuzzReuseSemanticsZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedReuseSemantics(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw ReuseSemantics
@@ -3732,6 +4580,7 @@ func FuzzOrderedSideEffectsZJSON(f *testing.F) {
 	f.Add([]byte(`{} x`))
 	f.Add([]byte("{\"first\":null}"))
 	f.Add([]byte("{\"first\":\"bad\"}"))
+	f.Add([]byte("{\"inner\":{}}"))
 	f.Add([]byte("{\"last\":1}"))
 	f.Add([]byte("{\"last\":\"1\"}"))
 	f.Add([]byte("{\"last\":1,\"last\":2}"))
@@ -3745,12 +4594,13 @@ func FuzzOrderedSideEffectsZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedOrderedSideEffects(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw OrderedSideEffects
 			stdErr := json.Unmarshal(oracleData, &stdRaw)
 			zjErr := zjRaw.UnmarshalZJSON(data)
-			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Last")) {
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Inner") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Last")) {
 				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
 			}
 		}
@@ -3823,14 +4673,18 @@ func FuzzOrderedSideEffectsZJSON(f *testing.F) {
 }
 
 func FuzzOrderedSideEffectsZJSONSequence(f *testing.F) {
-	f.Add([]byte("{}"), []byte("{}"), []byte("{\"first\":null}"), []byte("{\"last\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{}"), []byte("{\"first\":null}"), []byte("{\"inner\":{}}"), uint8(0x0))
 	f.Add([]byte("{}"), []byte("{}"), []byte("{"), []byte("{\"first\":null}"), uint8(0xf))
 	f.Add([]byte("{}"), []byte("{\"first\":null}"), []byte("{}"), []byte("["), uint8(0x5))
-	f.Add([]byte("{"), []byte("{}"), []byte("{\"last\":1}"), []byte("{}"), uint8(0xa))
-	f.Add([]byte("{\"first\":null}"), []byte("{}"), []byte("{\"last\":1}"), []byte("{}"), uint8(0x0))
-	f.Add([]byte("{}"), []byte("{\"first\":null}"), []byte("{"), []byte("{\"last\":1}"), uint8(0xf))
-	f.Add([]byte("{\"first\":null}"), []byte("{\"last\":1}"), []byte("{}"), []byte("["), uint8(0x5))
-	f.Add([]byte("{"), []byte("{\"first\":null}"), []byte("{}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{"), []byte("{}"), []byte("{\"inner\":{}}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"first\":null}"), []byte("{}"), []byte("{\"inner\":{}}"), []byte("{\"last\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"first\":null}"), []byte("{"), []byte("{\"inner\":{}}"), uint8(0xf))
+	f.Add([]byte("{\"first\":null}"), []byte("{\"inner\":{}}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"first\":null}"), []byte("{\"last\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"inner\":{}}"), []byte("{}"), []byte("{\"last\":1}"), []byte("{}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"inner\":{}}"), []byte("{"), []byte("{\"last\":1}"), uint8(0xf))
+	f.Add([]byte("{\"inner\":{}}"), []byte("{\"last\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"inner\":{}}"), []byte("{}"), []byte("{}"), uint8(0xa))
 	f.Add([]byte("{\"last\":1}"), []byte("{}"), []byte("{}"), []byte("{\"first\":null}"), uint8(0x0))
 	f.Add([]byte("{}"), []byte("{\"last\":1}"), []byte("{"), []byte("{}"), uint8(0xf))
 	f.Add([]byte("{\"last\":1}"), []byte("{}"), []byte("{}"), []byte("["), uint8(0x5))
@@ -3881,6 +4735,7 @@ func FuzzPoolAppenderHolderZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedPoolAppenderHolder(t, data)
 		oracleData := data
 		{
 			var zjRaw PoolAppenderHolder
@@ -4017,6 +4872,7 @@ func FuzzBytesCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedBytesCases(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw BytesCases
@@ -4177,6 +5033,7 @@ func FuzzEventListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedEventList(t, data)
 		oracleData := data
 		{
 			var zjRaw EventList
@@ -4295,6 +5152,7 @@ func FuzzLegPtrListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedLegPtrList(t, data)
 		oracleData := data
 		{
 			var zjRaw LegPtrList
@@ -4413,6 +5271,7 @@ func FuzzLegIndexZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedLegIndex(t, data)
 		oracleData := data
 		{
 			var zjRaw LegIndex
@@ -4531,6 +5390,7 @@ func FuzzPointerMethodIndexZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedPointerMethodIndex(t, data)
 		oracleData := data
 		{
 			var zjRaw PointerMethodIndex
@@ -4649,6 +5509,7 @@ func FuzzPointerQuotedIndexZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedPointerQuotedIndex(t, data)
 		oracleData := data
 		{
 			var zjRaw PointerQuotedIndex
@@ -4768,6 +5629,7 @@ func FuzzRawListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedRawList(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw RawList
@@ -4925,6 +5787,7 @@ func FuzzRawIndexZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedRawIndex(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw RawIndex
@@ -5081,6 +5944,7 @@ func FuzzRawHolderListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedRawHolderList(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw RawHolderList
@@ -5233,6 +6097,7 @@ func FuzzDecimalListZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedDecimalList(t, data)
 		oracleData := data
 		{
 			var zjRaw DecimalList
@@ -5360,6 +6225,7 @@ func FuzzPointerCollectionsZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedPointerCollections(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw PointerCollections
@@ -5522,6 +6388,7 @@ func FuzzNumberCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedNumberCases(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw NumberCases
@@ -5686,6 +6553,7 @@ func FuzzNullCasesZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedNullCases(t, data)
 		oracleData := data
 		{
 			var zjRaw NullCases
@@ -5813,6 +6681,762 @@ func FuzzNullCasesZJSONSequence(f *testing.F) {
 	})
 }
 
+func FuzzFoldNamesZJSON(f *testing.F) {
+	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
+	f.Add([]byte("{\"K\":1}"))
+	f.Add([]byte("{\"K\":\"1\"}"))
+	f.Add([]byte("{\"K\":1,\"K\":2}"))
+	f.Add([]byte("{\"K\":128}"))
+	f.Add([]byte("{\"K\":32768}"))
+	f.Add([]byte("{\"K\":2147483648}"))
+	f.Add([]byte("{\"K\":9223372036854775808}"))
+	f.Add([]byte("{\"K\":-129}"))
+	f.Add([]byte("{\"K\":-9223372036854775809}"))
+	f.Add([]byte("{\"k\":1}"))
+	f.Add([]byte("{\"k\":\"1\"}"))
+	f.Add([]byte("{\"k\":1,\"k\":2}"))
+	f.Add([]byte("{\"k\":128}"))
+	f.Add([]byte("{\"k\":32768}"))
+	f.Add([]byte("{\"k\":2147483648}"))
+	f.Add([]byte("{\"k\":9223372036854775808}"))
+	f.Add([]byte("{\"k\":-129}"))
+	f.Add([]byte("{\"k\":-9223372036854775809}"))
+	f.Add([]byte("{\"ſize\":1}"))
+	f.Add([]byte("{\"ſize\":\"1\"}"))
+	f.Add([]byte("{\"ſize\":1,\"ſize\":2}"))
+	f.Add([]byte("{\"ſize\":128}"))
+	f.Add([]byte("{\"ſize\":32768}"))
+	f.Add([]byte("{\"ſize\":2147483648}"))
+	f.Add([]byte("{\"ſize\":9223372036854775808}"))
+	f.Add([]byte("{\"ſize\":-129}"))
+	f.Add([]byte("{\"ſize\":-9223372036854775809}"))
+	f.Add([]byte("{\"Size\":1}"))
+	f.Add([]byte("{\"Size\":\"1\"}"))
+	f.Add([]byte("{\"Size\":1,\"Size\":2}"))
+	f.Add([]byte("{\"Size\":128}"))
+	f.Add([]byte("{\"Size\":32768}"))
+	f.Add([]byte("{\"Size\":2147483648}"))
+	f.Add([]byte("{\"Size\":9223372036854775808}"))
+	f.Add([]byte("{\"Size\":-129}"))
+	f.Add([]byte("{\"Size\":-9223372036854775809}"))
+	f.Add([]byte("{\"café\":1}"))
+	f.Add([]byte("{\"café\":\"1\"}"))
+	f.Add([]byte("{\"café\":1,\"café\":2}"))
+	f.Add([]byte("{\"café\":128}"))
+	f.Add([]byte("{\"café\":32768}"))
+	f.Add([]byte("{\"café\":2147483648}"))
+	f.Add([]byte("{\"café\":9223372036854775808}"))
+	f.Add([]byte("{\"café\":-129}"))
+	f.Add([]byte("{\"café\":-9223372036854775809}"))
+	f.Add([]byte("{\"orderID\":1}"))
+	f.Add([]byte("{\"orderID\":\"1\"}"))
+	f.Add([]byte("{\"orderID\":1,\"orderID\":2}"))
+	f.Add([]byte("{\"orderID\":128}"))
+	f.Add([]byte("{\"orderID\":32768}"))
+	f.Add([]byte("{\"orderID\":2147483648}"))
+	f.Add([]byte("{\"orderID\":9223372036854775808}"))
+	f.Add([]byte("{\"orderID\":-129}"))
+	f.Add([]byte("{\"orderID\":-9223372036854775809}"))
+	f.Add([]byte("{\"OrderId\":1}"))
+	f.Add([]byte("{\"OrderId\":\"1\"}"))
+	f.Add([]byte("{\"OrderId\":1,\"OrderId\":2}"))
+	f.Add([]byte("{\"OrderId\":128}"))
+	f.Add([]byte("{\"OrderId\":32768}"))
+	f.Add([]byte("{\"OrderId\":2147483648}"))
+	f.Add([]byte("{\"OrderId\":9223372036854775808}"))
+	f.Add([]byte("{\"OrderId\":-129}"))
+	f.Add([]byte("{\"OrderId\":-9223372036854775809}"))
+	f.Add([]byte("{\"x-y_z\":1}"))
+	f.Add([]byte("{\"x-y_z\":\"1\"}"))
+	f.Add([]byte("{\"x-y_z\":1,\"x-y_z\":2}"))
+	f.Add([]byte("{\"x-y_z\":128}"))
+	f.Add([]byte("{\"x-y_z\":32768}"))
+	f.Add([]byte("{\"x-y_z\":2147483648}"))
+	f.Add([]byte("{\"x-y_z\":9223372036854775808}"))
+	f.Add([]byte("{\"x-y_z\":-129}"))
+	f.Add([]byte("{\"x-y_z\":-9223372036854775809}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_the_others\":1}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_the_others\":\"1\"}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_the_others\":1,\"a_declared_name_longer_than_the_others\":2}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_the_others\":128}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_the_others\":32768}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_the_others\":2147483648}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_the_others\":9223372036854775808}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_the_others\":-129}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_the_others\":-9223372036854775809}"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if zjFuzzHugeExponent(data) {
+			return
+		}
+		zjCheckTrustedFoldNames(t, data)
+		oracleData := data
+		{
+			var stdRaw, zjRaw FoldNames
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
+			zjErr := zjRaw.UnmarshalZJSON(data)
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Kelvin") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Lower") || !zjRawFieldEqual(&stdRaw, &zjRaw, "LongS") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Size") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Cafe") || !zjRawFieldEqual(&stdRaw, &zjRaw, "OrderID") || !zjRawFieldEqual(&stdRaw, &zjRaw, "OrderId") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Dashed") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Longest")) {
+				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
+			}
+		}
+		{
+			var zjRaw FoldNames
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedFoldNames(data) {
+				var stdRaw FoldNames
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
+					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
+				}
+			}
+		}
+		var seed FoldNames
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerFoldNames(data) && !zjEscapedDirectLeafFoldNames(data) {
+				var zj FoldNames
+				if zj.UnmarshalZJSON(data) == nil {
+					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
+				}
+			}
+			return
+		}
+		canon, err := json.Marshal(&seed)
+		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerFoldNames(canon) {
+			return
+		}
+		var viaStd FoldNames
+		if json.Unmarshal(canon, &viaStd) != nil {
+			return
+		}
+		var viaZJ FoldNames
+		if err := viaZJ.UnmarshalZJSON(canon); err != nil {
+			t.Fatalf("zerojson rejected canonical %q: %v", canon, err)
+		}
+		x, _ := json.Marshal(&viaStd)
+		y, _ := json.Marshal(&viaZJ)
+		if !bytes.Equal(x, y) {
+			t.Fatalf("decode divergence\ninput: %s\nstdlib: %s\nzerojson: %s", canon, x, y)
+		}
+		var viaFallback FoldNames
+		lFallback := zerojson.NewLexer(canon, false)
+		zjDecodeFallback_FoldNames(&lFallback, &viaFallback, &zjArenaFoldNames{})
+		lFallback.Finish()
+		if err := lFallback.Err(); err != nil {
+			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
+		}
+		if !reflect.DeepEqual(&viaFallback, &viaZJ) {
+			t.Fatalf("ordered-vs-fallback divergence\ninput: %s\nfallback-only: %+v\npublic (ordered+fallback): %+v", canon, &viaFallback, &viaZJ)
+		}
+		enc, err := viaZJ.AppendZJSON(nil)
+		if err != nil {
+			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
+		}
+		var reZJ FoldNames
+		if err := reZJ.UnmarshalZJSON(enc); err != nil {
+			t.Fatalf("zerojson could not re-decode its own output %q: %v", enc, err)
+		}
+		var reStd FoldNames
+		if err := json.Unmarshal(enc, &reStd); err != nil {
+			t.Fatalf("stdlib rejected zerojson output %q: %v", enc, err)
+		}
+	})
+}
+
+func FuzzFoldNamesZJSONSequence(f *testing.F) {
+	f.Add([]byte("{}"), []byte("{}"), []byte("{\"K\":1}"), []byte("{\"k\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{}"), []byte("{"), []byte("{\"K\":1}"), uint8(0xf))
+	f.Add([]byte("{}"), []byte("{\"K\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{}"), []byte("{\"k\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"K\":1}"), []byte("{}"), []byte("{\"k\":1}"), []byte("{\"ſize\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"K\":1}"), []byte("{"), []byte("{\"k\":1}"), uint8(0xf))
+	f.Add([]byte("{\"K\":1}"), []byte("{\"k\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"K\":1}"), []byte("{\"ſize\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"k\":1}"), []byte("{}"), []byte("{\"ſize\":1}"), []byte("{\"Size\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"k\":1}"), []byte("{"), []byte("{\"ſize\":1}"), uint8(0xf))
+	f.Add([]byte("{\"k\":1}"), []byte("{\"ſize\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"k\":1}"), []byte("{\"Size\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"ſize\":1}"), []byte("{}"), []byte("{\"Size\":1}"), []byte("{\"café\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"ſize\":1}"), []byte("{"), []byte("{\"Size\":1}"), uint8(0xf))
+	f.Add([]byte("{\"ſize\":1}"), []byte("{\"Size\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"ſize\":1}"), []byte("{\"café\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"Size\":1}"), []byte("{}"), []byte("{\"café\":1}"), []byte("{\"orderID\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"Size\":1}"), []byte("{"), []byte("{\"café\":1}"), uint8(0xf))
+	f.Add([]byte("{\"Size\":1}"), []byte("{\"café\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"Size\":1}"), []byte("{\"orderID\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"café\":1}"), []byte("{}"), []byte("{\"orderID\":1}"), []byte("{\"OrderId\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"café\":1}"), []byte("{"), []byte("{\"orderID\":1}"), uint8(0xf))
+	f.Add([]byte("{\"café\":1}"), []byte("{\"orderID\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"café\":1}"), []byte("{\"OrderId\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"orderID\":1}"), []byte("{}"), []byte("{\"OrderId\":1}"), []byte("{\"x-y_z\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"orderID\":1}"), []byte("{"), []byte("{\"OrderId\":1}"), uint8(0xf))
+	f.Add([]byte("{\"orderID\":1}"), []byte("{\"OrderId\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"orderID\":1}"), []byte("{\"x-y_z\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"OrderId\":1}"), []byte("{}"), []byte("{\"x-y_z\":1}"), []byte("{\"a_declared_name_longer_than_the_others\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"OrderId\":1}"), []byte("{"), []byte("{\"x-y_z\":1}"), uint8(0xf))
+	f.Add([]byte("{\"OrderId\":1}"), []byte("{\"x-y_z\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"OrderId\":1}"), []byte("{\"a_declared_name_longer_than_the_others\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"x-y_z\":1}"), []byte("{}"), []byte("{\"a_declared_name_longer_than_the_others\":1}"), []byte("{}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"x-y_z\":1}"), []byte("{"), []byte("{\"a_declared_name_longer_than_the_others\":1}"), uint8(0xf))
+	f.Add([]byte("{\"x-y_z\":1}"), []byte("{\"a_declared_name_longer_than_the_others\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"x-y_z\":1}"), []byte("{}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"a_declared_name_longer_than_the_others\":1}"), []byte("{}"), []byte("{}"), []byte("{\"K\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"a_declared_name_longer_than_the_others\":1}"), []byte("{"), []byte("{}"), uint8(0xf))
+	f.Add([]byte("{\"a_declared_name_longer_than_the_others\":1}"), []byte("{}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"a_declared_name_longer_than_the_others\":1}"), []byte("{\"K\":1}"), []byte("{}"), uint8(0xa))
+	f.Fuzz(func(t *testing.T, first, second, third, fourth []byte, modeMask uint8) {
+		inputs := [4][]byte{first, second, third, fourth}
+		for _, data := range inputs {
+			if zjFuzzHugeExponent(data) {
+				return
+			}
+		}
+		var d FoldNamesDecoder
+		for op, data := range inputs {
+			borrow := modeMask&(1<<uint(op)) != 0
+			pooledInput := append([]byte(nil), data...)
+			freshInput := append([]byte(nil), data...)
+			var got, want FoldNames
+			var gotErr, wantErr error
+			if borrow {
+				gotErr, wantErr = d.DecodeBorrow(pooledInput, &got), want.UnmarshalZJSONBorrow(freshInput)
+			} else {
+				gotErr, wantErr = d.Decode(pooledInput, &got), want.UnmarshalZJSON(freshInput)
+			}
+			if (gotErr != nil) != (wantErr != nil) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: decode error mismatch\ninput: %q\npooled: %v\nfresh: %v", op, borrow, modeMask, data, gotErr, wantErr)
+			}
+			if gotErr == nil && !reflect.DeepEqual(&got, &want) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: pooled result differs from fresh\ninput: %q\npooled: %#v\nfresh: %#v", op, borrow, modeMask, data, &got, &want)
+			}
+			if gotErr == nil && !borrow {
+				for i := range pooledInput {
+					pooledInput[i] = 0xa5
+				}
+				if !reflect.DeepEqual(&got, &want) {
+					t.Fatalf("op=%d mask=0x%x: copy-mode result aliases caller input after scribble\ninput: %q\npooled: %#v\nfresh: %#v", op, modeMask, data, &got, &want)
+				}
+			}
+		}
+	})
+}
+
+func FuzzFoldUnicodeNamesZJSON(f *testing.F) {
+	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
+	f.Add([]byte("{\"ılk\":1}"))
+	f.Add([]byte("{\"ılk\":\"1\"}"))
+	f.Add([]byte("{\"ılk\":1,\"ılk\":2}"))
+	f.Add([]byte("{\"ılk\":128}"))
+	f.Add([]byte("{\"ılk\":32768}"))
+	f.Add([]byte("{\"ılk\":2147483648}"))
+	f.Add([]byte("{\"ılk\":9223372036854775808}"))
+	f.Add([]byte("{\"ılk\":-129}"))
+	f.Add([]byte("{\"ılk\":-9223372036854775809}"))
+	f.Add([]byte("{\"café\":1}"))
+	f.Add([]byte("{\"café\":\"1\"}"))
+	f.Add([]byte("{\"café\":1,\"café\":2}"))
+	f.Add([]byte("{\"café\":128}"))
+	f.Add([]byte("{\"café\":32768}"))
+	f.Add([]byte("{\"café\":2147483648}"))
+	f.Add([]byte("{\"café\":9223372036854775808}"))
+	f.Add([]byte("{\"café\":-129}"))
+	f.Add([]byte("{\"café\":-9223372036854775809}"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if zjFuzzHugeExponent(data) {
+			return
+		}
+		zjCheckTrustedFoldUnicodeNames(t, data)
+		oracleData := data
+		{
+			var stdRaw, zjRaw FoldUnicodeNames
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
+			zjErr := zjRaw.UnmarshalZJSON(data)
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "Ilk") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Cafe")) {
+				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
+			}
+		}
+		{
+			var zjRaw FoldUnicodeNames
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedFoldUnicodeNames(data) {
+				var stdRaw FoldUnicodeNames
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
+					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
+				}
+			}
+		}
+		var seed FoldUnicodeNames
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerFoldUnicodeNames(data) && !zjEscapedDirectLeafFoldUnicodeNames(data) {
+				var zj FoldUnicodeNames
+				if zj.UnmarshalZJSON(data) == nil {
+					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
+				}
+			}
+			return
+		}
+		canon, err := json.Marshal(&seed)
+		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerFoldUnicodeNames(canon) {
+			return
+		}
+		var viaStd FoldUnicodeNames
+		if json.Unmarshal(canon, &viaStd) != nil {
+			return
+		}
+		var viaZJ FoldUnicodeNames
+		if err := viaZJ.UnmarshalZJSON(canon); err != nil {
+			t.Fatalf("zerojson rejected canonical %q: %v", canon, err)
+		}
+		x, _ := json.Marshal(&viaStd)
+		y, _ := json.Marshal(&viaZJ)
+		if !bytes.Equal(x, y) {
+			t.Fatalf("decode divergence\ninput: %s\nstdlib: %s\nzerojson: %s", canon, x, y)
+		}
+		var viaFallback FoldUnicodeNames
+		lFallback := zerojson.NewLexer(canon, false)
+		zjDecodeFallback_FoldUnicodeNames(&lFallback, &viaFallback, &zjArenaFoldUnicodeNames{})
+		lFallback.Finish()
+		if err := lFallback.Err(); err != nil {
+			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
+		}
+		if !reflect.DeepEqual(&viaFallback, &viaZJ) {
+			t.Fatalf("ordered-vs-fallback divergence\ninput: %s\nfallback-only: %+v\npublic (ordered+fallback): %+v", canon, &viaFallback, &viaZJ)
+		}
+		enc, err := viaZJ.AppendZJSON(nil)
+		if err != nil {
+			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
+		}
+		var reZJ FoldUnicodeNames
+		if err := reZJ.UnmarshalZJSON(enc); err != nil {
+			t.Fatalf("zerojson could not re-decode its own output %q: %v", enc, err)
+		}
+		var reStd FoldUnicodeNames
+		if err := json.Unmarshal(enc, &reStd); err != nil {
+			t.Fatalf("stdlib rejected zerojson output %q: %v", enc, err)
+		}
+	})
+}
+
+func FuzzFoldUnicodeNamesZJSONSequence(f *testing.F) {
+	f.Add([]byte("{}"), []byte("{}"), []byte("{\"ılk\":1}"), []byte("{\"café\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{}"), []byte("{"), []byte("{\"ılk\":1}"), uint8(0xf))
+	f.Add([]byte("{}"), []byte("{\"ılk\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{}"), []byte("{\"café\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"ılk\":1}"), []byte("{}"), []byte("{\"café\":1}"), []byte("{}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"ılk\":1}"), []byte("{"), []byte("{\"café\":1}"), uint8(0xf))
+	f.Add([]byte("{\"ılk\":1}"), []byte("{\"café\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"ılk\":1}"), []byte("{}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"café\":1}"), []byte("{}"), []byte("{}"), []byte("{\"ılk\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"café\":1}"), []byte("{"), []byte("{}"), uint8(0xf))
+	f.Add([]byte("{\"café\":1}"), []byte("{}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"café\":1}"), []byte("{\"ılk\":1}"), []byte("{}"), uint8(0xa))
+	f.Fuzz(func(t *testing.T, first, second, third, fourth []byte, modeMask uint8) {
+		inputs := [4][]byte{first, second, third, fourth}
+		for _, data := range inputs {
+			if zjFuzzHugeExponent(data) {
+				return
+			}
+		}
+		var d FoldUnicodeNamesDecoder
+		for op, data := range inputs {
+			borrow := modeMask&(1<<uint(op)) != 0
+			pooledInput := append([]byte(nil), data...)
+			freshInput := append([]byte(nil), data...)
+			var got, want FoldUnicodeNames
+			var gotErr, wantErr error
+			if borrow {
+				gotErr, wantErr = d.DecodeBorrow(pooledInput, &got), want.UnmarshalZJSONBorrow(freshInput)
+			} else {
+				gotErr, wantErr = d.Decode(pooledInput, &got), want.UnmarshalZJSON(freshInput)
+			}
+			if (gotErr != nil) != (wantErr != nil) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: decode error mismatch\ninput: %q\npooled: %v\nfresh: %v", op, borrow, modeMask, data, gotErr, wantErr)
+			}
+			if gotErr == nil && !reflect.DeepEqual(&got, &want) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: pooled result differs from fresh\ninput: %q\npooled: %#v\nfresh: %#v", op, borrow, modeMask, data, &got, &want)
+			}
+			if gotErr == nil && !borrow {
+				for i := range pooledInput {
+					pooledInput[i] = 0xa5
+				}
+				if !reflect.DeepEqual(&got, &want) {
+					t.Fatalf("op=%d mask=0x%x: copy-mode result aliases caller input after scribble\ninput: %q\npooled: %#v\nfresh: %#v", op, modeMask, data, &got, &want)
+				}
+			}
+		}
+	})
+}
+
+func FuzzOrderedLookupZJSON(f *testing.F) {
+	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
+	f.Add([]byte("{\"n\":1}"))
+	f.Add([]byte("{\"n\":\"1\"}"))
+	f.Add([]byte("{\"n\":1,\"n\":2}"))
+	f.Add([]byte("{\"n\":128}"))
+	f.Add([]byte("{\"n\":32768}"))
+	f.Add([]byte("{\"n\":2147483648}"))
+	f.Add([]byte("{\"n\":9223372036854775808}"))
+	f.Add([]byte("{\"n\":-129}"))
+	f.Add([]byte("{\"n\":-9223372036854775809}"))
+	f.Add([]byte("{\"no\":1}"))
+	f.Add([]byte("{\"no\":\"1\"}"))
+	f.Add([]byte("{\"no\":1,\"no\":2}"))
+	f.Add([]byte("{\"no\":128}"))
+	f.Add([]byte("{\"no\":32768}"))
+	f.Add([]byte("{\"no\":2147483648}"))
+	f.Add([]byte("{\"no\":9223372036854775808}"))
+	f.Add([]byte("{\"no\":-129}"))
+	f.Add([]byte("{\"no\":-9223372036854775809}"))
+	f.Add([]byte("{\"nos\":1}"))
+	f.Add([]byte("{\"nos\":\"1\"}"))
+	f.Add([]byte("{\"nos\":1,\"nos\":2}"))
+	f.Add([]byte("{\"nos\":128}"))
+	f.Add([]byte("{\"nos\":32768}"))
+	f.Add([]byte("{\"nos\":2147483648}"))
+	f.Add([]byte("{\"nos\":9223372036854775808}"))
+	f.Add([]byte("{\"nos\":-129}"))
+	f.Add([]byte("{\"nos\":-9223372036854775809}"))
+	f.Add([]byte("{\"ID\":1}"))
+	f.Add([]byte("{\"ID\":\"1\"}"))
+	f.Add([]byte("{\"ID\":1,\"ID\":2}"))
+	f.Add([]byte("{\"ID\":128}"))
+	f.Add([]byte("{\"ID\":32768}"))
+	f.Add([]byte("{\"ID\":2147483648}"))
+	f.Add([]byte("{\"ID\":9223372036854775808}"))
+	f.Add([]byte("{\"ID\":-129}"))
+	f.Add([]byte("{\"ID\":-9223372036854775809}"))
+	f.Add([]byte("{\"id\":1}"))
+	f.Add([]byte("{\"id\":\"1\"}"))
+	f.Add([]byte("{\"id\":1,\"id\":2}"))
+	f.Add([]byte("{\"id\":128}"))
+	f.Add([]byte("{\"id\":32768}"))
+	f.Add([]byte("{\"id\":2147483648}"))
+	f.Add([]byte("{\"id\":9223372036854775808}"))
+	f.Add([]byte("{\"id\":-129}"))
+	f.Add([]byte("{\"id\":-9223372036854775809}"))
+	f.Add([]byte("{\"-\":1}"))
+	f.Add([]byte("{\"-\":\"1\"}"))
+	f.Add([]byte("{\"-\":1,\"-\":2}"))
+	f.Add([]byte("{\"-\":128}"))
+	f.Add([]byte("{\"-\":32768}"))
+	f.Add([]byte("{\"-\":2147483648}"))
+	f.Add([]byte("{\"-\":9223372036854775808}"))
+	f.Add([]byte("{\"-\":-129}"))
+	f.Add([]byte("{\"-\":-9223372036854775809}"))
+	f.Add([]byte("{\"x-y\":1}"))
+	f.Add([]byte("{\"x-y\":\"1\"}"))
+	f.Add([]byte("{\"x-y\":1,\"x-y\":2}"))
+	f.Add([]byte("{\"x-y\":128}"))
+	f.Add([]byte("{\"x-y\":32768}"))
+	f.Add([]byte("{\"x-y\":2147483648}"))
+	f.Add([]byte("{\"x-y\":9223372036854775808}"))
+	f.Add([]byte("{\"x-y\":-129}"))
+	f.Add([]byte("{\"x-y\":-9223372036854775809}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":1}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":\"1\"}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":1,\"a_declared_name_longer_than_thirty_two\":2}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":128}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":32768}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":2147483648}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":9223372036854775808}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":-129}"))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":-9223372036854775809}"))
+	f.Add([]byte("{\"last\":\"x\"}"))
+	f.Add([]byte("{\"last\":1}"))
+	f.Add([]byte("{\"last\":\"x\",\"last\":\"y\"}"))
+	f.Add([]byte("{\"last\":\"\\u0078\"}"))
+	f.Add(append(append([]byte("{\"last\":\""), byte(0xff)), []byte("\"}")...))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if zjFuzzHugeExponent(data) {
+			return
+		}
+		zjCheckTrustedOrderedLookup(t, data)
+		oracleData := data
+		{
+			var stdRaw, zjRaw OrderedLookup
+			stdErr := json.Unmarshal(oracleData, &stdRaw)
+			zjErr := zjRaw.UnmarshalZJSON(data)
+			if stdErr == nil && zjErr == nil && (!zjRawFieldEqual(&stdRaw, &zjRaw, "N") || !zjRawFieldEqual(&stdRaw, &zjRaw, "No") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Nos") || !zjRawFieldEqual(&stdRaw, &zjRaw, "UpID") || !zjRawFieldEqual(&stdRaw, &zjRaw, "LowID") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Dash") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Dashed") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Long") || !zjRawFieldEqual(&stdRaw, &zjRaw, "Last")) {
+				t.Fatalf("raw decode value divergence\ninput: %q\nstdlib: %#v\nzerojson: %#v", data, &stdRaw, &zjRaw)
+			}
+		}
+		{
+			var zjRaw OrderedLookup
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedOrderedLookup(data) {
+				var stdRaw OrderedLookup
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
+					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
+				}
+			}
+		}
+		var seed OrderedLookup
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerOrderedLookup(data) && !zjEscapedDirectLeafOrderedLookup(data) {
+				var zj OrderedLookup
+				if zj.UnmarshalZJSON(data) == nil {
+					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
+				}
+			}
+			return
+		}
+		canon, err := json.Marshal(&seed)
+		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerOrderedLookup(canon) {
+			return
+		}
+		var viaStd OrderedLookup
+		if json.Unmarshal(canon, &viaStd) != nil {
+			return
+		}
+		var viaZJ OrderedLookup
+		if err := viaZJ.UnmarshalZJSON(canon); err != nil {
+			t.Fatalf("zerojson rejected canonical %q: %v", canon, err)
+		}
+		x, _ := json.Marshal(&viaStd)
+		y, _ := json.Marshal(&viaZJ)
+		if !bytes.Equal(x, y) {
+			t.Fatalf("decode divergence\ninput: %s\nstdlib: %s\nzerojson: %s", canon, x, y)
+		}
+		var viaFallback OrderedLookup
+		lFallback := zerojson.NewLexer(canon, false)
+		zjDecodeFallback_OrderedLookup(&lFallback, &viaFallback, &zjArenaOrderedLookup{})
+		lFallback.Finish()
+		if err := lFallback.Err(); err != nil {
+			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
+		}
+		if !reflect.DeepEqual(&viaFallback, &viaZJ) {
+			t.Fatalf("ordered-vs-fallback divergence\ninput: %s\nfallback-only: %+v\npublic (ordered+fallback): %+v", canon, &viaFallback, &viaZJ)
+		}
+		enc, err := viaZJ.AppendZJSON(nil)
+		if err != nil {
+			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
+		}
+		var reZJ OrderedLookup
+		if err := reZJ.UnmarshalZJSON(enc); err != nil {
+			t.Fatalf("zerojson could not re-decode its own output %q: %v", enc, err)
+		}
+		var reStd OrderedLookup
+		if err := json.Unmarshal(enc, &reStd); err != nil {
+			t.Fatalf("stdlib rejected zerojson output %q: %v", enc, err)
+		}
+	})
+}
+
+func FuzzOrderedLookupZJSONSequence(f *testing.F) {
+	f.Add([]byte("{}"), []byte("{}"), []byte("{\"n\":1}"), []byte("{\"no\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{}"), []byte("{"), []byte("{\"n\":1}"), uint8(0xf))
+	f.Add([]byte("{}"), []byte("{\"n\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{}"), []byte("{\"no\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"n\":1}"), []byte("{}"), []byte("{\"no\":1}"), []byte("{\"nos\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"n\":1}"), []byte("{"), []byte("{\"no\":1}"), uint8(0xf))
+	f.Add([]byte("{\"n\":1}"), []byte("{\"no\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"n\":1}"), []byte("{\"nos\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"no\":1}"), []byte("{}"), []byte("{\"nos\":1}"), []byte("{\"ID\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"no\":1}"), []byte("{"), []byte("{\"nos\":1}"), uint8(0xf))
+	f.Add([]byte("{\"no\":1}"), []byte("{\"nos\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"no\":1}"), []byte("{\"ID\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"nos\":1}"), []byte("{}"), []byte("{\"ID\":1}"), []byte("{\"id\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"nos\":1}"), []byte("{"), []byte("{\"ID\":1}"), uint8(0xf))
+	f.Add([]byte("{\"nos\":1}"), []byte("{\"ID\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"nos\":1}"), []byte("{\"id\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"ID\":1}"), []byte("{}"), []byte("{\"id\":1}"), []byte("{\"-\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"ID\":1}"), []byte("{"), []byte("{\"id\":1}"), uint8(0xf))
+	f.Add([]byte("{\"ID\":1}"), []byte("{\"id\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"ID\":1}"), []byte("{\"-\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"id\":1}"), []byte("{}"), []byte("{\"-\":1}"), []byte("{\"x-y\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"id\":1}"), []byte("{"), []byte("{\"-\":1}"), uint8(0xf))
+	f.Add([]byte("{\"id\":1}"), []byte("{\"-\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"id\":1}"), []byte("{\"x-y\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"-\":1}"), []byte("{}"), []byte("{\"x-y\":1}"), []byte("{\"a_declared_name_longer_than_thirty_two\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"-\":1}"), []byte("{"), []byte("{\"x-y\":1}"), uint8(0xf))
+	f.Add([]byte("{\"-\":1}"), []byte("{\"x-y\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"-\":1}"), []byte("{\"a_declared_name_longer_than_thirty_two\":1}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"x-y\":1}"), []byte("{}"), []byte("{\"a_declared_name_longer_than_thirty_two\":1}"), []byte("{\"last\":\"x\"}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"x-y\":1}"), []byte("{"), []byte("{\"a_declared_name_longer_than_thirty_two\":1}"), uint8(0xf))
+	f.Add([]byte("{\"x-y\":1}"), []byte("{\"a_declared_name_longer_than_thirty_two\":1}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"x-y\":1}"), []byte("{\"last\":\"x\"}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":1}"), []byte("{}"), []byte("{\"last\":\"x\"}"), []byte("{}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"a_declared_name_longer_than_thirty_two\":1}"), []byte("{"), []byte("{\"last\":\"x\"}"), uint8(0xf))
+	f.Add([]byte("{\"a_declared_name_longer_than_thirty_two\":1}"), []byte("{\"last\":\"x\"}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"a_declared_name_longer_than_thirty_two\":1}"), []byte("{}"), []byte("{}"), uint8(0xa))
+	f.Add([]byte("{\"last\":\"x\"}"), []byte("{}"), []byte("{}"), []byte("{\"n\":1}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{\"last\":\"x\"}"), []byte("{"), []byte("{}"), uint8(0xf))
+	f.Add([]byte("{\"last\":\"x\"}"), []byte("{}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{\"last\":\"x\"}"), []byte("{\"n\":1}"), []byte("{}"), uint8(0xa))
+	f.Fuzz(func(t *testing.T, first, second, third, fourth []byte, modeMask uint8) {
+		inputs := [4][]byte{first, second, third, fourth}
+		for _, data := range inputs {
+			if zjFuzzHugeExponent(data) {
+				return
+			}
+		}
+		var d OrderedLookupDecoder
+		for op, data := range inputs {
+			borrow := modeMask&(1<<uint(op)) != 0
+			pooledInput := append([]byte(nil), data...)
+			freshInput := append([]byte(nil), data...)
+			var got, want OrderedLookup
+			var gotErr, wantErr error
+			if borrow {
+				gotErr, wantErr = d.DecodeBorrow(pooledInput, &got), want.UnmarshalZJSONBorrow(freshInput)
+			} else {
+				gotErr, wantErr = d.Decode(pooledInput, &got), want.UnmarshalZJSON(freshInput)
+			}
+			if (gotErr != nil) != (wantErr != nil) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: decode error mismatch\ninput: %q\npooled: %v\nfresh: %v", op, borrow, modeMask, data, gotErr, wantErr)
+			}
+			if gotErr == nil && !reflect.DeepEqual(&got, &want) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: pooled result differs from fresh\ninput: %q\npooled: %#v\nfresh: %#v", op, borrow, modeMask, data, &got, &want)
+			}
+			if gotErr == nil && !borrow {
+				for i := range pooledInput {
+					pooledInput[i] = 0xa5
+				}
+				if !reflect.DeepEqual(&got, &want) {
+					t.Fatalf("op=%d mask=0x%x: copy-mode result aliases caller input after scribble\ninput: %q\npooled: %#v\nfresh: %#v", op, modeMask, data, &got, &want)
+				}
+			}
+		}
+	})
+}
+
+func FuzzIgnoredOnlyZJSON(f *testing.F) {
+	f.Add([]byte(`{}`))
+	f.Add([]byte(`{} x`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if zjFuzzHugeExponent(data) {
+			return
+		}
+		zjCheckTrustedIgnoredOnly(t, data)
+		oracleData := data
+		{
+			var zjRaw IgnoredOnly
+			if zjErr := zjRaw.UnmarshalZJSON(data); zjErr != nil && !zjDecodeStricterAllowedIgnoredOnly(data) {
+				var stdRaw IgnoredOnly
+				if json.Unmarshal(oracleData, &stdRaw) == nil {
+					t.Fatalf("zerojson rejected %q that encoding/json accepted: %v", data, zjErr)
+				}
+			}
+		}
+		var seed IgnoredOnly
+		if serr := json.Unmarshal(oracleData, &seed); serr != nil {
+			if zjStdlibMustMirror(serr) && !zjNullOnValueUnmarshalerIgnoredOnly(data) && !zjEscapedDirectLeafIgnoredOnly(data) {
+				var zj IgnoredOnly
+				if zj.UnmarshalZJSON(data) == nil {
+					t.Fatalf("stdlib rejected value in %q (%v) but zerojson accepted it", data, serr)
+				}
+			}
+			return
+		}
+		canon, err := json.Marshal(&seed)
+		if err != nil {
+			return
+		}
+		if zjNullOnValueUnmarshalerIgnoredOnly(canon) {
+			return
+		}
+		var viaStd IgnoredOnly
+		if json.Unmarshal(canon, &viaStd) != nil {
+			return
+		}
+		var viaZJ IgnoredOnly
+		if err := viaZJ.UnmarshalZJSON(canon); err != nil {
+			t.Fatalf("zerojson rejected canonical %q: %v", canon, err)
+		}
+		x, _ := json.Marshal(&viaStd)
+		y, _ := json.Marshal(&viaZJ)
+		if !bytes.Equal(x, y) {
+			t.Fatalf("decode divergence\ninput: %s\nstdlib: %s\nzerojson: %s", canon, x, y)
+		}
+		var viaFallback IgnoredOnly
+		lFallback := zerojson.NewLexer(canon, false)
+		zjDecodeFallback_IgnoredOnly(&lFallback, &viaFallback, &zjArenaIgnoredOnly{})
+		lFallback.Finish()
+		if err := lFallback.Err(); err != nil {
+			t.Fatalf("fallback-only decode rejected canonical %q: %v", canon, err)
+		}
+		if !reflect.DeepEqual(&viaFallback, &viaZJ) {
+			t.Fatalf("ordered-vs-fallback divergence\ninput: %s\nfallback-only: %+v\npublic (ordered+fallback): %+v", canon, &viaFallback, &viaZJ)
+		}
+		enc, err := viaZJ.AppendZJSON(nil)
+		if err != nil {
+			return
+		}
+		expected, err := json.Marshal(&viaZJ)
+		if err == nil {
+			zjAssertJSONEqual(t, expected, enc)
+		}
+		var reZJ IgnoredOnly
+		if err := reZJ.UnmarshalZJSON(enc); err != nil {
+			t.Fatalf("zerojson could not re-decode its own output %q: %v", enc, err)
+		}
+		var reStd IgnoredOnly
+		if err := json.Unmarshal(enc, &reStd); err != nil {
+			t.Fatalf("stdlib rejected zerojson output %q: %v", enc, err)
+		}
+	})
+}
+
+func FuzzIgnoredOnlyZJSONSequence(f *testing.F) {
+	f.Add([]byte("{}"), []byte("{}"), []byte("{}"), []byte("{}"), uint8(0x0))
+	f.Add([]byte("{}"), []byte("{}"), []byte("{"), []byte("{}"), uint8(0xf))
+	f.Add([]byte("{}"), []byte("{}"), []byte("{}"), []byte("["), uint8(0x5))
+	f.Add([]byte("{"), []byte("{}"), []byte("{}"), []byte("{}"), uint8(0xa))
+	f.Fuzz(func(t *testing.T, first, second, third, fourth []byte, modeMask uint8) {
+		inputs := [4][]byte{first, second, third, fourth}
+		for _, data := range inputs {
+			if zjFuzzHugeExponent(data) {
+				return
+			}
+		}
+		var d IgnoredOnlyDecoder
+		for op, data := range inputs {
+			borrow := modeMask&(1<<uint(op)) != 0
+			pooledInput := append([]byte(nil), data...)
+			freshInput := append([]byte(nil), data...)
+			var got, want IgnoredOnly
+			var gotErr, wantErr error
+			if borrow {
+				gotErr, wantErr = d.DecodeBorrow(pooledInput, &got), want.UnmarshalZJSONBorrow(freshInput)
+			} else {
+				gotErr, wantErr = d.Decode(pooledInput, &got), want.UnmarshalZJSON(freshInput)
+			}
+			if (gotErr != nil) != (wantErr != nil) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: decode error mismatch\ninput: %q\npooled: %v\nfresh: %v", op, borrow, modeMask, data, gotErr, wantErr)
+			}
+			if gotErr == nil && !reflect.DeepEqual(&got, &want) {
+				t.Fatalf("op=%d borrow=%v mask=0x%x: pooled result differs from fresh\ninput: %q\npooled: %#v\nfresh: %#v", op, borrow, modeMask, data, &got, &want)
+			}
+			if gotErr == nil && !borrow {
+				for i := range pooledInput {
+					pooledInput[i] = 0xa5
+				}
+				if !reflect.DeepEqual(&got, &want) {
+					t.Fatalf("op=%d mask=0x%x: copy-mode result aliases caller input after scribble\ninput: %q\npooled: %#v\nfresh: %#v", op, modeMask, data, &got, &want)
+				}
+			}
+		}
+	})
+}
+
 func FuzzEventMetaZJSON(f *testing.F) {
 	f.Add([]byte(`{}`))
 	f.Add([]byte(`{} x`))
@@ -5830,6 +7454,7 @@ func FuzzEventMetaZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedEventMeta(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw EventMeta
@@ -5932,6 +7557,7 @@ func FuzzReuseInnerZJSON(f *testing.F) {
 		if zjFuzzHugeExponent(data) {
 			return
 		}
+		zjCheckTrustedReuseInner(t, data)
 		oracleData := data
 		{
 			var stdRaw, zjRaw ReuseInner

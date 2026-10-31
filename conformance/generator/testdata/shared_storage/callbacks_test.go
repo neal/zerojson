@@ -7,7 +7,7 @@ import (
 )
 
 func TestCallbackBoundary(t *testing.T) {
-	for _, doc := range []string{`{"A":1,"S":[2],"M":{"k":3},"Z":0}`, `{"A":1,"S":[2],"M":{"k":3}, "Z":0}`, `{"A":1,"S":[2],"M":{"k":3},"A":4}`} {
+	for _, doc := range []string{`{"A":1,"S":[2],"M":{"k":3},"Z":0}`, `{"A":1,"S":[2],"M":{"k":3}, "Z":0}`, `{"A":1,"S":[2],"M":{"k":3},"A":4}`, `{"A":1,"S":[2],"M":{"k":3},"I":{ },"Z":0}`} {
 		var got, want Callbacks
 		Calls = 0
 		e := got.UnmarshalZJSON([]byte(doc))

@@ -59,6 +59,18 @@ run_nounsafe() {
 run_modules test go test ./... -count=1
 run_modules vet go vet ./...
 
+# The runtime picks its encoding/json method checks by build tag; build and
+# test it with the jsonv2 experiment explicitly on and off, whichever the
+# toolchain defaults to (see jsonv2_*.go).
+for experiment in jsonv2 nojsonv2; do
+	echo "zerojson verify: root module with GOEXPERIMENT=$experiment"
+	(
+		cd "$root"
+		GOEXPERIMENT=$experiment go vet .
+		GOEXPERIMENT=$experiment go test . -count=1
+	)
+done
+
 if [[ $mode == race || $mode == full ]]; then
 	run_modules race go test -race ./... -count=1
 	run_checkptr_modules
@@ -69,7 +81,7 @@ if [[ $mode == full ]]; then
 	echo "zerojson verify: regenerate committed fixtures"
 	(
 		cd "$root/conformance"
-		go generate ./codec ./generator/compat ./generator/typeshape ./ownership
+		go generate ./codec ./generator/compat ./generator/typeshape ./ownership ./generator/xpkg/inner ./generator/xpkg
 	)
 	git -C "$root" diff --exit-code -- \
 		conformance/codec/easyjson_oracle_easyjson.go \
@@ -81,7 +93,11 @@ if [[ $mode == full ]]; then
 		conformance/generator/typeshape/oracle_gen.go \
 		conformance/generator/typeshape/oracle_gen_easyjson.go \
 		conformance/generator/typeshape/zerojson_gen.go \
-		conformance/ownership/zerojson_gen.go
+		conformance/ownership/zerojson_gen.go \
+		conformance/generator/xpkg/inner/zerojson_gen.go \
+		conformance/generator/xpkg/inner/zerojson_gen_fuzz_test.go \
+		conformance/generator/xpkg/zerojson_gen.go \
+		conformance/generator/xpkg/zerojson_gen_fuzz_test.go
 
 	echo "zerojson verify: exhaustive runtime domains"
 	(

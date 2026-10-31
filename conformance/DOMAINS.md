@@ -54,7 +54,7 @@ interactions, or caller lifetime violations unless stated explicitly.
 | `AppendInt64`, `AppendUint64`, `AppendQuotedInt64`, `AppendQuotedUint64` | 2^64 | **DIFFERENTIAL** vs `strconv.Append{Int,Uint}` + **TOTAL** over narrow ranges | `TestNarrowIntTotalDomain`, `TestInt64Uint64BoundaryComplete` (quoted) | `strconv` is the implementation |
 | `AppendBool` | {true,false} | **TOTAL** | existing writer/codec tests | none |
 | `AppendStringBytes` | wrapper of `AppendString` | inherits `AppendString` coverage | — | none |
-| `AppendInterface` | arbitrary `any` | **DIFFERENTIAL** — delegates to `encoding/json.Marshal` | codec interface tests | it *is* `encoding/json` |
+| `AppendInterface` | arbitrary `any` | **DIFFERENTIAL** vs `encoding/json.Marshal` (bytes, error text and type) on the running toolchain; fast paths for nil/bool/`time.Time`/escape-free strings and verbatim Marshaler/TextMarshaler output, everything else delegated | `TestAppendInterfaceMatchesMarshal`, `TestAppendInterfaceCallsMethodsOnce`, `FuzzAPIAppendInterface` | fast-path eligibility is conservative (ASCII, compact, no escapes), so stdlib remains the authority for every other spelling |
 
 ### decimal.go — dependency-free decimal parts
 

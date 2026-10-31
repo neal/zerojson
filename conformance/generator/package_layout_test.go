@@ -278,7 +278,11 @@ type Root struct { V any; N *int }
 			{"builtin_len", "package p\nvar len = 1\ntype T struct { X []int }\n", "-pool", "predeclared name len is already declared by hand"},
 			{"builtin_type", "package p\ntype byte string\ntype T struct { X int }\n", "-pool", "predeclared name byte is already declared by hand"},
 			{"pool_decoder_type", "package p\ntype T struct { X int `json:\"x\"` }\ntype TDecoder struct{}\n", "-pool", "type TDecoder is already declared by hand"},
-			{"easyjson_method", "package p\nimport \"github.com/mailru/easyjson/jwriter\"\ntype T struct { X int `json:\"x\"` }\nfunc (t T) MarshalEasyJSON(w *jwriter.Writer) { w.RawString(\"{}\") }\n", "-compat-easyjson", "method T.MarshalEasyJSON is already declared by hand"},
+			// A same-named method that is not easyjson's Marshaler shape still
+			// collides with the -compat-easyjson wrapper. (A real hand-written
+			// MarshalEasyJSON is refused earlier, as a custom wire format; see
+			// the behavior matrix's easyjson_only_* cases.)
+			{"easyjson_method", "package p\ntype T struct { X int `json:\"x\"` }\nfunc (t T) MarshalEasyJSON() {}\n", "-compat-easyjson", "method T.MarshalEasyJSON is already declared by hand"},
 			{"arena_type", "package p\ntype T struct { X int `json:\"x\"` }\ntype zjArenaT int\n", "-pool", "type zjArenaT is already declared by hand"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {

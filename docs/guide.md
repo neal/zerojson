@@ -38,6 +38,7 @@ or generator changes. Keep the runtime and generator on compatible versions;
 upgrading the tool does not automatically regenerate existing codecs.
 
 Optional flags add [reusable decoders](#reusable-decoders) (`-pool`),
+[trusted decoding](#trusted-decoding) (`-trusted`),
 [differential tests](#generated-differential-tests--tests) (`-tests`), or
 [stdlib wrappers](#compatibility-wrappers) (`-compat`). Use
 `go tool zerojsongen -help` for the full flag reference.
@@ -52,7 +53,10 @@ refuses to regenerate the codec while leaving that file to go stale.
 
 Hand-written custom methods are preserved during auto-discovery. Only methods
 from recognized zerojsongen/easyjson output are replaceable; an arbitrary
-`Code generated` header is insufficient. Explicit roots with hand-written
+`Code generated` header is insufficient. This applies to same-package structs
+and to named slices and maps used as fields: a field of a named map whose
+methods are generated output gets the inline map codec, so the result does not
+depend on whether the previous output was visible during regeneration. Explicit roots with hand-written
 JSON/Text methods are refused; remove those methods to generate a codec, or
 leave the type out of the explicit roots to retain its custom behavior.
 
@@ -66,9 +70,11 @@ following build reports that reference. Unrelated package errors still
 require manual repair.
 
 Generated declarations must not collide with hand-written ones: a type named
-like a `-pool` Decoder (`EventDecoder`), or a hand-written
-`MarshalEasyJSON` on a type `-compat-easyjson` would wrap, is refused with
-its location rather than written into a file that cannot compile.
+like a `-pool` Decoder (`EventDecoder`), or a hand-written method that
+`-compat-easyjson` would redeclare, is refused with its location rather than
+written into a file that cannot compile. (A hand-written easyjson
+`MarshalEasyJSON`/`UnmarshalEasyJSON` pair is refused earlier, as a custom
+wire format; see [easyjson migration](compatibility.md#easyjson-migration).)
 
 The generator refuses to overwrite a file without a recognized codec header
 before the package clause; `-force` overrides that protection. It cannot detect
@@ -134,7 +140,11 @@ does.
 - JSON/Text method pairs are delegated to. Signatures, not method names alone,
   determine interface satisfaction. Incomplete pairs are refused unless another
   supported codec takes precedence (such as an Appender/Reader pair).
-- `any` fields/elements/values encode through stdlib. Fresh interfaces decode
+- `any` fields/elements/values encode exactly as `json.Marshal` does. Nil,
+  bools, `time.Time`, strings needing no escapes, and JSON/Text marshalers
+  whose output stdlib would copy unchanged skip its reflection; other values,
+  and output stdlib would compact, escape, or reject, go through
+  `json.Marshal` with each method still called once. Fresh interfaces decode
   with zerojson's generic readers. An existing interface holding a non-nil
   concrete pointer decodes through stdlib into that receiver.
 - Type aliases are resolved while preserving usable source spellings.
@@ -163,7 +173,10 @@ reserved; a target package declaring that name at package scope is refused.
 `-pool` emits a reset-first `<Type>Decoder` per listed type. The flag name
 is retained for compatibility; the Decoder now uses fresh storage per call,
 not a persistent arena. Leaf-only borrowing shapes can still allocate zero
-bytes. Pointer and container shapes allocate as needed.
+bytes. Pointer and container shapes allocate as needed: the cells that back
+newly set pointer fields come from one block per decode, allocated only when
+the input sets a nil pointer field and shared with nested structs decoded
+after it, so a message that sets no pointer field pays nothing for them.
 
 ```go
 var d models.EventDecoder // one per goroutine
@@ -195,6 +208,24 @@ Fresh storage costs allocations and GC work on collection-heavy workloads;
 see [resource considerations](compatibility.md#resource-considerations).
 An empty JSON array replaces its slice with a non-nil, zero-capacity value.
 
+## Trusted decoding
+
+Every public decode first checks that the whole document is valid JSON,
+which keeps malformed input from reaching the decoders. For data already
+known to be valid, that check is repeated work, typically a fifth to a
+third of decode time. `-trusted` adds `UnmarshalZJSONTrusted`, which
+decodes exactly as `UnmarshalZJSON` does but skips the check.
+
+Use it only for data whose validity something else guarantees, such as
+`AppendZJSON` output read back from storage or a log that detects
+corruption. Given invalid JSON, a trusted decode may return an error or
+decode without one, so a document it accepts is not thereby known to be
+valid. It still copies strings, enforces the nesting limit, and rejects
+trailing data, and fields with their own `UnmarshalJSON` or `UnmarshalText`
+still receive only values that are themselves valid. With `-tests`, each
+generated fuzzer also checks that trusted decoding matches `UnmarshalZJSON`
+on valid input and does not panic on any input.
+
 ## Projection / passthrough decoding
 
 Declare only the fields you need. Unknown fields are grammar-checked and
@@ -225,14 +256,18 @@ necessarily cheaper than decoding them.
 ## Ordered decode
 
 For eligible structs, the decoder first matches compact keys in declaration
-order using fixed-width little-endian comparisons. Missing fields and unknown
-members are supported; unknown values are grammar-checked without being
-materialized.
+order: it compares the expected field's key using fixed-width little-endian
+loads and, when that misses, looks up a plain key (compact ASCII without
+escapes) by name in one switch. Missing fields and unknown members are
+supported; unknown values are grammar-checked without being materialized.
 
-Out-of-order or duplicate keys, escaped keys, and syntax the matcher cannot
-consume cause a rewind to the keyed decoder. It re-reads the document into
-the current target; rewinding does not undo earlier writes. **A value or grammar
-error is final; it does not trigger a second parse.** The two paths share field readers
+Out-of-order or duplicate keys, escaped keys, and whitespace around a key or
+separator hand the rest of the object to the keyed decoder at that member;
+the members before it are not decoded again. Syntax the matcher cannot
+consume inside a value, such as a whitespace-padded empty nested object,
+rewinds to the keyed decoder instead. It re-reads the object into the current
+target; rewinding does not undo earlier writes. **A value or grammar error is
+final; it does not trigger a second parse.** The two paths share field readers
 and are compared by differential tests.
 
 Schemas with reachable JSON/Text/Appender decode callbacks use the keyed
@@ -300,10 +335,12 @@ and [Reader](https://pkg.go.dev/github.com/neal/zerojson#Reader) instead of
 registering free leaf functions. The generator gives this pair precedence over
 JSON/Text methods for fields.
 
-Generated types also implement the pair, enabling fields to compose across
-packages. Same-package generated structs share the parent's arena directly.
-For slice elements and map values, Appender types must also provide a
-JSON method pair (for example through `-compat`); otherwise that shape is refused.
+Generated types also implement the pair, so types compose across packages:
+a type generated in one package can be a field, pointer, slice element
+(`[]T`, `[]*T`), or map value of a type generated in another (generate the
+inner package first). The pair drives every one of those positions, for
+hand-written Appenders too, and takes precedence over JSON methods in each.
+Same-package generated structs share the parent's decode state directly.
 
 Appenders must preserve the output prefix and produce one valid JSON value.
 Readers consume one value and report errors through the Lexer. These callbacks

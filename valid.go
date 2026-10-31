@@ -35,6 +35,180 @@ func syntaxErrorf(offset int, format string, args ...any) error {
 // Valid returns nil without allocating on success, or a *SyntaxError on
 // failure. Error messages and offsets need not match encoding/json.
 func Valid(data []byte) error {
+	if validFast(data) {
+		return nil
+	}
+	return validExact(data)
+}
+
+// validFastDepth is the nesting depth validFast handles; deeper documents
+// go to validExact.
+const validFastDepth = 256
+
+// validFast reports whether data is one JSON value, nested at most
+// validFastDepth containers deep, with optional surrounding whitespace.
+// It never accepts what validExact rejects; false means invalid or too
+// deep, and Valid then asks validExact for the verdict and the error. One
+// loop walks the document with an explicit container stack, so a value
+// costs no call or error return, and a string is scanned a word at a
+// time. Numbers and escapes use validExact's own grammar functions.
+func validFast(data []byte) bool {
+	var stack [validFastDepth / 64]uint64 // bit d: container d+1 is an object
+	n := len(data)
+	pos, depth := 0, 0
+	closer := -1 // closes the innermost container; -1 at the top level
+	inKey := false
+
+value:
+	pos = validSkipWS(data, pos)
+	if pos >= n {
+		return false
+	}
+	switch data[pos] {
+	case '"':
+		goto str
+	case '{', '[':
+		if depth == validFastDepth {
+			return false
+		}
+		open := data[pos]
+		pos = validSkipWS(data, pos+1)
+		if open == '{' {
+			if pos < n && data[pos] == '}' {
+				pos++
+				goto after
+			}
+			stack[depth>>6&3] |= 1 << (depth & 63)
+			depth++
+			closer = '}'
+			goto key
+		}
+		if pos < n && data[pos] == ']' {
+			pos++
+			goto after
+		}
+		stack[depth>>6&3] &^= 1 << (depth & 63)
+		depth++
+		closer = ']'
+		goto value
+	case 't':
+		if pos+4 > n || binary.LittleEndian.Uint32(data[pos:]) != 0x65757274 { // "true"
+			return false
+		}
+		pos += 4
+	case 'f':
+		if pos+5 > n || binary.LittleEndian.Uint32(data[pos+1:]) != 0x65736c61 { // "alse"
+			return false
+		}
+		pos += 5
+	case 'n':
+		if pos+4 > n || binary.LittleEndian.Uint32(data[pos:]) != 0x6c6c756e { // "null"
+			return false
+		}
+		pos += 4
+	case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		next, err := validNumber(data, pos)
+		if err != nil {
+			return false
+		}
+		pos = next
+	default:
+		return false
+	}
+
+after: // a value ends at pos
+	pos = validSkipWS(data, pos)
+	if pos < n {
+		switch c := int(data[pos]); {
+		case c == ',' && closer > 0:
+			pos++
+			if closer == '}' {
+				goto key
+			}
+			goto value
+		case c == closer:
+			pos++
+			depth--
+			closer = -1
+			if depth > 0 {
+				closer = ']'
+				if stack[(depth-1)>>6&3]>>((depth-1)&63)&1 != 0 {
+					closer = '}'
+				}
+			}
+			goto after
+		}
+	}
+	return pos >= n && closer < 0
+
+key:
+	pos = validSkipWS(data, pos)
+	if pos >= n || data[pos] != '"' {
+		return false
+	}
+	inKey = true
+
+str: // data[pos] is a string's opening quote
+	pos++
+	for {
+		var j int
+		if pos+8 <= n {
+			m := stringSpecial(binary.LittleEndian.Uint64(data[pos:]))
+			if m == 0 {
+				pos += 8
+				continue
+			}
+			j = pos + bits.TrailingZeros64(m)>>3
+		} else {
+			j = pos
+			for j < n && data[j] != '"' && data[j] != '\\' && data[j] >= 0x20 {
+				j++
+			}
+			if j >= n {
+				return false
+			}
+		}
+		if data[j] == '"' {
+			pos = j + 1
+			break
+		}
+		if data[j] != '\\' {
+			return false // a control byte
+		}
+		next, err := validEscape(data, j)
+		if err != nil {
+			return false
+		}
+		pos = next
+	}
+	if !inKey {
+		goto after
+	}
+	inKey = false
+	pos = validSkipWS(data, pos)
+	if pos >= n || data[pos] != ':' {
+		return false
+	}
+	pos++
+	goto value
+}
+
+// stringSpecial marks (bit 7 of each lane) the bytes of v that end a run
+// of plain string content: '"', '\\', and control bytes. Only the lowest
+// marked lane is exact; callers take its index. A byte is a control byte
+// or '"' exactly when it is below 0x21 after flipping bit 1 (which swaps
+// 0x22 with 0x20 and keeps 0x00-0x1F among themselves), so two SWAR
+// below-threshold tests cover all three cases.
+func stringSpecial(v uint64) uint64 {
+	const lo, hi = 0x0101010101010101, 0x8080808080808080
+	q := v ^ 0x0202020202020202
+	b := v ^ 0x5c5c5c5c5c5c5c5c
+	return ((q-0x21*lo)&^q | (b-lo)&^b) & hi
+}
+
+// validExact is the reference validator: a recursive walk that reports the
+// first violation as a *SyntaxError.
+func validExact(data []byte) error {
 	pos, err := validValue(data, 0, 0)
 	if err != nil {
 		return err

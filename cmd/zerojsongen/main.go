@@ -127,10 +127,10 @@ func aliasFor(path, name string) string {
 // runtimeAlias, which importAlias therefore never hands to anything else.
 var generatedIdents = map[string]bool{
 	"v": true, "dst": true, "n": true, "err": true, "raw": true, "first": true,
-	"mk": true, "mv": true, "i": true, "l": true, "a": true, "data": true,
+	"mk": true, "mv": true, "m": true, "kv": true, "i": true, "l": true, "a": true, "data": true,
 	"pos": true, "key": true, "e": true, "ea": true, "idx": true, "zjZero": true,
 	"expected": true, "matched": true, "d": true, "p": true, "k": true,
-	"start": true, "b": true, "w": true, "name": true, "isTopLevel": true,
+	"start": true, "memberPos": true, "next": true, "ok": true, "from": true, "lower": true, "c": true, "b": true, "w": true, "name": true, "isTopLevel": true,
 	"json": true, "jwriter": true,
 	"jlexer": true, "bytes": true, "reflect": true, "testing": true,
 	"fmt": true, "strings": true, "f": true, "t": true, "seed": true,
@@ -202,6 +202,7 @@ type fieldInfo struct {
 	elemPtr          bool       // kSlice: elements are pointers
 	keyTypeStr       string     // kMap: key type expression
 	valInfo          *fieldInfo // kMap: value classification
+	mapEntrySize     int64      // kMap: bytes per buffered key/value pair (see maps.go)
 	leaf             *leafSpec  // kCustomLeaf: append/read funcs
 	intRead          string     // kInt/kUint/kQuotedInt: width-aware read call (e.g. "l.ReadInt32()")
 	// scalarEmpty records a named type's underlying scalar category ("num",
@@ -265,12 +266,14 @@ type generator struct {
 	aliasOwner             map[string]string      // qualifier -> import path that claimed it (importAlias)
 	leafPkgNames           map[string]string      // -leaf codec package path -> declared package name
 	enumHelpers            map[string]*enumHelper // emitted zjReadEnum helpers, keyed by type expression
+	mapHelpers             map[string]*mapHelper  // emitted zjReadMap helpers, keyed by code
 	buf                    strings.Builder
 
 	compat         bool // emit json.Marshaler/Unmarshaler wrappers
 	compatEasyjson bool // also emit easyjson Marshaler/Unmarshaler wrappers
 	pool           bool // emit reset-first Decoder types
 	ordered        bool // emit the speculative ordered-decode fast path (ordered.go)
+	trusted        bool // emit UnmarshalZJSONTrusted, which skips the up-front Valid
 }
 
 func main() {
@@ -284,6 +287,7 @@ func main() {
 	testsOut := flag.String("tests", "", "also emit a differential fuzz test file at this path (a _test.go file, relative to -dir; not combinable with -compat)")
 	pool := flag.Bool("pool", false, "emit reset-first Decoder types with fresh per-call storage")
 	noOrdered := flag.Bool("no-ordered", false, "disable the speculative ordered-decode fast path (ordered.go)")
+	trusted := flag.Bool("trusted", false, "also emit UnmarshalZJSONTrusted, which skips the up-front validity check, for data already known to be valid JSON")
 	force := flag.Bool("force", false, "overwrite -out/-tests even if the existing file is not zerojsongen (or easyjson) output")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage: zerojsongen -types T1,T2 [-dir DIR] [-out FILE] [flags]\n\nFlags:\n")
@@ -347,8 +351,8 @@ func main() {
 	}
 
 	g := &generator{pkg: pkg, outPath: *out, replaceableMethodFiles: map[string]bool{}, explicit: map[string]bool{}, genSet: map[string]bool{}, leaves: leaves, imports: map[string]string{},
-		aliasOwner: map[string]string{}, leafPkgNames: resolveLeafPkgNames(*dir, leaves), enumHelpers: map[string]*enumHelper{},
-		compat: *compat || *compatEasyjson, compatEasyjson: *compatEasyjson, pool: *pool, ordered: !*noOrdered}
+		aliasOwner: map[string]string{}, leafPkgNames: resolveLeafPkgNames(*dir, leaves), enumHelpers: map[string]*enumHelper{}, mapHelpers: map[string]*mapHelper{},
+		compat: *compat || *compatEasyjson, compatEasyjson: *compatEasyjson, pool: *pool, ordered: !*noOrdered, trusted: *trusted}
 	g.testNames = loadTestNames(*dir, pkg.Name)
 	if pos, ok := g.testNames[runtimeAlias]; ok {
 		log.Fatalf("test declaration %s at %s collides with the runtime import", runtimeAlias, pos)
@@ -389,6 +393,9 @@ func main() {
 			log.Fatalf("type %s is not a named type", n)
 		}
 		rejectGeneric(named, n)
+		if m := g.handwrittenEasyjsonMethod(named); m != "" {
+			log.Fatalf("%s: type has a hand-written %s method — easyjson calls it, so it defines this type's wire format, and zerojsongen will not silently replace a custom wire format; remove it from -types and give it a MarshalJSON/UnmarshalJSON (or AppendZJSON/ReadZJSON) pair producing the same bytes, so containing types delegate to it", n, m)
+		}
 		if g.explicit[n] && !g.replaceableMethods(named) {
 			log.Fatalf("%s: explicitly listed type has hand-written JSON/Text methods — zerojsongen will not silently replace a custom wire format; remove it from -types and let containing types delegate to it (implement AppendZJSON/ReadZJSON on the custom type as well if that delegated path must be allocation-free)", n)
 		}
@@ -585,6 +592,7 @@ func (g *generator) generate() string {
 			g.genPool(ti)
 		}
 	}
+	g.emitMapHelpers()
 	g.emitEnumHelpers()
 	body := g.buf.String()
 	used := usedQualifiers(body)
@@ -628,6 +636,7 @@ func (g *generator) generate() string {
 }
 
 func arenaName(t string) string  { return "zjArena" + t }
+func cellsName(t string) string  { return "zjCells" + t }
 func decodeName(t string) string { return "zjDecode_" + t }
 
 // qualify returns the emitted-code qualifier ("pkg.") for a package and

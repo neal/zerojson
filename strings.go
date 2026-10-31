@@ -280,12 +280,12 @@ func validKeyString(data []byte, pos int) (int, bool, error) {
 // This low-level reader is grammar-strict: a raw control byte or an invalid
 // escape sequence in a key is
 // rejected, matching json.Valid / encoding/json. Keys are validated on
-// every path that reaches ReadKey (the general keyed fallback, map decode,
-// and the ordered decoder's skip of an unknown key); the ordered fast path
-// never reaches here for a declared key — it matches the exact declared-
-// name literal bytes, so an escaped or control-bearing key can never
-// satisfy that compare and always falls through to this strict reader.
-// Generated public decodes also validate the complete document up front.
+// every path: the general keyed fallback and map decode read them here, and
+// the ordered decoder reads a key itself only when it is plain — an exact
+// declared-name literal, or a key PlainKey accepts, which this reader would
+// return unchanged — so an escaped or control-bearing key always falls
+// through to this strict reader. Generated public decodes also validate the
+// complete document up front.
 func (l *Lexer) ReadKey() []byte {
 	l.skipWS()
 	var b []byte

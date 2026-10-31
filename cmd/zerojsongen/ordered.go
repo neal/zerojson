@@ -9,9 +9,10 @@ import (
 // type whose JSON field names are all safe to embed as literal byte
 // constants (see canOrderType), the generator additionally emits
 //
-//	zjDecodeOrdered_<T>(l, v, a) bool       — the member loop
+//	zjDecodeOrdered_<T>(l, v, a) bool         — the member loop
 //	zjDecodeOrderedField_<T>(l, v, a, k) bool — per-field value dispatch
-//	zjTryOrderedKey<T>(l, k) bool           — per-field literal key match
+//	zjTryOrderedKey<T>(l, k) bool             — per-field literal key match
+//	zjSeekOrderedKey<T>(l, from) int          — one-switch key lookup
 //
 // zjDecode_<T> (decode.go) tries zjDecodeOrdered_<T> first and falls back to
 // zjDecodeFallback_<T> — the unchanged keyed decoder — on structural
@@ -21,20 +22,24 @@ import (
 // The matcher exploits the fact that zerojson's own encoder (and
 // easyjson, whose bytes fill the existing wire format) emits fields in
 // declaration order, compact, with omitempty fields skipped: it walks an
-// `expected` cursor forward through the declared fields, so an object
-// missing some omitempty fields still matches the fast path (this is what
-// makes projection structs — decoding only a few of the wire fields —
-// fast too: unmatched keys are skipped inline rather than causing a
-// bail). Any structural deviation (out-of-order key, duplicate key, escaped
-// key, or non-compact syntax) bails: the caller rewinds via Lexer.OrderedBail
-// and retries with the fallback. A real value/grammar error is retained
-// without retrying the same work.
+// `expected` cursor forward through the declared fields, trying the
+// expected field's literal first and otherwise looking the key up by
+// name, so an object missing some omitempty fields still matches the fast
+// path (this is what makes projection structs — decoding only a few of the
+// wire fields — fast too: unknown keys are skipped inline rather than
+// causing a bail). A deviation at a member boundary (out-of-order key,
+// duplicate key, escaped key, or non-compact syntax around one) hands the
+// rest of the object to the keyed member loop; one inside a value bails:
+// the caller rewinds via Lexer.OrderedBail and retries with the fallback.
+// A real value/grammar error is retained without retrying the same work.
 
 func orderedDecodeName(t string) string    { return "zjDecodeOrdered_" + t }
 func orderedFieldFuncName(t string) string { return "zjDecodeOrderedField_" + t }
 func orderedKeyFuncName(t string) string   { return "zjTryOrderedKey" + t }
+func orderedSeekFuncName(t string) string  { return "zjSeekOrderedKey" + t }
 func declaredKeyFuncName(t string) string  { return "zjIsDeclaredKey" + t }
 func fallbackDecodeName(t string) string   { return "zjDecodeFallback_" + t }
+func membersDecodeName(t string) string    { return "zjDecodeMembers_" + t }
 
 // jsonNameNeedsEscape reports whether name would be encoded with any
 // escape by zerojson.AppendString (control chars, '"', '\\', and the
@@ -245,6 +250,72 @@ func (g *generator) emitOrderedTryKey(ti typeInfo) {
 	g.p("}")
 }
 
+// emitOrderedSeekKey emits zjSeekOrderedKey<T>(l, from) int, which the
+// member loop calls when the key at l's position is not field from's
+// literal. It reads a plain key (Lexer.PlainKey) once and classifies it:
+//
+//	k >= from  the first field at or after from whose literal
+//	           zjTryOrderedKey<T> would match; consumed
+//	-2         a declared name before from, or one that matches only under
+//	           case folding; not consumed, so the keyed loop takes the member
+//	-3         an unknown name; consumed, so its value is next
+//	-1         not a plain key; not consumed, and the caller uses ReadKey
+//
+// canOrderType admits only plain-ASCII names without quotes, so field k's
+// literal matches exactly when a plain key spells k's name; one switch
+// replaces trying each remaining field in turn. ReadKey would return the
+// same bytes, so -2 and -3 split keys as zjIsDeclaredKey<T> does.
+func (g *generator) emitOrderedSeekKey(ti typeInfo) {
+	n := ti.name
+	g.p("")
+	g.p("// %s classifies a plain key that is not field from's literal:", orderedSeekFuncName(n))
+	g.p("// k >= from is the field it names, consumed; -2 a declared name the")
+	g.p("// keyed loop must take, not consumed; -3 an unknown name, consumed;")
+	g.p("// -1 not a plain key, not consumed.")
+	g.p("func %s(l *zerojson.Lexer, from int) int {", orderedSeekFuncName(n))
+	if len(ti.fields) == 0 {
+		g.p("\t_, next, ok := l.PlainKey()")
+		g.p("\tif !ok {")
+		g.p("\t\treturn -1")
+		g.p("\t}")
+		g.p("\tl.SetPos(next)")
+		g.p("\treturn -3")
+		g.p("}")
+		return
+	}
+	g.p("\tkey, next, ok := l.PlainKey()")
+	g.p("\tif !ok {")
+	g.p("\t\treturn -1")
+	g.p("\t}")
+	g.p("\tk := -1")
+	g.p("\tswitch string(key) {")
+	for i, f := range ti.fields {
+		g.p("\tcase %q:", f.jsonName)
+		g.p("\t\tk = %d", i)
+	}
+	g.p("\t}")
+	g.p("\tif k >= from {")
+	g.p("\t\tl.SetPos(next)")
+	g.p("\t\treturn k")
+	g.p("\t}")
+	g.p("\tif k >= 0 {")
+	g.p("\t\treturn -2")
+	g.p("\t}")
+	maxLen := 0
+	for _, f := range ti.fields {
+		maxLen = max(maxLen, len(f.jsonName))
+	}
+	g.p("\t// The names are ASCII, so a key folds only onto one of its length.")
+	g.p("\tif len(key) <= %d {", maxLen)
+	g.p("\t\tif name := string(key); %s(name) != name {", foldFieldNameFunc(n))
+	g.p("\t\t\treturn -2")
+	g.p("\t\t}")
+	g.p("\t}")
+	g.p("\tl.SetPos(next)")
+	g.p("\treturn -3")
+	g.p("}")
+}
+
 func joinOr(conds []string) string {
 	var s strings.Builder
 	s.WriteString(conds[0])
@@ -257,7 +328,8 @@ func joinOr(conds []string) string {
 // emitOrderedDeclaredKey emits zjIsDeclaredKey<T>(name string) bool,
 // reporting whether name is any of T's declared JSON field names
 // (regardless of index). The ordered decoder's member loop uses this —
-// not a position-limited word-compare — to classify an unmatched key: a
+// not a position-limited word-compare — to classify a key that is not
+// plain (zjSeekOrderedKey<T> classifies plain ones the same way): a
 // declared name here means duplicate, out-of-order, non-compact syntax
 // around an otherwise-known key (e.g. whitespace before the colon, which
 // defeats the literal word-compare but not ReadKey), or an escaped key
@@ -282,7 +354,7 @@ func (g *generator) emitOrderedDeclaredKey(ti typeInfo) {
 	g.p("\tcase %s:", strings.Join(names, ", "))
 	g.p("\t\treturn true")
 	g.p("\t}")
-	g.p("\treturn zjFieldName_%s(name) != name", n)
+	g.p("\treturn %s(name) != name", foldFieldNameFunc(n))
 	g.p("}")
 }
 
@@ -352,14 +424,16 @@ func fieldNamesVar(t string) string { return "zjFieldNames" + t }
 // loop described in the file comment above.
 func (g *generator) emitOrderedDecode(ti typeInfo) {
 	n := ti.name
-	numFields := len(ti.fields)
 	g.p("")
 	g.p("// %s speculatively decodes a compact, declaration-ordered object", orderedDecodeName(n))
 	g.p("// (the shape zerojson's own encoder emits) directly into v, without")
-	g.p("// the general keyed loop. It returns false with zero observable")
-	g.p("// effect (once the caller rewinds via Lexer.OrderedBail) on any")
-	g.p("// structural deviation: out-of-order/duplicate/escaped keys or")
-	g.p("// non-compact syntax. The caller retries those through %s;", fallbackDecodeName(n))
+	g.p("// the general keyed loop. A deviation at a member boundary (an")
+	g.p("// out-of-order, duplicate, or escaped key, or non-compact syntax")
+	g.p("// around one) hands the rest of the object to %s:", membersDecodeName(n))
+	g.p("// every member before it was decoded exactly as the keyed decoder")
+	g.p("// would, so only the remainder needs the general path. Any other")
+	g.p("// deviation returns false, and the caller rewinds via")
+	g.p("// Lexer.OrderedBail and retries the object through %s;", fallbackDecodeName(n))
 	g.p("// real value/grammar errors are preserved without a redundant retry.")
 	g.p("func %s(l *zerojson.Lexer, v *%s, a *%s) bool {", orderedDecodeName(n), n, arenaName(n))
 	g.p("\t_ = a")
@@ -391,14 +465,32 @@ func (g *generator) emitOrderedDecode(ti typeInfo) {
 	g.p("\t}")
 	g.p("\texpected := 0")
 	g.p("\tfor {")
-	g.p("\t\tmatched := -1")
-	g.p("\t\tfor k := expected; k < %d; k++ {", numFields)
-	g.p("\t\t\tif %s(l, k) {", orderedKeyFuncName(n))
-	g.p("\t\t\t\tmatched = k")
-	g.p("\t\t\t\tbreak")
-	g.p("\t\t\t}")
+	g.p("\t\tmatched := expected")
+	g.p("\t\tif !%s(l, expected) {", orderedKeyFuncName(n))
+	g.p("\t\t\tmatched = %s(l, expected)", orderedSeekFuncName(n))
 	g.p("\t\t}")
-	g.p("\t\tif matched < 0 {")
+	g.p("\t\tswitch {")
+	g.p("\t\tcase matched >= 0:")
+	g.p("\t\t\tif !%s(l, v, a, matched) {", orderedFieldFuncName(n))
+	g.p("\t\t\t\treturn false")
+	g.p("\t\t\t}")
+	g.p("\t\t\texpected = matched + 1")
+	g.p("\t\tcase matched == -3:")
+	g.p("\t\t\t// A name matching no declared field, even folded as the keyed")
+	g.p("\t\t\t// decoder folds it, is unknown and safe to skip inline (the")
+	g.p("\t\t\t// projection-struct fast path).")
+	g.p("\t\t\tl.Skip()")
+	g.p("\t\t\tif l.Err() != nil {")
+	g.p("\t\t\t\treturn false")
+	g.p("\t\t\t}")
+	g.p("\t\tcase matched == -2:")
+	g.p("\t\t\t// A declared name out of order, repeated, or matching only")
+	g.p("\t\t\t// under case folding: the keyed decoder's last-wins/general")
+	g.p("\t\t\t// handling takes over from this member.")
+	g.p("\t\t\t%s(l, v, a)", membersDecodeName(n))
+	g.p("\t\t\treturn l.Err() == nil")
+	g.p("\t\tdefault:")
+	g.p("\t\t\tmemberPos := l.Pos()")
 	g.p("\t\t\t// A whitespace-padded empty object (`{ }`) is valid but")
 	g.p("\t\t\t// cannot literal-match the compact fast path. Bail without")
 	g.p("\t\t\t// asking ReadKey to parse the closing brace as a string;")
@@ -406,33 +498,24 @@ func (g *generator) emitOrderedDecode(ti typeInfo) {
 	g.p("\t\t\tif l.IsDelim('}') {")
 	g.p("\t\t\t\treturn false")
 	g.p("\t\t\t}")
-	g.p("\t\t\t// No declared field k >= expected literal-matched at this")
-	g.p("\t\t\t// position. Read the key properly (ReadKey tolerates")
-	g.p("\t\t\t// whitespace and unescapes, unlike the word-compare above)")
-	g.p("\t\t\t// and check its *name*, not its byte position: a declared")
-	g.p("\t\t\t// name here — regardless of index — means duplicate,")
-	g.p("\t\t\t// out-of-order, non-compact syntax around an otherwise")
-	g.p("\t\t\t// valid key, or an escaped key that decodes to a declared")
-	g.p("\t\t\t// name; any of those must bail so the fallback's ")
-	g.p("\t\t\t// last-wins/general handling applies. Only a name matching")
-	g.p("\t\t\t// no declared field is genuinely unknown and safe to skip")
-	g.p("\t\t\t// inline (the projection-struct fast path).")
+	g.p("\t\t\t// Not a plain key: whitespace around it, an escape, or a")
+	g.p("\t\t\t// control or non-ASCII byte. Read it properly and check its")
+	g.p("\t\t\t// *name*: a declared name (duplicate, out of order, folded,")
+	g.p("\t\t\t// or escaped) hands the member to the keyed decoder; only an")
+	g.p("\t\t\t// unknown name is skipped inline.")
 	g.p("\t\t\tkey := l.ReadKey()")
 	g.p("\t\t\tif l.Err() != nil {")
 	g.p("\t\t\t\treturn false")
 	g.p("\t\t\t}")
 	g.p("\t\t\tif %s(string(key)) {", declaredKeyFuncName(n))
-	g.p("\t\t\t\treturn false")
+	g.p("\t\t\t\tl.SetPos(memberPos)")
+	g.p("\t\t\t\t%s(l, v, a)", membersDecodeName(n))
+	g.p("\t\t\t\treturn l.Err() == nil")
 	g.p("\t\t\t}")
 	g.p("\t\t\tl.Skip()")
 	g.p("\t\t\tif l.Err() != nil {")
 	g.p("\t\t\t\treturn false")
 	g.p("\t\t\t}")
-	g.p("\t\t} else {")
-	g.p("\t\t\tif !%s(l, v, a, matched) {", orderedFieldFuncName(n))
-	g.p("\t\t\t\treturn false")
-	g.p("\t\t\t}")
-	g.p("\t\t\texpected = matched + 1")
 	g.p("\t\t}")
 	g.p("\t\td, p := l.DataAndPos()")
 	g.p("\t\tif p >= len(d) {")
@@ -446,7 +529,13 @@ func (g *generator) emitOrderedDecode(ti typeInfo) {
 	g.p("\t\t\tl.Leave()")
 	g.p("\t\t\treturn true")
 	g.p("\t\tdefault:")
-	g.p("\t\t\treturn false")
+	g.p("\t\t\t// Whitespace before the separator: the member is complete,")
+	g.p("\t\t\t// so the keyed decoder continues from here. NextMember")
+	g.p("\t\t\t// leaves the nesting level on the closing brace.")
+	g.p("\t\t\tif l.NextMember() {")
+	g.p("\t\t\t\t%s(l, v, a)", membersDecodeName(n))
+	g.p("\t\t\t}")
+	g.p("\t\t\treturn l.Err() == nil")
 	g.p("\t\t}")
 	g.p("\t}")
 	g.p("}")

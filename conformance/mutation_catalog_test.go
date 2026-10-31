@@ -8,6 +8,274 @@ func mutationCatalog() []mutationCase {
 	)
 	return []mutationCase{
 		{
+			// A type whose only custom codec is a hand-written
+			// MarshalEasyJSON must be refused, not encoded by its Go
+			// structure (which silently changes a migrated wire format).
+			name: "easyjson_only_type_is_encoded_structurally", tier: "quick", file: "cmd/zerojsongen/load.go",
+			old:       `if m := g.handwrittenEasyjsonMethod(named); m != "" && !(hasM && hasU) {`,
+			new:       `if m := g.handwrittenEasyjsonMethod(named); false && m != "" && !(hasM && hasU) {`,
+			wantCount: 1,
+			detector:  generatorDetector(`^TestGeneratorBehaviorMatrix/easyjson_only_field_refused$`), wantOutput: "want substring",
+		},
+		{
+			// A same-package named map whose methods are generated output must
+			// get the inline map codec; delegating to the methods makes
+			// regeneration change the codec.
+			name: "generated_named_map_methods_delegated", tier: "quick", file: "cmd/zerojsongen/load.go",
+			old:       "generatedContainer = true\n\t\t\t\thasM, hasU = false, false",
+			new:       "generatedContainer = false",
+			wantCount: 1,
+			detector:  generatorDetector(`^TestGeneratedNamedMapMethodsAreReplaced$`), wantOutput: "delegates to v.Set",
+		},
+		{
+			// A member-boundary deviation hands the rest of the object to the
+			// keyed member loop; restarting re-decodes the ordered prefix.
+			name: "ordered_deviation_restarts_object", tier: "quick", file: "cmd/zerojsongen/ordered.go",
+			old:        "g.p(\"\\t\\t\\t\\tl.SetPos(memberPos)\")\n\tg.p(\"\\t\\t\\t\\t%s(l, v, a)\", membersDecodeName(n))\n\tg.p(\"\\t\\t\\t\\treturn l.Err() == nil\")",
+			new:        "g.p(\"\\t\\t\\t\\t_ = memberPos\")\n\tg.p(\"\\t\\t\\t\\treturn false\")",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestOrderedHandoffDecodesPrefixOnce$`), wantOutput: "want 2",
+		},
+		{
+			// The keyed loop must resume at the deviating member's key.
+			name: "ordered_handoff_skips_rewind", tier: "quick", file: "cmd/zerojsongen/ordered.go",
+			old:        "g.p(\"\\t\\t\\t\\tl.SetPos(memberPos)\")",
+			new:        "g.p(\"\\t\\t\\t\\t_ = memberPos\")",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestOrderedHandoffMatchesStdlib$`), wantOutput: "zerojson err=",
+		},
+		{
+			// A plain declared key out of order hands the rest of the object
+			// to the keyed member loop too, not just a key ReadKey had to read.
+			name: "ordered_lookup_handoff_restarts_object", tier: "quick", file: "cmd/zerojsongen/ordered.go",
+			old:        "g.p(\"\\t\\t\\t%s(l, v, a)\", membersDecodeName(n))\n\tg.p(\"\\t\\t\\treturn l.Err() == nil\")\n\tg.p(\"\\t\\tdefault:\")",
+			new:        "g.p(\"\\t\\t\\treturn false\")\n\tg.p(\"\\t\\tdefault:\")",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestOrderedHandoffDecodesPrefixOnce$`), wantOutput: "want 2",
+		},
+		{
+			// The lookup must not match a field before the cursor: a repeated
+			// or out-of-order name belongs to the keyed loop.
+			name: "ordered_lookup_ignores_cursor", tier: "quick", file: "cmd/zerojsongen/ordered.go",
+			old:        "g.p(\"\\tif k >= from {\")",
+			new:        "g.p(\"\\tif k >= 0 {\")",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestSeekOrderedKeyMatchesReference$`), wantOutput: "; want -2 at",
+		},
+		{
+			// A plain key that names a field only under case folding is
+			// declared, not unknown.
+			name: "ordered_lookup_skips_folded_names", tier: "quick", file: "cmd/zerojsongen/ordered.go",
+			old:        "g.p(\"\\t\\tif name := string(key); %s(name) != name {\", foldFieldNameFunc(n))",
+			new:        "g.p(\"\\t\\tif name := string(key); false && %s(name) != name {\", foldFieldNameFunc(n))",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestOrderedHandoffMatchesStdlib$`), wantOutput: "zerojson {Origin:acme Active:false}",
+		},
+		{
+			// A declared name behind the cursor is a duplicate or out of
+			// order; skipping it as unknown loses the later value.
+			name: "ordered_lookup_skips_declared_names", tier: "quick", file: "cmd/zerojsongen/ordered.go",
+			old:        "g.p(\"\\tif k >= 0 {\")\n\tg.p(\"\\t\\treturn -2\")",
+			new:        "g.p(\"\\tif k >= 0 {\")\n\tg.p(\"\\t\\tl.SetPos(next)\")\n\tg.p(\"\\t\\treturn -3\")",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestOrderedHandoffMatchesStdlib$`), wantOutput: "zerojson {Origin:acme Active:true}, stdlib {Origin:beta Active:true}",
+		},
+		{
+			// The fold is skipped only for keys longer than every name.
+			name: "ordered_lookup_fold_guard_too_short", tier: "full", file: "cmd/zerojsongen/ordered.go",
+			old:        "g.p(\"\\tif len(key) <= %d {\", maxLen)",
+			new:        "g.p(\"\\tif len(key) < %d {\", maxLen)",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestOrderedLookupDecodeMatchesStdlib$`), wantOutput: `copy {"A_DECLARED_NAME_LONGER_THAN_THIRTY_TWO":8}`,
+		},
+		{
+			// Near the end of input the byte loop must stop at a raw control byte too.
+			name: "valid_fast_tail_admits_control", tier: "quick", file: "valid.go",
+			old:       "for j < n && data[j] != '\"' && data[j] != '\\\\' && data[j] >= 0x20 {",
+			new:       "for j < n && data[j] != '\"' && data[j] != '\\\\' {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestValidFastMatchesExact$`), wantOutput: "validFast accepted invalid",
+		},
+		{
+			// The word mask must mark raw control bytes, not only quotes and
+			// backslashes.
+			name: "valid_fast_word_admits_control", tier: "full", file: "valid.go",
+			old:       "q := v ^ 0x0202020202020202\n\tb := v ^ 0x5c5c5c5c5c5c5c5c\n\treturn ((q-0x21*lo)&^q | (b-lo)&^b) & hi",
+			new:       "q := v ^ 0x2222222222222222\n\tb := v ^ 0x5c5c5c5c5c5c5c5c\n\treturn ((q-lo)&^q | (b-lo)&^b) & hi",
+			wantCount: 1,
+			detector:  rootDetector(`^TestValidFastMatchesExact$`), wantOutput: "validFast accepted invalid",
+		},
+		{
+			// A container closes only with its own bracket.
+			name: "valid_fast_ignores_closer_kind", tier: "quick", file: "valid.go",
+			old:       "case c == closer:",
+			new:       "case c == '}' || c == ']':",
+			wantCount: 1,
+			detector:  rootDetector(`^TestValidFastMatchesExact$`), wantOutput: "validFast accepted invalid",
+		},
+		{
+			// A comma separates members only inside a container.
+			name: "valid_fast_top_level_comma", tier: "quick", file: "valid.go",
+			old:       "case c == ',' && closer > 0:",
+			new:       "case c == ',':",
+			wantCount: 1,
+			detector:  rootDetector(`^TestValidFastMatchesExact$`), wantOutput: "validFast accepted invalid",
+		},
+		{
+			// Past its stack the fast pass must hand the document to validExact.
+			name: "valid_fast_depth_unchecked", tier: "full", file: "valid.go",
+			old:       "if depth == validFastDepth {",
+			new:       "if depth == 4*validFastDepth {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestValidFastDepthBoundary$`), wantOutput: "validFast accepted depth 257",
+		},
+		{
+			// Strings are the common case; sending them to validExact silently gives up the fast pass.
+			name: "valid_fast_strings_fall_back", tier: "quick", file: "valid.go",
+			old:       "case '\"':\n\t\tgoto str",
+			new:       "case '\"':\n\t\tif false {\n\t\t\tgoto str\n\t\t}\n\t\treturn false",
+			wantCount: 1,
+			detector:  rootDetector(`^TestValidFastMatchesExact$`), wantOutput: "validFast rejected valid",
+		},
+		{
+			// A key followed by whitespace before its colon is not plain.
+			name: "plain_key_ignores_colon", tier: "quick", file: "ordered.go",
+			old:       "if end+1 >= len(data) || data[end] != '\"' || data[end+1] != ':' {",
+			new:       "if end+1 >= len(data) || data[end] != '\"' {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestPlainKey$`), wantOutput: `PlainKey("\"a\" :1" at 0)`,
+		},
+		{
+			// ReadKey normalizes invalid UTF-8, so a plain key is ASCII only.
+			name: "plain_key_admits_non_ascii", tier: "full", file: "ordered.go",
+			old:       "if high&0x8080808080808080 != 0 {",
+			new:       "if false && high&0x8080808080808080 != 0 {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestPlainKey$`), wantOutput: `, 8, true; want "", 0, false`,
+		},
+		{
+			// Nested structs must share the decode's cell block once it
+			// exists; otherwise every nested type pays its own allocation.
+			name: "nested_cells_not_shared", tier: "quick", file: "cmd/zerojsongen/decode.go",
+			old:        `g.p("%s\ta.a%s.zjBlock = &a.zjBlock.s%s", ind, f.cellName, f.cellName)`,
+			new:        `g.p("%s\t_ = a", ind)`,
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestLazyCellBlockAllocations$`), wantOutput: "want 1",
+		},
+		{
+			// AppendInterface may copy Marshaler output verbatim only when
+			// encoding/json would; HTML-sensitive bytes must be escaped.
+			name: "append_interface_verbatim_skips_html_escape", tier: "quick", file: "writer.go",
+			old:       "if c >= utf8.RuneSelf || c == '<' || c == '>' || c == '&' || c == '\\\\' {",
+			new:       "if c >= utf8.RuneSelf || c == '\\\\' {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestAppendInterfaceMatchesMarshal$`), wantOutput: "AppendInterface:",
+		},
+		{
+			// Output needing post-processing is replayed into json.Marshal,
+			// not re-encoded from the value, so the method runs once.
+			name: "append_interface_calls_marshaler_twice", tier: "quick", file: "writer.go",
+			old:       "return appendReplayed(dst, v, replayMarshaler{b, err})",
+			new:       "return appendStdlib(dst, v)",
+			wantCount: 1,
+			detector:  rootDetector(`^TestAppendInterfaceCallsMethodsOnce$`), wantOutput: "method called 2 times",
+		},
+		{
+			// A float in exponent form drops the exponent's padding zero, as
+			// encoding/json does (1e-07 is spelled 1e-7).
+			name: "append_interface_float_keeps_exponent_padding", tier: "quick", file: "writer.go",
+			old:       "format == 'e' && dst[n-4] == 'e'",
+			new:       "false && dst[n-4] == 'e'",
+			wantCount: 1,
+			detector:  rootDetector(`^TestAppendInterfaceMatchesMarshal$`), wantOutput: "AppendInterface:",
+		},
+		{
+			// encoding/json built on encoding/json/v2 calls AppendText, so a
+			// type with one must not be formatted by kind.
+			name: "append_interface_ignores_append_text", tier: "quick", file: "writer.go",
+			old:       `"MarshalText", "AppendText"}`,
+			new:       `"MarshalText"}`,
+			wantCount: 1,
+			detector:  rootDetector(`^TestAppendInterfaceMatchesMarshal$`), wantOutput: "append text",
+		},
+		{
+			// A hint leaves room for slightly larger encodings than the last.
+			name: "size_hint_drops_slack", tier: "quick", file: "writer.go",
+			old:       "want := min(int64(n)+int64(n)/4, maxSizeHint)",
+			new:       "want := min(int64(n), maxSizeHint)",
+			wantCount: 1,
+			detector:  rootDetector(`^TestSizeHint$`), wantOutput: "want 0 and 125",
+		},
+		{
+			// MarshalJSON must start from the hinted size, not grow from empty.
+			name: "size_hint_never_learns", tier: "quick", file: "writer.go",
+			old:        "\t\th.n.Store(want)",
+			new:        "\t\t_ = want",
+			wantCount:  1,
+			detector:   commandSpec{dir: "conformance", args: []string{"go", "test", "./generator/compat", "-run", `^TestMarshalJSONAllocatesOnce$`, "-count=1"}},
+			wantOutput: "MarshalJSON allocations =",
+		},
+		{
+			// Trusted decoding skips only the validity check: strings are
+			// still copied, so the result does not alias the input.
+			name: "trusted_decode_borrows_input", tier: "quick", file: "cmd/zerojsongen/decode.go",
+			old:        `g.emitDecodeBody(n, "false")`,
+			new:        `g.emitDecodeBody(n, "true")`,
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^FuzzEventZJSON$`), wantOutput: "trusted decode differs",
+		},
+		{
+			// MarshalJSONTo outranks MarshalJSON in encoding/json built on
+			// encoding/json/v2, so the MarshalJSON fast path must yield.
+			name: "append_interface_marshal_json_outranked", tier: "quick", file: "writer.go",
+			old:       "if hasMarshalJSONTo(v) {",
+			new:       "if false && hasMarshalJSONTo(v) {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestAppendInterfaceMethodPrecedence$`), wantOutput: "AppendInterface",
+		},
+		{
+			// MarshalJSONTo outranks MarshalText too.
+			name: "append_interface_marshal_text_outranked_by_json_to", tier: "quick", file: "writer.go",
+			old:       "if hasMarshalJSONTo(v) || hasAppendText(v) {",
+			new:       "if hasAppendText(v) {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestAppendInterfaceMethodPrecedence$`), wantOutput: "AppendInterface",
+		},
+		{
+			// AppendText outranks MarshalText.
+			name: "append_interface_marshal_text_outranked_by_append_text", tier: "quick", file: "writer.go",
+			old:       "if hasMarshalJSONTo(v) || hasAppendText(v) {",
+			new:       "if hasMarshalJSONTo(v) {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestAppendInterfaceMatchesMarshal$`), wantOutput: "append text",
+		},
+		{
+			// A replayed Marshaler error must name v's type, not the stand-in.
+			name: "append_interface_error_names_stand_in", tier: "full", file: "writer.go",
+			old:       "retyped.Type = vt",
+			new:       "retyped.Type = st",
+			wantCount: 1,
+			detector:  rootDetector(`^TestAppendInterfaceMatchesMarshal$`), wantOutput: "errors differ",
+		},
+		{
+			// Appender slice elements and map values must call AppendZJSON;
+			// emitting nothing would produce "[,]".
+			name: "appender_element_encodes_nothing", tier: "quick", file: "cmd/zerojsongen/encode.go",
+			old:        `g.p("%sdst, err = %s.AppendZJSON(dst)", ind, expr)`,
+			new:        `g.p("%s_ = %s", ind, expr)`,
+			occurrence: 1, wantCount: 2,
+			detector: generatorDetector(`^TestGeneratorShapeValidation/slice,_pointer_slice,_and_map_of_hand-written_Appender_struct$`), wantOutput: "encode: got",
+		},
+		{
 			name: "empty_slice_keeps_previous_capacity", tier: "full", file: "cmd/zerojsongen/decode.go",
 			old: `g.p("%sif len(%s) == 0 {", ind, cell)`,
 			new: `g.p("%sif %s == nil {", ind, cell)`, wantCount: 1,
@@ -57,6 +325,30 @@ func mutationCatalog() []mutationCase {
 			detector: generatorDetector(`^TestIndependentChallenge$`), wantOutput: "ordinary compatibility",
 		},
 		{
+			// An ASCII key reaches a declared name with a Kelvin sign or long
+			// s only through the ASCII switch; dropping such names from it
+			// sends "K" to the later field "k".
+			name: "ascii_fold_drops_unicode_names", tier: "quick", file: "cmd/zerojsongen/decode.go",
+			old: `c, ok := asciiFoldMember(r)`, new: `c, ok := byte(r), r < utf8.RuneSelf`, wantCount: 1,
+			regenerate: true,
+			detector:   codecDetector(`^TestFoldFieldNameMatchesReference$`), wantOutput: `zjFieldName_FoldNames("K") = "k"`,
+		},
+		{
+			// Folded ties go to the first field in declaration order.
+			name: "ascii_fold_tie_takes_last_field", tier: "quick", file: "cmd/zerojsongen/decode.go",
+			old:        "if !ok || seen[key] {\n\t\t\tcontinue\n\t\t}",
+			new:        "if !ok {\n\t\t\tcontinue\n\t\t}\n\t\tif seen[key] {\n\t\t\tfor i := range cases {\n\t\t\t\tif cases[i].key == key {\n\t\t\t\t\tcases[i].name = f.jsonName\n\t\t\t\t}\n\t\t\t}\n\t\t\tcontinue\n\t\t}",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestFoldFieldNameMatchesReference$`), wantOutput: `zjFieldName_FoldNames("ORDERID") = "OrderId"`,
+		},
+		{
+			name: "ascii_fold_skips_lowercasing", tier: "full", file: "cmd/zerojsongen/decode.go",
+			old: `g.p("\t\t\tif 'A' <= c && c <= 'Z' { c += 'a' - 'A' }")`, new: `g.p("\t\t\t_ = 'A'")`, wantCount: 1,
+			regenerate: true,
+			detector:   codecDetector(`^TestFoldFieldNameMatchesReference$`), wantOutput: `zjFieldName_FoldNames("SIZE") = "SIZE"`,
+		},
+		{
 			name: "field_lookup_drops_case_folding", tier: "full", file: "cmd/zerojsongen/decode.go",
 			old: `g.p("\tif %s.EqualFold(name, %q) { return %q }", q, f.jsonName, f.jsonName)`, new: `g.p("\tif false && %s.EqualFold(name, %q) { return %q }", q, f.jsonName, f.jsonName)`, wantCount: 1,
 			detector: generatorDetector(`^TestIndependentChallenge$`), wantOutput: "ordinary compatibility",
@@ -68,7 +360,7 @@ func mutationCatalog() []mutationCase {
 		},
 		{
 			name: "publication_map", tier: "full", file: "cmd/zerojsongen/decode.go",
-			old: `g.p("%s\t\t%s = make(%s)", ind, cell, f.typeStr)`, new: `g.p("%s\t\tif %s == nil { %s = make(%s) } else { clear(%s) }", ind, cell, cell, f.typeStr, cell)`, wantCount: 1,
+			old: `g.p("%s\t%s = %s(l, nil)", ind, cell, read)`, new: `g.p("%s\tif %s != nil { clear(%s); %s = %s(l, %s) } else { %s = %s(l, nil) }", ind, cell, cell, cell, read, cell, cell, read)`, wantCount: 1,
 			detector: generatorDetector(`^TestGeneratorBehaviorMatrix/publication_map_ordered$`), wantOutput: "publication pooled=",
 		},
 		{
@@ -94,9 +386,9 @@ func mutationCatalog() []mutationCase {
 		},
 		{
 			name: "state_campaign_observes_retained_maps", tier: "full", file: "cmd/zerojsongen/decode.go",
-			old: `g.p("%s\t\t%s = make(%s)", ind, cell, f.typeStr)`,
+			old: `g.p("%s\t%s = %s(l, nil)", ind, cell, read)`,
 			// Recycle detached storage to model clearing an observable map.
-			new:        `g.p("%s\t\tif %s == nil { %s = make(%s) } else { clear(%s) }", ind, cell, cell, f.typeStr, cell)`,
+			new:        `g.p("%s\tif %s != nil { clear(%s); %s = %s(l, %s) } else { %s = %s(l, nil) }", ind, cell, cell, cell, read, cell, cell, read)`,
 			occurrence: 0, wantCount: 1,
 			detector: generatorDetector(`^TestGeneratedSchemaCampaign$`), wantOutput: "state/retained-pointee mismatch",
 		},
@@ -171,23 +463,161 @@ func mutationCatalog() []mutationCase {
 			name:       "read_interface_keys_are_interned",
 			tier:       "quick",
 			file:       "interface.go",
-			old:        "m[string(l.ReadKey())] = l.ReadInterface()",
-			new:        "m[Intern(l.ReadKey())] = l.ReadInterface()",
+			old:        "k := string(l.ReadKey())",
+			new:        "k := Intern(l.ReadKey())",
 			occurrence: 0,
-			wantCount:  1,
+			wantCount:  2,
 			detector:   rootDetector(`^TestReadInterfaceDoesNotInternObjectKeys$`),
-			wantOutput: "retained an arbitrary object key",
+			wantOutput: "retained an arbitrary object key (member 0)",
+		},
+		{
+			name:       "read_interface_spill_keys_are_interned",
+			tier:       "quick",
+			file:       "interface.go",
+			old:        "k := string(l.ReadKey())",
+			new:        "k := Intern(l.ReadKey())",
+			occurrence: 1,
+			wantCount:  2,
+			detector:   rootDetector(`^TestReadInterfaceDoesNotInternObjectKeys$`),
+			wantOutput: "retained an arbitrary object key (member 9)",
+		},
+		{
+			// An error past the stack slots must not publish the members
+			// buffered so far as a partial object.
+			name: "read_interface_spill_error_returns_partial_object", tier: "quick", file: "interface.go",
+			old:       "\t\tif l.err != nil {\n\t\t\treturn nil\n\t\t}\n\t\tif m != nil {",
+			new:       "\t\tif l.err != nil {\n\t\t\tbreak\n\t\t}\n\t\tif m != nil {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestReadInterfaceObjectErrorIsNil$`), wantOutput: "want nil and an error",
+		},
+		{
+			// The spill buffer must hand over to direct insertion when full.
+			name: "read_interface_spill_overruns_buffer", tier: "quick", file: "interface.go",
+			old:       "} else if n < len(kv) {",
+			new:       "} else if n <= len(kv) {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestReadInterfaceObjectSizes$`), wantOutput: "index out of range",
+		},
+		{
+			// Members buffered before the hand-over to direct insertion
+			// must reach the map.
+			name: "read_interface_spill_drops_buffered_members", tier: "quick", file: "interface.go",
+			old:       "m = make(map[string]any, 2*len(kv))\n\t\t\tfor _, e := range kv[:n] {",
+			new:       "m = make(map[string]any, 2*len(kv))\n\t\t\tfor _, e := range kv[:0] {",
+			wantCount: 1,
+			detector:  rootDetector(`^TestReadInterfaceObjectSizes$`), wantOutput: "n=40 dup=0: err=<nil>",
 		},
 		{
 			name:       "map_intern_opt_in_condition_is_inverted",
 			tier:       "quick",
-			file:       "cmd/zerojsongen/decode.go",
-			old:        "if f.intern {\n\t\t\tg.p(\"%s\\tmk := %s(zerojson.Intern(l.ReadKey()))\", ind, f.keyTypeStr)",
-			new:        "if !f.intern {\n\t\t\tg.p(\"%s\\tmk := %s(zerojson.Intern(l.ReadKey()))\", ind, f.keyTypeStr)",
+			file:       "cmd/zerojsongen/maps.go",
+			old:        "if intern {\n\t\tg.p(\"%smk := %s(zerojson.Intern(l.ReadKey()))\", ind, keyTypeStr)",
+			new:        "if !intern {\n\t\tg.p(\"%smk := %s(zerojson.Intern(l.ReadKey()))\", ind, keyTypeStr)",
 			occurrence: 0,
 			wantCount:  1,
 			detector:   generatorDetector(`^TestMapKeyInterningOptIn$`),
 			wantOutput: "tagged map key is not interned",
+		},
+		{
+			// An Appender's Reader decodes into the element a reused slot
+			// holds, as encoding/json does; resetting the slot loses the
+			// fields the input omits.
+			name: "appender_slice_slot_is_reset", tier: "quick", file: "cmd/zerojsongen/decode.go",
+			old:       "if g.hasLeafOverride(*vi, map[string]bool{}) {",
+			new:       "if true {",
+			wantCount: 1,
+			detector:  generatorDetector(`^TestGeneratorBehaviorMatrix/appender_slice_element_reuse$`), wantOutput: "appender slice reuse",
+		},
+		{
+			// null clears an Appender-only slice or map element that a
+			// reused slot still holds.
+			name: "appender_null_element_is_kept", tier: "quick", file: "cmd/zerojsongen/decode.go",
+			old:       "\t\tif isNullableField(f) {\n\t\t\tg.p(\"%sif l.IsNull() {\", ind)",
+			new:       "\t\tif false && isNullableField(f) {\n\t\t\tg.p(\"%sif l.IsNull() {\", ind)",
+			wantCount: 1,
+			detector:  generatorDetector(`^TestGeneratorBehaviorMatrix/appender_slice_null_clears_nullable$`), wantOutput: "appender null element",
+		},
+		{
+			// A struct slice whose elements reach no registered leaf keeps
+			// its reused slots, through nested Appender slices too.
+			name: "struct_slice_slot_is_reset_without_leaf", tier: "quick", file: "cmd/zerojsongen/decode.go",
+			old:       "\tif reset {\n\t\tg.p(\"%s\\t%s[len(%s)-1] = %s\", ind, cell, cell, zero)",
+			new:       "\tif true {\n\t\tg.p(\"%s\\t%s[len(%s)-1] = %s\", ind, cell, cell, zero)",
+			wantCount: 1,
+			detector:  generatorDetector(`^TestGeneratorBehaviorMatrix/appender_nested_slice_reuse$`), wantOutput: "nested appender",
+		},
+		{
+			// ...and a pointer slot keeps its pointer.
+			name: "struct_slice_pointer_is_replaced", tier: "quick", file: "cmd/zerojsongen/decode.go",
+			old:       `g.p("%s\tif %s == nil { %s = new(%s) }", ind, slot, slot, elem)`,
+			new:       `g.p("%s\t%s = new(%s)", ind, slot, elem)`,
+			wantCount: 1,
+			detector:  generatorDetector(`^TestGeneratorBehaviorMatrix/appender_nested_slice_reuse$`), wantOutput: "nested appender",
+		},
+		{
+			// An aliased easyjson pointee is the same type.
+			name: "easyjson_alias_pointee_missed", tier: "quick", file: "cmd/zerojsongen/load.go",
+			old:        "n, ok := types.Unalias(ptr.Elem()).(*types.Named)",
+			new:        "n, ok := ptr.Elem().(*types.Named)",
+			occurrence: 1,
+			wantCount:  2,
+			detector:   generatorDetector(`^TestGeneratorBehaviorMatrix/easyjson_only_aliased_pointee_refused$`), wantOutput: "want substring",
+		},
+		{
+			// So is an aliased easyjson pointer type.
+			name: "easyjson_alias_pointer_missed", tier: "quick", file: "cmd/zerojsongen/load.go",
+			old:        "ptr, ok := types.Unalias(sig.Params().At(0).Type()).(*types.Pointer)",
+			new:        "ptr, ok := sig.Params().At(0).Type().(*types.Pointer)",
+			occurrence: 1,
+			wantCount:  2,
+			detector:   generatorDetector(`^TestGeneratorBehaviorMatrix/easyjson_only_aliased_pointer_refused$`), wantOutput: "want substring",
+		},
+		{
+			// A pointer slot within the capacity keeps its pointer.
+			name: "appender_pointer_slot_is_replaced", tier: "quick", file: "cmd/zerojsongen/decode.go",
+			old:       `g.p("%sif len(%s) < cap(%s) { e = %s[:len(%s)+1][len(%s)] }", ind, cell, cell, cell, cell, cell)`,
+			new:       `g.p("%s_ = %s", ind, cell)`,
+			wantCount: 1,
+			detector:  generatorDetector(`^TestGeneratorBehaviorMatrix/appender_slice_element_reuse$`), wantOutput: "appender slice reuse",
+		},
+		{
+			// The member that overflows the stack slots is handed to the
+			// spill helper and must be kept.
+			name: "map_spill_drops_handed_member", tier: "quick", file: "cmd/zerojsongen/maps.go",
+			old:        "g.p(\"\\tkv[n] = %s{mk, mv}\", entry)\n\tg.p(\"\\tn++\")",
+			new:        "g.p(\"\\t_, _ = mk, mv\")",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestMapSizesMatchStdlib$`), wantOutput: "mismatch for",
+		},
+		{
+			// An existing map is added to; buffering is only for new maps.
+			name: "map_existing_target_is_buffered", tier: "quick", file: "cmd/zerojsongen/maps.go",
+			old:        "g.p(\"\\t\\t\\tif m != nil {\")",
+			new:        "g.p(\"\\t\\t\\tif false {\")",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestMapSizesMatchStdlib$`), wantOutput: "mismatch for",
+		},
+		{
+			// Members buffered before the spill helper switches to direct
+			// insertion must reach the map.
+			name: "map_spill_drops_buffered_members", tier: "quick", file: "cmd/zerojsongen/maps.go",
+			old:        "g.p(\"\\t\\t\\tfor _, e := range kv[:n] { m[e.k] = e.v }\")",
+			new:        "g.p(\"\\t\\t\\tfor _, e := range kv[:0] { m[e.k] = e.v }\")",
+			wantCount:  1,
+			regenerate: true,
+			detector:   codecDetector(`^TestMapSizesMatchStdlib$`), wantOutput: "mismatch for",
+		},
+		{
+			// A buffered map must be made at its final size, not grown.
+			name: "map_spill_drops_size_hint", tier: "quick", file: "cmd/zerojsongen/maps.go",
+			old:        "g.p(\"\\t\\tm = make(%s, n)\", typeStr)",
+			new:        "g.p(\"\\t\\tm = make(%s)\", typeStr)",
+			occurrence: 1,
+			wantCount:  2,
+			regenerate: true,
+			detector:   codecDetector(`^TestMapDecodeMakesMapOnce$`), wantOutput: "decode allocations=",
 		},
 		{
 			name:       "enum_intern_opt_in_condition_is_inverted",
@@ -304,8 +734,8 @@ func mutationCatalog() []mutationCase {
 			name:       "reused_slice_slot_is_not_zeroed",
 			tier:       "full",
 			file:       "cmd/zerojsongen/decode.go",
-			old:        `g.p("%s\t\t%s[len(%s)-1] = %s", ind, cell, cell, zero)`,
-			new:        `g.p("%s\t\tif false { %s[len(%s)-1] = %s }", ind, cell, cell, zero)`,
+			old:        `g.p("%s\t%s[len(%s)-1] = %s", ind, cell, cell, zero)`,
+			new:        `g.p("%s\tif false { %s[len(%s)-1] = %s }", ind, cell, cell, zero)`,
 			occurrence: 0,
 			wantCount:  1,
 			regenerate: true,

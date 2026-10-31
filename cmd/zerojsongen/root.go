@@ -24,9 +24,8 @@ func (g *generator) genRootArena(ti typeInfo) {
 	g.p("")
 	g.p("// %s holds working storage for one %s decode.", arenaName(n), n)
 	g.p("type %s struct {", arenaName(n))
-	if ti.rootField.kind == kMap {
-		g.p("\tmRoot %s", n)
-	} else {
+	// A map root decodes straight into *v through its zjReadMap helper.
+	if ti.rootField.kind != kMap {
 		g.p("\tcRoot %s", n)
 	}
 	g.p("}")
@@ -179,12 +178,9 @@ func (g *generator) genRootDecode(ti typeInfo) {
 	g.p("")
 	g.p("func (v *%s) unmarshalZJSON(data []byte, borrow bool) error {", n)
 	g.p("\tif err := zerojson.Valid(data); err != nil { return err }")
-	g.p("\tl := zerojson.NewLexer(data, borrow)")
-	g.p("\ta := &%s{}", arenaName(n))
-	g.p("\t%s(&l, v, a)", decodeName(n))
-	g.p("\tl.Finish()")
-	g.p("\treturn l.Err()")
+	g.emitDecodeBody(n, "borrow")
 	g.p("}")
+	g.emitTrustedDecode(n)
 	g.genReadZJSON(n)
 
 	g.p("")
@@ -245,29 +241,7 @@ func (g *generator) emitRootSliceDecode(ti typeInfo) {
 	g.p("%sif l.EnterArray() {", ind)
 	g.p("%sfor {", ind)
 	if rf.kind == kSlice {
-		zero := "nil"
-		if !rf.elemPtr {
-			zero = rf.elem + "{}"
-		}
-		g.p("%s\tif len(%s) == cap(%s) {", ind, cell, cell)
-		g.p("%s\t\t%s = append(%s, %s)", ind, cell, cell, zero)
-		g.p("%s\t} else {", ind)
-		g.p("%s\t\t%s = %s[:len(%s)+1]", ind, cell, cell, cell)
-		g.p("%s\t\t%s[len(%s)-1] = %s", ind, cell, cell, zero)
-		g.p("%s\t}", ind)
-		if rf.elemPtr {
-			g.p("%s\tif !l.IsNull() {", ind)
-			g.p("%s\t\te := new(%s)", ind, rf.elem)
-			g.p("%s\t\tvar ea %s", ind, arenaName(rf.elem))
-			g.p("%s\t\t%s(l, e, &ea)", ind, decodeName(rf.elem))
-			g.p("%s\t\t%s[len(%s)-1] = e", ind, cell, cell)
-			g.p("%s\t}", ind)
-		} else {
-			g.p("%s\tif !l.IsNull() {", ind)
-			g.p("%s\t\tvar ea %s", ind, arenaName(rf.elem))
-			g.p("%s\t\t%s(l, &%s[len(%s)-1], &ea)", ind, decodeName(rf.elem), cell, cell)
-			g.p("%s\t}", ind)
-		}
+		g.emitStructSliceElem(rf.elem, rf.elemPtr, g.hasLeafOverride(*rf, map[string]bool{}), cell, ind+"\t")
 		g.p("%s\tif l.Err() != nil { return }", ind)
 		g.p("%s\tif !l.NextElem() { break }", ind)
 	} else {
@@ -284,15 +258,15 @@ func (g *generator) emitRootSliceDecode(ti typeInfo) {
 func (g *generator) emitRootLeafSliceBody(rf *fieldInfo, cell, ind string) {
 	vi := rf.valInfo
 	if rf.elemPtr {
-		// Only Marshaler/TextMarshaler elements can be pointers.
-		g.p("%s\tvar e *%s", ind, vi.typeStr)
-		g.p("%s\tif !l.IsNull() {", ind)
-		g.p("%s\t\te = new(%s)", ind, vi.typeStr)
+		// Only Marshaler/TextMarshaler/Appender elements can be pointers.
+		g.emitReusedPointerElem(cell, vi.typeStr, ind+"\t")
 		switch vi.kind {
 		case kMarshaler:
 			g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := e.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
 		case kTextMarshaler:
 			g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := e.UnmarshalText(txt); err != nil { l.AddError(err) } }", ind)
+		case kAppender:
+			g.p("%s\t\te.ReadZJSON(l)", ind)
 		}
 		g.p("%s\t}", ind)
 		g.p("%s\tif l.Err() != nil { return }", ind)
@@ -300,14 +274,7 @@ func (g *generator) emitRootLeafSliceBody(rf *fieldInfo, cell, ind string) {
 		g.p("%s\tif !l.NextElem() { break }", ind)
 		return
 	}
-	g.p("%s\tif len(%s) == cap(%s) {", ind, cell, cell)
-	g.p("%s\t\tvar zjZero %s", ind, vi.typeStr)
-	g.p("%s\t\t%s = append(%s, zjZero)", ind, cell, cell)
-	g.p("%s\t} else {", ind)
-	g.p("%s\t\t%s = %s[:len(%s)+1]", ind, cell, cell, cell)
-	g.p("%s\t\tvar zjZero %s", ind, vi.typeStr)
-	g.p("%s\t\t%s[len(%s)-1] = zjZero", ind, cell, cell)
-	g.p("%s\t}", ind)
+	g.emitGrowLeafSlice(cell, vi, ind+"\t")
 	g.p("%s\tidx := len(%s) - 1", ind, cell)
 	g.emitElemNullOpen(vi, fmt.Sprintf("%s[idx]", cell), ind+"\t")
 	switch vi.kind {
@@ -319,6 +286,8 @@ func (g *generator) emitRootLeafSliceBody(rf *fieldInfo, cell, ind string) {
 		g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := %s[idx].UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind, cell)
 	case kTextMarshaler:
 		g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := %s[idx].UnmarshalText(txt); err != nil { l.AddError(err) } }", ind, cell)
+	case kAppender:
+		g.p("%s\t\t%s[idx].ReadZJSON(l)", ind, cell)
 	case kInterface:
 		g.p("%s\t\t%s[idx] = l.ReadInterface()", ind, cell)
 	default:
@@ -332,56 +301,12 @@ func (g *generator) emitRootLeafSliceBody(rf *fieldInfo, cell, ind string) {
 func (g *generator) emitRootMapDecode(ti typeInfo) {
 	n := ti.name
 	rf := ti.rootField
-	vi := rf.valInfo
 	ind := "\t"
-	cell := "a.mRoot"
 	g.p("%sif l.IsNull() {", ind)
 	g.p("%s\t*v = nil", ind)
 	g.p("%s\treturn", ind)
 	g.p("%s}", ind)
-	g.p("%sif *v != nil {", ind)
-	g.p("%s\t%s = *v", ind, cell)
-	g.p("%s} else {", ind)
-	g.p("%s\t%s = make(%s)", ind, cell, n)
-	g.p("%s}", ind)
-	g.p("%sif l.EnterObject() {", ind)
-	g.p("%sfor {", ind)
 	// A named map root has no struct-tag site to request key interning, so
 	// keys are copied (string() — ReadKey aliases the buffer), never interned.
-	g.p("%s\tmk := %s(string(l.ReadKey()))", ind, rf.keyTypeStr)
-	g.p("%s\tvar mv %s", ind, vi.typeStr)
-	g.emitElemNullOpen(vi, "mv", ind+"\t")
-	switch vi.kind {
-	case kCustomLeaf:
-		g.leafRead(vi.leaf, "&mv", ind+"\t\t")
-	case kEmptyStruct:
-		// struct{} set-map value: require an object (any contents, ignored),
-		// rejecting number/array/string — matching encoding/json and
-		// easyjson. null already handled by IsNull.
-		g.p("%s\t\tl.SkipObject()", ind)
-	case kStruct:
-		g.p("%s\t\tvar ea %s", ind, arenaName(vi.elem))
-		g.p("%s\t\t%s(l, &mv, &ea)", ind, decodeName(vi.elem))
-	case kMarshaler:
-		g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := mv.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
-	case kTextMarshaler:
-		g.p("%s\t\tif txt := l.ReadTextBytes(); l.Err() == nil { if err := mv.UnmarshalText(txt); err != nil { l.AddError(err) } }", ind)
-	case kQuotedInt:
-		if !vi.marshalOnValue {
-			g.p("%s\t\tif raw := l.RawValue(); l.Err() == nil { if err := mv.UnmarshalJSON(raw); err != nil { l.AddError(err) } }", ind)
-		} else {
-			g.p("%s\t\tmv = %s", ind, g.leafReadExpr(vi))
-		}
-	case kInterface:
-		g.p("%s\t\tmv = l.ReadInterface()", ind)
-	default:
-		g.p("%s\t\tmv = %s", ind, g.leafReadExpr(vi))
-	}
-	g.p("%s\t}", ind)
-	g.p("%s\tif l.Err() != nil { return }", ind)
-	g.p("%s\t%s[mk] = mv", ind, cell)
-	g.p("%s\tif !l.NextMember() { break }", ind)
-	g.p("%s}", ind)
-	g.p("%s}", ind)
-	g.p("%s*v = %s", ind, cell)
+	g.p("%s*v = %s(l, *v)", ind, g.mapReadCall(n, rf.keyTypeStr, rf.valInfo, false, rf.mapEntrySize))
 }
