@@ -33,3 +33,21 @@ type Observed struct {
 	State  Plain
 	After  Hook
 }
+
+type Large struct{ A, B, C, D, E, F, G, H string }
+type Cells struct {
+	A, B   *int
+	Nested *Child
+}
+type MapCases struct {
+	Small   map[string]int
+	Medium  map[string]Child
+	Large   map[string]Large
+	Dynamic any
+}
+type Interaction struct {
+	Lead  int
+	Cells Cells
+	Maps  MapCases
+	Tail  int
+}

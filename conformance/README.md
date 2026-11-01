@@ -81,6 +81,14 @@ campaign's builders, cloners, projections, or divergence allowlists.
   propagation of later mutations, input integrity, successful callback traces,
   and absence of callbacks on malformed documents. Observer self-tests must
   detect equal-valued but differently aliased graphs.
+- A separate interaction matrix runs 990 three-decode sequences per generation
+  mode: map sizes around the first-buffer and spill boundaries, duplicate keys,
+  nested ordered-to-keyed handoffs, nulls, and repeated pointer fields. It uses
+  zero, shared-pointer, and separate-pointer initial states through checked
+  copy, checked borrow, and trusted copy entry points. Independently constructed
+  stdlib targets, retained values, pointer identity, and input-overwrite probes
+  check successful valid-input behavior; this does not extend trusted decoding's
+  contract to malformed input.
 
 Failed partial targets and later callbacks after semantic errors need not match
 stdlib. Recovery therefore uses independently rebuilt destinations with the same
@@ -107,6 +115,8 @@ Calibration first requires a clean baseline, then requires three compile-valid
 faults to fail at behavioral assertions: speculative shared-storage replay,
 unwanted destination reset, and a repeated callback. Build errors and timeouts
 do not count as detections.
+The replay fault removes the reuse guard and restores a restart at a member
+handoff; removing the guard alone no longer causes replay with keyed continuation.
 
 For candidate acceptance, finish the fixed matrix, explicitly chosen seeds and
 sequence counts, and calibration on each selected toolchain/platform. Record

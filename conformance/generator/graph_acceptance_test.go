@@ -62,7 +62,7 @@ func TestGraphAcceptance(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			args := []string{bin, "-dir", dir, "-types", "Plain,Observed", "-pool"}
+			args := []string{bin, "-dir", dir, "-types", "Plain,Observed,Interaction", "-pool", "-trusted"}
 			if mode == "fallback" {
 				args = append(args, "-no-ordered")
 			}
@@ -107,8 +107,22 @@ func TestGraphAcceptance(t *testing.T) {
 			}
 			lineEnd := lineLength + lineStart + len("\n\t}")
 			withoutGuard := guard[:lineStart] + guard[lineEnd:]
+			orderedLength := strings.Index(string(original)[guardEnd:], "\nfunc ")
+			if orderedLength < 0 {
+				t.Fatal("missing ordered function terminator")
+			}
+			ordered := string(original)[guardStart : guardEnd+orderedLength]
+			// Removing the guard alone is no longer a replay fault: member
+			// boundaries now continue in the keyed loop. Restore an actual
+			// restart at the escaped/whitespace-key handoff as well.
+			handoff := "l.SetPos(memberPos)\n\t\t\t\tzjDecodeMembers_Plain(l, v, a)\n\t\t\t\treturn l.Err() == nil"
+			if strings.Count(ordered, handoff) != 1 {
+				t.Fatal("stale ordered handoff anchor")
+			}
+			replay := strings.Replace(ordered, guard, withoutGuard, 1)
+			replay = strings.Replace(replay, handoff, "l.SetPos(memberPos)\n\t\t\t\treturn false", 1)
 			for _, fault := range []struct{ name, old, new, marker string }{
-				{"replay_shared_storage", guard, withoutGuard, "graph mismatch"},
+				{"replay_shared_storage", ordered, replay, "graph mismatch"},
 				{"reset_ordinary_target", "func (v *Plain) unmarshalZJSON(data []byte, borrow bool) error {", "func (v *Plain) unmarshalZJSON(data []byte, borrow bool) error {\n*v = Plain{}", "graph mismatch"},
 				{"repeat_callback", "v.Before.UnmarshalJSON(raw)", "func() error { if e := v.Before.UnmarshalJSON(raw); e != nil { return e }; return v.Before.UnmarshalJSON(raw) }()", "callback mismatch"},
 			} {
